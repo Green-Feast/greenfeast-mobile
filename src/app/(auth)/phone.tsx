@@ -9,8 +9,10 @@ import {
 } from 'react-native'
 import * as WebBrowser from 'expo-web-browser'
 import * as Linking from 'expo-linking'
+import { makeRedirectUri } from 'expo-auth-session'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
+import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Logo from '@/components/Logo'
 
 WebBrowser.maybeCompleteAuthSession()
@@ -58,7 +60,7 @@ export default function LoginScreen() {
         return
       }
 
-      const redirectTo = Linking.createURL('/')
+      const redirectTo = makeRedirectUri({ scheme: 'greenfeast', path: '/' })
       console.log('OAuth redirectTo:', redirectTo)
 
       const { data, error } = await supabase.auth.signInWithOAuth({
@@ -166,15 +168,16 @@ export default function LoginScreen() {
           By continuing you agree to our Terms of Service and Privacy Policy
         </Text>
 
-        {/* DEV ONLY — remove before launch */}
-        <TouchableOpacity
-          style={styles.devBtn}
-          onPress={async () => {
-            await supabase.auth.signInWithPassword({ email: 'test@test.com', password: 'test1234' })
-          }}
-        >
-          <Text style={styles.devBtnText}>Dev: Skip Login</Text>
-        </TouchableOpacity>
+        {SHOW_DEV_SKIP && (
+          <TouchableOpacity
+            style={styles.devBtn}
+            onPress={async () => {
+              await supabase.auth.signInWithPassword({ email: 'test@test.com', password: 'test1234' })
+            }}
+          >
+            <Text style={styles.devBtnText}>Dev: Skip Login</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   )

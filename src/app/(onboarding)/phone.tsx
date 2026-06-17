@@ -10,12 +10,16 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { OTPWidget } from '@msg91comm/sendotp-react-native'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
+import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
 
 export default function OnboardingPhoneScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  const { setPhone: setStorePhone } = useAuthStore()
   const [phone, setPhone] = useState('')
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -88,6 +92,21 @@ export default function OnboardingPhoneScreen() {
         <Button onPress={handleSendOTP} disabled={!isValid} loading={loading}>
           Send OTP →
         </Button>
+
+        {SHOW_DEV_SKIP && (
+          <TouchableOpacity
+            style={styles.devBtn}
+            onPress={async () => {
+              const devPhone = '+917777777777'
+              const { data: { user } } = await supabase.auth.getUser()
+              await supabase.from('users').update({ phone: devPhone }).eq('id', user!.id)
+              setStorePhone(devPhone)
+              router.replace('/(onboarding)/menu')
+            }}
+          >
+            <Text style={styles.devBtnText}>Dev: Skip Phone Verification</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </KeyboardAvoidingView>
   )
@@ -131,4 +150,6 @@ const styles = StyleSheet.create({
   inputFocused: { borderColor: Colors.primary },
   hint: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 10 },
   error: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 8 },
+  devBtn: { marginTop: 16, alignItems: 'center', padding: 10 },
+  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, textDecorationLine: 'underline' },
 })

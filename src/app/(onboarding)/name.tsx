@@ -38,10 +38,16 @@ export default function OnboardingNameScreen() {
     setError('')
 
     const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      // Session points to a deleted/expired auth user — clear it and restart.
+      await supabase.auth.signOut()
+      router.replace('/(auth)/phone')
+      return
+    }
     const { error: updateError } = await supabase
       .from('users')
       .update({ name: name.trim() })
-      .eq('id', user!.id)
+      .eq('id', user.id)
 
     if (updateError) {
       setError(updateError.message)

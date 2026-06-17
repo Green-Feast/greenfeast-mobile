@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
+import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
 import RazorpayWebView from '@/components/RazorpayWebView'
 
@@ -272,6 +273,20 @@ export default function PaymentScreen() {
     setError(`Payment failed: ${errMsg}`)
   }
 
+  async function handleDevSkip() {
+    setError('')
+    setPhase('creating')
+    try {
+      const subId = await createRecords()
+      setSubscriptionId(subId)
+      await activateSubscription(subId)
+      setPhase('success')
+    } catch (e: any) {
+      setError(e?.message ?? 'Dev skip failed')
+      setPhase('summary')
+    }
+  }
+
   function handleCheckoutDismissed() {
     setRzpOrder(null)
     setPhase('summary')
@@ -374,6 +389,16 @@ export default function PaymentScreen() {
         )}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        {SHOW_DEV_SKIP && (
+          <TouchableOpacity
+            style={styles.devBtn}
+            onPress={handleDevSkip}
+            disabled={phase === 'creating'}
+          >
+            <Text style={styles.devBtnText}>Dev: Skip Payment</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       {/* CTA */}
@@ -517,4 +542,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
+  devBtn: { marginTop: 16, alignItems: 'center', padding: 10 },
+  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, textDecorationLine: 'underline' },
 })

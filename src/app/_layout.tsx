@@ -77,8 +77,12 @@ function AuthGate() {
       return
     }
 
-    // Fully onboarded — move to app
-    if (inAuthGroup || inOnboardingGroup) {
+    // Fully onboarded. The subscribe / build-plan flow reuses the onboarding
+    // screens, so onboarded-but-unsubscribed users must be allowed into them.
+    // Only the identity screens (name/phone/otp) are pre-onboarding only —
+    // bounce back to the app if a fully onboarded user lands on those.
+    const IDENTITY_SCREENS = ['name', 'phone', 'otp']
+    if (inAuthGroup || (inOnboardingGroup && IDENTITY_SCREENS.includes(segments[1] ?? ''))) {
       router.replace('/(app)/(tabs)')
     }
   }, [session, phone, onboarded, loading, segments])

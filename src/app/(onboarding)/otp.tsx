@@ -14,6 +14,7 @@ import { OTPWidget } from '@msg91comm/sendotp-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
+import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
 
 export default function OnboardingOTPScreen() {
@@ -92,6 +93,20 @@ export default function OnboardingOTPScreen() {
         <Button onPress={handleVerify} disabled={otp.length !== 6} loading={loading}>
           Verify →
         </Button>
+
+        {SHOW_DEV_SKIP && (
+          <TouchableOpacity
+            style={styles.devBtn}
+            onPress={async () => {
+              const { data: { user } } = await supabase.auth.getUser()
+              await supabase.from('users').update({ phone }).eq('id', user!.id)
+              setPhone(phone)
+              router.replace('/(onboarding)/menu')
+            }}
+          >
+            <Text style={styles.devBtnText}>Dev: Skip OTP</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </KeyboardAvoidingView>
   )
@@ -118,4 +133,6 @@ const styles = StyleSheet.create({
   error: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger, marginTop: 12, textAlign: 'center' },
   resend: { alignItems: 'center', marginTop: 20 },
   resendText: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.primary },
+  devBtn: { marginTop: 16, alignItems: 'center', padding: 10 },
+  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, textDecorationLine: 'underline' },
 })
