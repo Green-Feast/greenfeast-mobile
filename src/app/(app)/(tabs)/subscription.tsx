@@ -9,14 +9,16 @@ import {
   RefreshControl,
   Modal,
   Image,
+  Linking,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Pause, Play, SkipForward, ArrowUpDown, ArrowRight, Wallet, MapPin, X, Check } from 'lucide-react-native'
+import { Pause, Play, SkipForward, ArrowUpDown, ArrowRight, Wallet, MapPin, X, Check, AlertCircle, TrendingDown, TrendingUp } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import SubscribeGate from '@/components/SubscribeGate'
+import RazorpayWebView from '@/components/RazorpayWebView'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,14 @@ type MealTemplate = {
 }
 
 type AddressData = { line1: string; landmark: string | null; label: string }
+
+type WalletTransaction = {
+  id: string
+  type: 'credit' | 'debit'
+  amount: number
+  reason: string
+  created_at: string
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -101,6 +111,11 @@ export default function SubscriptionScreen() {
   const [selectedDay, setSelectedDay] = useState<{ dateStr: string; date: Date } | null>(null)
   const [swapping, setSwapping] = useState(false)
   const [swapError, setSwapError] = useState('')
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([])
+  const [showTransactions, setShowTransactions] = useState(false)
+  const [showAddMoney, setShowAddMoney] = useState(false)
+  const [showRazorpay, setShowRazorpay] = useState(false)
+  const [funding, setFunding] = useState(false)
   const didAutoSync = useRef(false)
 
   const fetchAll = useCallback(async () => {
@@ -235,6 +250,48 @@ export default function SubscriptionScreen() {
       setSwapError(e?.message ?? 'Could not swap meal. Try again.')
     } finally {
       setSwapping(false)
+    }
+  }
+
+  async function fetchTransactions() {
+    if (!user) return
+    const { data } = await supabase
+      .from('wallet_transactions')
+      .select('id, type, amount, reason, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50)
+    setTransactions((data as WalletTransaction[]) ?? [])
+  }
+
+  async function fundWallet(subscriptionId: string, amount: number) {
+    if (!user) return
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+      const { data } = await supabase.functions.invoke('fund-subscription-wallet', {
+        body: { subscription_id: subscriptionId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (data?.error) throw new Error(data.error)
+      await fetchAll()
+    } catch (e: any) {
+      console.error('Fund wallet failed:', e)
+      throw e
+    }
+  }
+
+  async function handleAddMoneyDev() {
+    if (!sub) return
+    setFunding(true)
+    try {
+      await fundWallet(sub.id, sub.plans?.base_price ?? 0)
+      setShowAddMoney(false)
+      setShowTransactions(true)
+    } catch {
+      /* error shown in toast */
+    } finally {
+      setFunding(false)
     }
   }
 
@@ -444,6 +501,33 @@ export default function SubscriptionScreen() {
           )}
         </View>
 
+        {/* RENEWAL ALERT */}
+        {remaining === 0 && (
+          <View style={s.renewalAlert}>
+            <View style={s.renewalAlertContent}>
+              <AlertCircle size={20} color={Colors.accent} style={{ marginRight: 10 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.renewalAlertTitle}>Plan expired</Text>
+                <Text style={s.renewalAlertText}>Renew to keep receiving meals</Text>
+              </View>
+            </View>
+            <View style={s.renewalAlertBtns}>
+              <Pressable
+                style={({ pressed }) => [s.renewalAlertBtn, s.renewalAlertBtnPrimary, pressed && { opacity: 0.85 }]}
+                onPress={() => setShowAddMoney(true)}
+              >
+                <Text style={s.renewalAlertBtnText}>Renew plan</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [s.renewalAlertBtn, s.renewalAlertBtnGhost, pressed && { opacity: 0.7 }]}
+                onPress={() => router.push('/(app)/plan-settings')}
+              >
+                <Text style={s.renewalAlertBtnGhostText}>Change plan</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         {/* WALLET */}
         {walletBalance !== null && (
           <View style={s.walletCard}>
@@ -456,11 +540,16 @@ export default function SubscriptionScreen() {
                 <Text style={s.walletBalance}>₹{(walletBalance / 100).toLocaleString('en-IN')}</Text>
                 <Text style={s.walletSub}>Available balance</Text>
               </View>
-              <View style={s.walletBtn}>
+              <Pressable
+                style={({ pressed }) => [s.walletBtn, pressed && { opacity: 0.85 }]}
+                onPress={() => setShowAddMoney(true)}
+              >
                 <Text style={s.walletBtnText}>Add money</Text>
-              </View>
+              </Pressable>
             </View>
-            <Text style={s.walletLink}>View transactions</Text>
+            <Pressable onPress={() => { fetchTransactions(); setShowTransactions(true) }}>
+              <Text style={s.walletLink}>View transactions</Text>
+            </Pressable>
           </View>
         )}
 
@@ -644,6 +733,120 @@ export default function SubscriptionScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Transactions modal */}
+      <Modal
+        visible={showTransactions}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowTransactions(false)}
+      >
+        <Pressable style={s.dayModalOverlay} onPress={() => setShowTransactions(false)}>
+          <Pressable style={s.dayModalSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={s.dayModalHandle} />
+            <View style={s.dayModalHeader}>
+              <Text style={s.dayModalDate}>Wallet transactions</Text>
+              <Pressable onPress={() => setShowTransactions(false)} hitSlop={10}>
+                <X size={20} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+              {transactions.length === 0 ? (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={s.dayModalNoOrderText}>No transactions yet</Text>
+                </View>
+              ) : (
+                transactions.map((t) => (
+                  <View key={t.id} style={s.transactionRow}>
+                    <View style={s.transactionIcon}>
+                      {t.type === 'credit' ? (
+                        <TrendingUp size={16} color={Colors.primary} />
+                      ) : (
+                        <TrendingDown size={16} color={Colors.danger} />
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.transactionReason}>{t.reason}</Text>
+                      <Text style={s.transactionDate}>{fmtDate(t.created_at)}</Text>
+                    </View>
+                    <Text style={[s.transactionAmount, t.type === 'credit' ? s.transactionCredit : s.transactionDebit]}>
+                      {t.type === 'credit' ? '+' : '−'}₹{fmt(t.amount)}
+                    </Text>
+                  </View>
+                ))
+              )}
+              <View style={{ height: 20 }} />
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Add money modal */}
+      <Modal
+        visible={showAddMoney}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAddMoney(false)}
+      >
+        <Pressable style={s.dayModalOverlay} onPress={() => setShowAddMoney(false)}>
+          <Pressable style={s.dayModalSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={s.dayModalHandle} />
+            <View style={s.dayModalHeader}>
+              <Text style={s.dayModalDate}>Add money to wallet</Text>
+              <Pressable onPress={() => setShowAddMoney(false)} hitSlop={10}>
+                <X size={20} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+              <Text style={s.amountDisplayLabel}>Plan amount</Text>
+              <Text style={s.amountDisplay}>₹{fmt(payAmount)}</Text>
+
+              <Pressable
+                style={({ pressed }) => [s.addMoneyBtn, pressed && { opacity: 0.8 }]}
+                onPress={() => { setShowAddMoney(false); setShowRazorpay(true) }}
+                disabled={funding}
+              >
+                <Text style={s.addMoneyBtnText}>Pay with Razorpay</Text>
+              </Pressable>
+
+              {__DEV__ && (
+                <Pressable
+                  style={({ pressed }) => [s.addMoneyBtn, s.addMoneyBtnDev, pressed && { opacity: 0.8 }]}
+                  onPress={handleAddMoneyDev}
+                  disabled={funding}
+                >
+                  {funding ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <Text style={s.addMoneyBtnDevText}>Dev: Fake credit</Text>
+                  )}
+                </Pressable>
+              )}
+
+              <View style={{ height: 20 }} />
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Razorpay payment */}
+      {showRazorpay && sub && (
+        <RazorpayWebView
+          orderId={sub.id}
+          amount={payAmount}
+          keyId={process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID ?? ''}
+          userName={user?.user_metadata?.name ?? user?.email ?? 'User'}
+          userPhone={user?.phone ?? ''}
+          onSuccess={async (paymentId) => {
+            await fundWallet(sub.id, payAmount)
+            setShowRazorpay(false)
+            setShowAddMoney(false)
+            setShowTransactions(true)
+          }}
+          onFailure={() => setShowRazorpay(false)}
+          onDismiss={() => setShowRazorpay(false)}
+        />
+      )}
     </View>
   )
 }
@@ -744,6 +947,21 @@ const s = StyleSheet.create({
   progressFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 999 },
   renewNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight },
 
+  // Renewal alert
+  renewalAlert: {
+    backgroundColor: Colors.accentLight, borderRadius: 16, padding: 16, marginBottom: 12,
+    borderLeftWidth: 3, borderLeftColor: Colors.accent,
+  },
+  renewalAlertContent: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },
+  renewalAlertTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text, marginBottom: 2 },
+  renewalAlertText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
+  renewalAlertBtns: { gap: 8 },
+  renewalAlertBtn: { borderRadius: 999, paddingVertical: 11, alignItems: 'center' },
+  renewalAlertBtnPrimary: { backgroundColor: Colors.accent },
+  renewalAlertBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
+  renewalAlertBtnGhost: { backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.accent },
+  renewalAlertBtnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.accent },
+
   // Wallet
   walletCard: {
     backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
@@ -757,6 +975,32 @@ const s = StyleSheet.create({
   walletBtn: { backgroundColor: Colors.primary, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9 },
   walletBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
   walletLink: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.primary },
+
+  // Transactions
+  transactionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20,
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint,
+  },
+  transactionIcon: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  transactionReason: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginBottom: 2 },
+  transactionDate: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
+  transactionAmount: { fontFamily: Fonts.bodyBold, fontSize: 14, minWidth: 60, textAlign: 'right' },
+  transactionCredit: { color: Colors.primary },
+  transactionDebit: { color: Colors.danger },
+
+  // Add money
+  amountDisplayLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 4 },
+  amountDisplay: { fontFamily: Fonts.heading, fontSize: 36, color: Colors.text, marginBottom: 20 },
+  addMoneyBtn: {
+    backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 14,
+    alignItems: 'center', marginBottom: 10,
+  },
+  addMoneyBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: '#fff' },
+  addMoneyBtnDev: { backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primary },
+  addMoneyBtnDevText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
 
   // Delivery address
   addressCard: {
