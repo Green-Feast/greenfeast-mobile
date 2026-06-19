@@ -21,7 +21,7 @@ function next14Days(): Date[] {
 async function processSubscription(supabase: any, subId: string): Promise<number> {
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, user_id, batch_id, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner')
+    .select('id, user_id, batch_id, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type')
     .eq('id', subId)
     .single()
 
@@ -30,7 +30,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
   const eligible = sub && (sub.status === 'active' || (sub.status === 'pending' && sub.payment_method === 'cod'))
   if (!eligible) return 0
 
-  const [{ data: schedule }, { data: addr }, { data: subAddons }] = await Promise.all([
+  const [{ data: schedule }, { data: addr }, { data: subAddons }, { data: weeklyMenus }] = await Promise.all([
     supabase
       .from('subscription_schedule')
       .select('day_of_week, meal_template_id')
@@ -45,13 +45,24 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       .from('subscription_addons')
       .select('addon_id, sub_option')
       .eq('subscription_id', subId),
+    supabase
+      .from('weekly_menu')
+      .select('day_of_week, meal_slot, meal_template_id')
+      .eq('menu_type', sub.menu_type ?? 'M1'),
   ])
 
   if (!schedule || schedule.length === 0) return 0
 
-  // day_of_week → meal_template_id lookup
+  // day_of_week → meal_template_id lookup from subscription_schedule (fallback)
   const scheduleMap: Record<string, string> = {}
   for (const row of schedule) scheduleMap[row.day_of_week] = row.meal_template_id
+
+  // (day_of_week, meal_slot) → meal_template_id lookup from weekly_menu
+  const weeklyMenuMap: Record<string, Record<string, string>> = {}
+  for (const row of (weeklyMenus ?? [])) {
+    if (!weeklyMenuMap[row.day_of_week]) weeklyMenuMap[row.day_of_week] = {}
+    weeklyMenuMap[row.day_of_week][row.meal_slot] = row.meal_template_id
+  }
 
   // ingredient snapshot cache — avoids re-querying the same meal template
   const ingredientCache: Record<string, any[]> = {}
@@ -69,9 +80,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
 
   for (const date of next14Days()) {
     const dow = DOW_NAMES[date.getUTCDay()]
-    const mealTemplateId = scheduleMap[dow]
-    if (!mealTemplateId) continue
-
+    const dowNum = date.getUTCDay() // 0=Sun, 1=Mon, ..., 6=Sat
     const dateStr = toISO(date)
 
     // Skip pause range
@@ -82,6 +91,12 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     if ((sub.meals_dinner ?? 0) > 0) slots.push('dinner')
 
     for (const slot of slots) {
+      // Try weekly_menu first (by menu_type + day_of_week + meal_slot),
+      // fall back to subscription_schedule (by day_of_week)
+      let mealTemplateId = weeklyMenuMap[dowNum]?.[slot]
+      if (!mealTemplateId) mealTemplateId = scheduleMap[dow]
+      if (!mealTemplateId) continue
+
       const { data: order, error: insertErr } = await supabase
         .from('orders')
         .insert({
@@ -93,6 +108,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
           delivery_date: dateStr,
           meal_slot: slot,
           status: 'scheduled',
+          is_customized: false,
         })
         .select('id')
         .single()

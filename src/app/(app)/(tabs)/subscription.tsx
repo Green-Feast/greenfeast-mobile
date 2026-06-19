@@ -241,7 +241,7 @@ export default function SubscriptionScreen() {
     try {
       const { error } = await supabase
         .from('orders')
-        .update({ meal_template_id: newMealId })
+        .update({ meal_template_id: newMealId, is_customized: true })
         .eq('id', orderId)
       if (error) throw error
       setSelectedDay(null)
