@@ -4,7 +4,7 @@
 
 CREATE TABLE public.weekly_menu (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  menu_type CHECK (menu_type IN ('M1', 'M2')) NOT NULL,
+  menu_type VARCHAR(2) CHECK (menu_type IN ('M1', 'M2')) NOT NULL,
   day_of_week SMALLINT CHECK (day_of_week >= 0 AND day_of_week <= 6) NOT NULL, -- 0=Mon, 6=Sun
   meal_slot VARCHAR(20) CHECK (meal_slot IN ('lunch', 'dinner')) NOT NULL DEFAULT 'lunch',
   meal_template_id UUID REFERENCES meal_templates(id) ON DELETE SET NULL,
