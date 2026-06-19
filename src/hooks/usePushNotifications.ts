@@ -1,23 +1,37 @@
 import { useEffect } from 'react'
 import { Platform } from 'react-native'
-import * as Notifications from 'expo-notifications'
-import * as Device from 'expo-device'
-import Constants from 'expo-constants'
+import Constants, { ExecutionEnvironment } from 'expo-constants'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 
-// Configure how notifications appear while the app is in the foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-})
+// expo-notifications' push module was removed from Expo Go (SDK 53+) and throws
+// at *import* time there. So we must not statically import it — only require it
+// in real builds. In Expo Go, push is a no-op; use a dev/preview build to test.
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient
+
+let Notifications: typeof import('expo-notifications') | null = null
+let Device: typeof import('expo-device') | null = null
+
+if (!isExpoGo) {
+  Notifications = require('expo-notifications')
+  Device = require('expo-device')
+
+  // Configure how notifications appear while the app is in the foreground
+  Notifications!.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  })
+}
 
 async function registerForPushNotifications(userId: string) {
+  // Skip entirely in Expo Go — the native push module isn't available there.
+  if (isExpoGo || !Notifications || !Device) return
+
   // Push tokens only work on physical devices
   if (!Device.isDevice) return
 
@@ -72,7 +86,7 @@ export function usePushNotifications() {
   const { user } = useAuthStore()
 
   useEffect(() => {
-    if (!user?.id) return
+    if (isExpoGo || !user?.id) return
     registerForPushNotifications(user.id)
   }, [user?.id])
 }

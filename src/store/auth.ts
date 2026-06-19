@@ -29,7 +29,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   setOnboarded: (onboarded) => set({ onboarded }),
   setHasSubscription: (hasSubscription) => set({ hasSubscription }),
   signOut: async () => {
-    await supabase.auth.signOut()
-    set({ session: null, user: null, phone: null, onboarded: false, hasSubscription: false })
+    // Clear local state even if the network sign-out call fails, so the user
+    // is always logged out from the app's perspective and AuthGate redirects.
+    try {
+      await supabase.auth.signOut()
+    } catch {
+      // ignore — we still wipe local session below
+    }
+    set({ session: null, user: null, phone: null, onboarded: false, hasSubscription: false, loading: false })
   },
 }))

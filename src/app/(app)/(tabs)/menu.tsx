@@ -9,10 +9,12 @@ import {
   Modal,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { X } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 
 type Meal = {
@@ -25,38 +27,36 @@ type Meal = {
   carbs: number | null
   fat: number | null
   tags: string[]
+  image_url: string | null
 }
 
 const CATEGORIES = ['All', 'Bowl', 'Wrap', 'Salad', 'Toast', 'Smoothie']
 
 export default function MenuScreen() {
   const insets = useSafeAreaInsets()
+  const authLoading = useAuthStore((s) => s.loading)
   const [meals, setMeals] = useState<Meal[]>([])
   const [loading, setLoading] = useState(true)
   const [activeCategory, setActiveCategory] = useState('All')
   const [selected, setSelected] = useState<Meal | null>(null)
 
   useEffect(() => {
-    let active = true
+    if (authLoading) return
     ;(async () => {
       try {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('meal_templates')
-          .select('id, name, category, description, kcal, protein, carbs, fat, tags')
+          .select('id, name, category, description, kcal, protein, carbs, fat, tags, image_url')
           .eq('is_active', true)
           .order('category')
-        if (error) console.log('menu fetch error:', error.message)
-        if (active && data) setMeals(data as Meal[])
-      } catch (e: any) {
-        console.log('menu fetch threw:', e?.message)
+        setMeals((data ?? []) as Meal[])
+      } catch {
+        // transient/network — leave the list empty rather than spinning forever
       } finally {
-        if (active) setLoading(false)
+        setLoading(false)
       }
     })()
-    return () => {
-      active = false
-    }
-  }, [])
+  }, [authLoading])
 
   const filtered =
     activeCategory === 'All' ? meals : meals.filter((m) => m.category === activeCategory.toLowerCase())
@@ -123,9 +123,13 @@ export default function MenuScreen() {
                 </View>
               )}
             </View>
-            <View style={styles.categoryChip}>
-              <Text style={styles.categoryChipText}>{item.category}</Text>
-            </View>
+            {item.image_url ? (
+              <Image source={{ uri: item.image_url }} style={styles.mealThumb} />
+            ) : (
+              <View style={styles.categoryChip}>
+                <Text style={styles.categoryChipText}>{item.category}</Text>
+              </View>
+            )}
           </Pressable>
         )}
         ListEmptyComponent={
@@ -145,6 +149,9 @@ export default function MenuScreen() {
 
             {selected && (
               <>
+                {selected.image_url && (
+                  <Image source={{ uri: selected.image_url }} style={styles.modalImage} />
+                )}
                 <Text style={styles.modalName}>{selected.name}</Text>
                 <Text style={styles.modalCategory}>{selected.category}</Text>
 
@@ -220,6 +227,7 @@ const styles = StyleSheet.create({
   },
   mealCardPressed: { transform: [{ scale: 0.97 }] },
   mealCardLeft: { flex: 1, gap: 4 },
+  mealThumb: { width: 60, height: 60, borderRadius: 12, marginLeft: 12 },
   mealName: { fontFamily: Fonts.headingSemi, fontSize: 15, color: Colors.text },
   mealMeta: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
   categoryChip: {
@@ -240,6 +248,7 @@ const styles = StyleSheet.create({
   emptyText: { fontFamily: Fonts.body, color: Colors.textMuted, fontSize: 14 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalImage: { width: '100%', height: 200, borderRadius: 16, marginBottom: 4 },
   modalCard: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 28,

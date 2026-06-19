@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase'
 import { useOnboardingStore, type PlanId, type AddOnSelection } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import SectionProgress from '@/components/SectionProgress'
 
 type Plan = {
   id: PlanId
@@ -40,13 +41,18 @@ function fmt(paise: number) {
 export default function PlanScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { setPlan } = useOnboardingStore()
+  const { recommendation, upsellShown, setPlan } = useOnboardingStore()
   const [plans, setPlans] = useState<Plan[]>([])
   const [addons, setAddons] = useState<Addon[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [selectedPlan, setSelectedPlan] = useState<PlanId | null>(null)
-  const [selectedAddons, setSelectedAddons] = useState<Record<string, boolean>>({})
+  // Pre-select the recommended plan + add-ons (sub-flow.txt S10).
+  const [selectedPlan, setSelectedPlan] = useState<PlanId | null>(recommendation?.recommendedPlanId ?? null)
+  const [selectedAddons, setSelectedAddons] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {}
+    recommendation?.derivedAddons.forEach((id) => { init[id] = true })
+    return init
+  })
   const [subOptions, setSubOptions] = useState<Record<string, string>>({})
   const [subOptionModal, setSubOptionModal] = useState<string | null>(null)
 
@@ -91,8 +97,17 @@ export default function PlanScreen() {
         subOption: subOptions[a.id],
       }))
 
-    setPlan(selectedPlan, 'Custom Plan', addOnSelections)
-    router.push('/(onboarding)/days')
+    const planName = recommendation?.planName ?? 'Custom Plan'
+    setPlan(selectedPlan, planName, addOnSelections)
+
+    // S11 — if the user stripped a recommended add-on, show the upsell once
+    const recommended = recommendation?.derivedAddons ?? []
+    const removed = recommended.filter((id) => !selectedAddons[id])
+    if (removed.length > 0 && !upsellShown) {
+      router.push({ pathname: '/(onboarding)/addon-upsell', params: { removed: removed.join(',') } })
+    } else {
+      router.push('/(onboarding)/days')
+    }
   }
 
   const subOpts = subOptionModal === 'smoothie' ? SMOOTHIE_OPTIONS : CHEESE_OPTIONS
@@ -107,6 +122,7 @@ export default function PlanScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}>
+      <SectionProgress current={3} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ArrowLeft size={20} color={Colors.primary} />

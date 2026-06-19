@@ -1,9 +1,9 @@
 import { create } from 'zustand'
+import type { HealthGoal, MenuType, PlanId, Recommendation } from '@/lib/recommendation'
 
-export type PlanId = 'trial' | 'plan15' | 'plan30'
+// Re-export the domain types so existing screen imports keep working.
+export type { HealthGoal, MenuType, PlanId, Recommendation }
 export type DeliveryMode = 'opt-in' | 'opt-out'
-export type HealthGoal = 'build-muscle' | 'lose-weight' | 'improve-wellness' | 'boost-energy'
-export type MenuType = 'M1' | 'M2'
 
 export interface AddOnSelection {
   id: string
@@ -16,49 +16,55 @@ interface OnboardingState {
   // S4 — health profile
   height: string
   weight: string
+  proteinTarget: string         // optional daily protein target (g)
   healthGoal: HealthGoal | null
   exerciseType: string[]
   exerciseFrequency: string
   occupation: string
 
-  // S5 — questionnaire
+  // S6 — questionnaire + engine output
   q1Answer: string
   q2Answer: string
-  derivedMenu: MenuType | null
-  derivedAddons: string[]   // addon IDs recommended by questionnaire logic
+  recommendation: Recommendation | null
 
-  // S8/S8b — plan selection
+  // S9/S10 — plan selection
   planId: PlanId | null
-  planName: string          // e.g. "Power & Recover" from recommendation, or "Custom Plan" from fallback
+  planName: string
   addOns: AddOnSelection[]
+  upsellShown: boolean          // add-on upsell (S11) shows at most once
 
-  // S6 — dietary preferences
+  // S7 — dietary basics (collected PRE-payment, drive recommendation badges)
   allergens: string[]
   dietaryPreference: 'none' | 'vegetarian' | 'vegan'
+  dietaryFreeText: string
+
+  // Customisations (collected POST-payment, backend only)
   proteinPreference: string[]
   baseAvoidance: string[]
   veggieAvoidance: string[]
+  formatPreference: 'bowls' | 'wraps' | 'both' | ''
   spicePreference: 'mild' | 'medium' | 'spicy' | ''
   dressingPreference: 'mixed-in' | 'on-the-side' | ''
-  dietaryFreeText: string
+  customisationNote: string
 
-  // S9 — delivery days
+  // S12 — delivery days + meal timing
   selectedDays: string[]
   deliveryMode: DeliveryMode
+  mealsLunch: number
+  mealsDinner: number
 
-  // S10 — address + meal slots
+  // S13 — address
   addressLine1: string
   addressLandmark: string
   addressPincode: string
   addressLabel: string
   addressType: 'home' | 'office' | 'other'
-  mealsLunch: number
-  mealsDinner: number
 
   // Actions
   setHealthProfile: (fields: {
     height: string
     weight: string
+    proteinTarget: string
     healthGoal: HealthGoal
     exerciseType: string[]
     exerciseFrequency: string
@@ -67,67 +73,73 @@ interface OnboardingState {
   setQuestionnaire: (fields: {
     q1Answer: string
     q2Answer?: string
-    derivedMenu: MenuType
-    derivedAddons: string[]
+    recommendation: Recommendation
   }) => void
   setPlan: (planId: PlanId, planName: string, addOns: AddOnSelection[]) => void
-  setDietary: (fields: {
+  setUpsellShown: () => void
+  setDietaryBasics: (fields: {
     allergens: string[]
     dietaryPreference: 'none' | 'vegetarian' | 'vegan'
+    dietaryFreeText: string
+  }) => void
+  setCustomisations: (fields: {
     proteinPreference: string[]
     baseAvoidance: string[]
     veggieAvoidance: string[]
+    formatPreference: 'bowls' | 'wraps' | 'both' | ''
     spicePreference: 'mild' | 'medium' | 'spicy' | ''
     dressingPreference: 'mixed-in' | 'on-the-side' | ''
-    dietaryFreeText: string
+    customisationNote: string
   }) => void
-  setDays: (selectedDays: string[], deliveryMode: DeliveryMode) => void
+  setDays: (selectedDays: string[], deliveryMode: DeliveryMode, mealsLunch: number, mealsDinner: number) => void
   setAddress: (fields: {
     addressLine1: string
     addressLandmark: string
     addressPincode: string
     addressLabel: string
     addressType: 'home' | 'office' | 'other'
-    mealsLunch: number
-    mealsDinner: number
   }) => void
   reset: () => void
 }
 
-const defaultState: Omit<OnboardingState, keyof Pick<OnboardingState,
-  'setHealthProfile' | 'setQuestionnaire' | 'setPlan' | 'setDietary' |
-  'setDays' | 'setAddress' | 'reset'
->> = {
+type ActionKeys =
+  | 'setHealthProfile' | 'setQuestionnaire' | 'setPlan' | 'setUpsellShown'
+  | 'setDietaryBasics' | 'setCustomisations' | 'setDays' | 'setAddress' | 'reset'
+
+const defaultState: Omit<OnboardingState, ActionKeys> = {
   height: '',
   weight: '',
+  proteinTarget: '',
   healthGoal: null,
   exerciseType: [],
   exerciseFrequency: '',
   occupation: '',
   q1Answer: '',
   q2Answer: '',
-  derivedMenu: null,
-  derivedAddons: [],
+  recommendation: null,
   planId: null,
   planName: '',
   addOns: [],
+  upsellShown: false,
   allergens: [],
   dietaryPreference: 'none',
+  dietaryFreeText: '',
   proteinPreference: [],
   baseAvoidance: [],
   veggieAvoidance: [],
+  formatPreference: '',
   spicePreference: '',
   dressingPreference: '',
-  dietaryFreeText: '',
+  customisationNote: '',
   selectedDays: [],
   deliveryMode: 'opt-out',
+  mealsLunch: 1,
+  mealsDinner: 0,
   addressLine1: '',
   addressLandmark: '',
   addressPincode: '',
   addressLabel: 'Home',
   addressType: 'home',
-  mealsLunch: 1,
-  mealsDinner: 0,
 }
 
 export const useOnboardingStore = create<OnboardingState>((set) => ({
@@ -135,14 +147,19 @@ export const useOnboardingStore = create<OnboardingState>((set) => ({
 
   setHealthProfile: (fields) => set(fields),
 
-  setQuestionnaire: ({ q1Answer, q2Answer = '', derivedMenu, derivedAddons }) =>
-    set({ q1Answer, q2Answer, derivedMenu, derivedAddons }),
+  setQuestionnaire: ({ q1Answer, q2Answer = '', recommendation }) =>
+    set({ q1Answer, q2Answer, recommendation }),
 
   setPlan: (planId, planName, addOns) => set({ planId, planName, addOns }),
 
-  setDietary: (fields) => set(fields),
+  setUpsellShown: () => set({ upsellShown: true }),
 
-  setDays: (selectedDays, deliveryMode) => set({ selectedDays, deliveryMode }),
+  setDietaryBasics: (fields) => set(fields),
+
+  setCustomisations: (fields) => set(fields),
+
+  setDays: (selectedDays, deliveryMode, mealsLunch, mealsDinner) =>
+    set({ selectedDays, deliveryMode, mealsLunch, mealsDinner }),
 
   setAddress: (fields) => set(fields),
 

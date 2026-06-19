@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   View,
   Text,
@@ -8,15 +8,11 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
+  Image,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import {
-  Pause, Play, SkipForward, ArrowUpDown, X, ArrowRight, UtensilsCrossed, MapPin,
-} from 'lucide-react-native'
+import { Pause, Play, SkipForward, ArrowUpDown, ArrowRight, Wallet, MapPin, X, Check } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
@@ -38,39 +34,53 @@ type SubData = {
 
 type FirstMeal = { delivery_date: string; meal_templates: { name: string } | null }
 
-type Plan = { id: string; name: string; meals_total: number; days_per_week: number; base_price: number }
-type UpcomingOrder = { id: string; delivery_date: string; meal_templates: { name: string } | null }
+type OrderItem = {
+  id: string
+  delivery_date: string
+  status: string
+  meal_templates: { name: string; kcal: number | null; protein: number | null; image_url: string | null } | null
+}
+
+type MealTemplate = {
+  id: string
+  name: string
+  category: string
+  kcal: number | null
+  protein: number | null
+  image_url: string | null
+}
+
+type AddressData = { line1: string; landmark: string | null; label: string }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+function fmt(paise: number) { return (paise / 100).toLocaleString('en-IN') }
 function fmtDate(dateStr: string | null) {
   if (!dateStr) return '—'
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
-function fmtShort(d: Date) { return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
+function fmtDateLong(dateStr: string) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
+}
 function fmtDow(d: Date) { return d.toLocaleDateString('en-IN', { weekday: 'short' }) }
 function toISO(d: Date) { return d.toISOString().split('T')[0] }
-function generateDates(count: number, offsetDays = 1): Date[] {
-  return Array.from({ length: count }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() + offsetDays + i); return d
-  })
+
+function statusLabel(status: string) {
+  if (status === 'preparing') return 'In our kitchen'
+  if (status === 'out_for_delivery') return 'Out for delivery'
+  if (status === 'delivered') return 'Delivered'
+  return 'Scheduled'
 }
 
-const ALLERGENS = ['Peanuts', 'Shellfish', 'Dairy', 'Sesame', 'Soy', 'Nuts', 'Gluten', 'Egg']
-const DIETARY_PREFS = ['none', 'vegetarian', 'vegan'] as const
-const PROTEINS = ['Paneer', 'Tofu']
-const BASES = ['Quinoa', 'Couscous', 'Rice', 'Pasta', 'Soba noodles']
-const VEGGIES = ['Bell pepper', 'Mushroom', 'Broccoli', 'Onion']
-const SPICES = ['Mild', 'Medium', 'Spicy'] as const
-const DRESSINGS = [
-  { label: 'Mixed in', value: 'mixed-in' },
-  { label: 'On the side', value: 'on-the-side' },
-] as const
-const ADDR_TYPES = [
-  { id: 'home' as const, label: '🏠 Home' },
-  { id: 'office' as const, label: '🏢 Office' },
-  { id: 'other' as const, label: '📍 Other' },
-]
+// A delivery is locked if it's today or if it's tomorrow and past 8 PM
+function isLocked(dateStr: string): boolean {
+  const now = new Date()
+  const todayStr = toISO(now)
+  if (dateStr <= todayStr) return true
+  const tmr = new Date(now)
+  tmr.setDate(tmr.getDate() + 1)
+  return dateStr === toISO(tmr) && now.getHours() >= 20
+}
 
 // ── Main screen ────────────────────────────────────────────────────────────
 
@@ -80,21 +90,24 @@ export default function SubscriptionScreen() {
   const { user, hasSubscription } = useAuthStore()
   const [sub, setSub] = useState<SubData | null>(null)
   const [firstMeal, setFirstMeal] = useState<FirstMeal | null>(null)
+  const [weekOrders, setWeekOrders] = useState<OrderItem[]>([])
+  const [walletBalance, setWalletBalance] = useState<number | null>(null)
+  const [address, setAddress] = useState<AddressData | null>(null)
+  const [allMeals, setAllMeals] = useState<MealTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [skipConfirm, setSkipConfirm] = useState<string | null>(null)
+  const [skipping, setSkipping] = useState(false)
+  const [selectedDay, setSelectedDay] = useState<{ dateStr: string; date: Date } | null>(null)
+  const [swapping, setSwapping] = useState(false)
+  const [swapError, setSwapError] = useState('')
+  const didAutoSync = useRef(false)
 
-  const [pauseOpen, setPauseOpen] = useState(false)
-  const [skipOpen, setSkipOpen] = useState(false)
-  const [changePlanOpen, setChangePlanOpen] = useState(false)
-  const [cancelOpen, setCancelOpen] = useState(false)
-  const [dietaryOpen, setDietaryOpen] = useState(false)
-  const [addressOpen, setAddressOpen] = useState(false)
-
-  const fetchSub = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     if (!user) return
-    // Include CoD subs still 'pending' (limited view). Online 'pending' subs
-    // (abandoned checkouts) are excluded.
-    const { data } = await supabase
+    const today = new Date().toISOString().split('T')[0]
+
+    const { data: subData } = await supabase
       .from('subscriptions')
       .select('id, status, payment_method, plan_name, deliveries_remaining, end_date, pause_from, pause_until, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
@@ -102,12 +115,14 @@ export default function SubscriptionScreen() {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    const s = (data as unknown as SubData) ?? null
+
+    const s = (subData as unknown as SubData) ?? null
     setSub(s)
 
-    // For the CoD limited view, load the earliest upcoming meal
-    if (s && s.status === 'pending' && s.payment_method === 'cod') {
-      const today = new Date().toISOString().split('T')[0]
+    if (!s) return
+
+    // CoD limited view: only the first upcoming meal
+    if (s.status === 'pending' && s.payment_method === 'cod') {
       const { data: order } = await supabase
         .from('orders')
         .select('delivery_date, meal_templates ( name )')
@@ -118,21 +133,110 @@ export default function SubscriptionScreen() {
         .limit(1)
         .maybeSingle()
       setFirstMeal((order as unknown as FirstMeal) ?? null)
-    } else {
-      setFirstMeal(null)
+      return
     }
+
+    // Active / paused: parallel fetch
+    const in7 = new Date()
+    in7.setDate(in7.getDate() + 6)
+    const in7Str = in7.toISOString().split('T')[0]
+
+    const [ordersRes, walletRes, addrRes] = await Promise.all([
+      supabase
+        .from('orders')
+        .select('id, delivery_date, status, meal_templates ( name, kcal, protein, image_url )')
+        .eq('subscription_id', s.id)
+        .gte('delivery_date', today)
+        .lte('delivery_date', in7Str)
+        .in('status', ['scheduled', 'confirmed', 'preparing'])
+        .order('delivery_date'),
+      supabase
+        .from('wallets')
+        .select('balance')
+        .eq('user_id', user.id)
+        .maybeSingle(),
+      supabase
+        .from('addresses')
+        .select('line1, landmark, label')
+        .eq('user_id', user.id)
+        .order('created_at')
+        .limit(1)
+        .maybeSingle(),
+    ])
+
+    setWeekOrders((ordersRes.data as unknown as OrderItem[]) ?? [])
+    setWalletBalance(walletRes.data?.balance ?? null)
+    setAddress((addrRes.data as AddressData) ?? null)
   }, [user])
+
+  // Fetch meal templates once on mount for the swap panel
+  useEffect(() => {
+    supabase
+      .from('meal_templates')
+      .select('id, name, category, kcal, protein, image_url')
+      .eq('is_active', true)
+      .order('category')
+      .then(({ data }) => setAllMeals((data as MealTemplate[]) ?? []))
+  }, [])
 
   useEffect(() => {
     setLoading(true)
-    fetchSub().finally(() => setLoading(false))
-  }, [fetchSub])
+    fetchAll().finally(() => setLoading(false))
+  }, [fetchAll])
+
+  // Auto-sync: if the sub is active but no orders exist (e.g. instantiate-orders
+  // failed silently during payment), retry it once so the week strip isn't empty.
+  useEffect(() => {
+    if (loading || !sub || sub.status !== 'active' || weekOrders.length > 0) return
+    if (didAutoSync.current) return
+    didAutoSync.current = true
+    ;(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      await supabase.functions.invoke('instantiate-orders', {
+        body: { subscription_id: sub.id },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      fetchAll()
+    })()
+  }, [loading, sub, weekOrders.length, fetchAll])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
-    await fetchSub()
+    await fetchAll()
     setRefreshing(false)
-  }, [fetchSub])
+  }, [fetchAll])
+
+  async function handleSkipConfirm() {
+    if (!skipConfirm || !sub) return
+    setSkipping(true)
+    try {
+      await supabase.functions.invoke('manage-subscription', {
+        body: { action: 'skip', subscription_id: sub.id, delivery_date: skipConfirm },
+      })
+      setSkipConfirm(null)
+      await fetchAll()
+    } catch { /* silent */ }
+    finally { setSkipping(false) }
+  }
+
+  async function handleSwapMeal(orderId: string, newMealId: string) {
+    setSwapping(true)
+    setSwapError('')
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ meal_template_id: newMealId })
+        .eq('id', orderId)
+      if (error) throw error
+      setSelectedDay(null)
+      await fetchAll()
+    } catch (e: any) {
+      setSwapError(e?.message ?? 'Could not swap meal. Try again.')
+    } finally {
+      setSwapping(false)
+    }
+  }
 
   if (loading) {
     return <View style={s.loadingWrap}><ActivityIndicator size="large" color={Colors.primary} /></View>
@@ -141,7 +245,7 @@ export default function SubscriptionScreen() {
   if (!hasSubscription || !sub) {
     return (
       <View style={s.container}>
-        <View style={[s.header, { paddingTop: insets.top + 16 }]}>
+        <View style={[s.titleWrap, { paddingTop: insets.top + 16 }]}>
           <Text style={s.title}>My Plan</Text>
         </View>
         <SubscribeGate
@@ -152,15 +256,16 @@ export default function SubscriptionScreen() {
     )
   }
 
-  const planName = sub.plan_name || sub.plans?.name || 'Your Plan'
   const mealsTotal = sub.plans?.meals_total ?? 0
   const remaining = sub.deliveries_remaining
   const progress = mealsTotal > 0 ? Math.min(100, (remaining / mealsTotal) * 100) : 0
   const isCodPending = sub.status === 'pending' && sub.payment_method === 'cod'
   const payAmount = sub.plans?.base_price ?? 0
 
-  // ── Limited CoD view: first meal + pay banner, no management until paid ──
+  // ── CoD limited view ──────────────────────────────────────────────────────
+
   if (isCodPending) {
+    const planName = sub.plan_name || sub.plans?.name || 'Your Plan'
     return (
       <View style={s.container}>
         <ScrollView
@@ -170,7 +275,6 @@ export default function SubscriptionScreen() {
         >
           <Text style={s.title}>My Plan</Text>
 
-          {/* Confirmed plan banner */}
           <View style={s.codHeroCard}>
             <Text style={s.codHeroEmoji}>🎉</Text>
             <Text style={s.codHeroTitle}>{planName} is confirmed</Text>
@@ -179,8 +283,7 @@ export default function SubscriptionScreen() {
             </Text>
           </View>
 
-          {/* First meal card */}
-          <Text style={s.codSectionLabel}>Your first meal</Text>
+          <Text style={s.sectionLabel}>Your first meal</Text>
           <View style={s.codMealCard}>
             {firstMeal ? (
               <>
@@ -192,11 +295,10 @@ export default function SubscriptionScreen() {
             )}
           </View>
 
-          {/* Pay banner */}
           <View style={s.codPayCard}>
             <Text style={s.codPayEmoji}>💵</Text>
             <View style={{ flex: 1 }}>
-              <Text style={s.codPayTitle}>Pay ₹{payAmount.toLocaleString('en-IN')} on delivery</Text>
+              <Text style={s.codPayTitle}>Pay ₹{fmt(payAmount)} on delivery</Text>
               <Text style={s.codPayDesc}>
                 Hand the cash to your delivery partner when your first meal arrives. Once we confirm
                 payment, your full plan — pause, skip, meal changes and history — unlocks here.
@@ -208,26 +310,20 @@ export default function SubscriptionScreen() {
     )
   }
 
-  async function handleResume() {
-    if (!sub) return
-    try {
-      await supabase.functions.invoke('manage-subscription', {
-        body: { action: 'resume', subscription_id: sub.id },
-      })
-      await fetchSub()
-    } catch { /* silent — pull-to-refresh recovers */ }
-  }
+  // ── Active / paused home view ─────────────────────────────────────────────
 
-  const sharedActions = [
-    { label: 'Skip a specific day',   Icon: SkipForward,     onPress: () => setSkipOpen(true) },
-    { label: 'Change plan',           Icon: ArrowUpDown,     onPress: () => setChangePlanOpen(true) },
-    { label: 'Edit dietary profile',  Icon: UtensilsCrossed, onPress: () => setDietaryOpen(true) },
-    { label: 'Edit delivery address', Icon: MapPin,          onPress: () => setAddressOpen(true) },
-  ]
+  const todayStr = new Date().toISOString().split('T')[0]
+  const orderMap = new Map(weekOrders.map(o => [o.delivery_date, o]))
+  const todayOrder = orderMap.get(todayStr) ?? null
+  const nextOrder = weekOrders.find(o => o.delivery_date >= todayStr) ?? null
 
-  const actions = sub.status === 'paused'
-    ? [{ label: 'Resume subscription', Icon: Play, onPress: handleResume }, ...sharedActions]
-    : [{ label: 'Pause subscription',  Icon: Pause, onPress: () => setPauseOpen(true) }, ...sharedActions]
+  const weekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() + i); return d
+  })
+
+  // Day detail panel data
+  const dayOrder = selectedDay ? (orderMap.get(selectedDay.dateStr) ?? null) : null
+  const dayLocked = selectedDay ? isLocked(selectedDay.dateStr) : false
 
   return (
     <View style={s.container}>
@@ -238,664 +334,316 @@ export default function SubscriptionScreen() {
       >
         <Text style={s.title}>My Plan</Text>
 
-        {/* Plan card */}
-        <View style={s.planCard}>
-          <View style={s.planCardHeader}>
-            <View style={s.planCardTop}>
-              <Text style={s.planCardNameLight}>{planName}</Text>
-              <View style={s.activeBadge}>
-                <Text style={s.activeBadgeText}>{sub.status === 'paused' ? 'Paused' : 'Active'}</Text>
+        {/* TODAY'S DELIVERY */}
+        <Text style={s.sectionLabel}>Today's delivery</Text>
+        {todayOrder ? (
+          <View style={s.todayCard}>
+            <View style={s.todayCardRow}>
+              <View style={{ flex: 1 }}>
+                <View style={s.statusBadge}>
+                  <Text style={s.statusBadgeText}>{statusLabel(todayOrder.status)}</Text>
+                </View>
+                <Text style={s.todayMealName}>{todayOrder.meal_templates?.name ?? 'Your meal'}</Text>
+                {(todayOrder.meal_templates?.kcal || todayOrder.meal_templates?.protein) && (
+                  <Text style={s.todayMeta}>
+                    {todayOrder.meal_templates.kcal ? `${todayOrder.meal_templates.kcal} kcal` : ''}
+                    {todayOrder.meal_templates.kcal && todayOrder.meal_templates.protein ? ' · ' : ''}
+                    {todayOrder.meal_templates.protein ? `${todayOrder.meal_templates.protein}g protein` : ''}
+                  </Text>
+                )}
               </View>
-            </View>
-            {sub.plans && (
-              <Text style={s.planCardMetaLight}>
-                {sub.plans.meals_total} meals · {sub.plans.days_per_week} days/week · ₹{sub.plans.base_price.toLocaleString('en-IN')}
-              </Text>
-            )}
-          </View>
-          <View style={s.planCardBody}>
-            <View style={s.metaRow}>
-              <Text style={s.metaLabel}>Next renewal</Text>
-              <Text style={s.metaValue}>{fmtDate(sub.end_date)}</Text>
-            </View>
-            {sub.status === 'paused' && sub.pause_until && (
-              <View style={s.metaRow}>
-                <Text style={s.metaLabel}>Paused until</Text>
-                <Text style={s.metaValue}>{fmtDate(sub.pause_until)}</Text>
-              </View>
-            )}
-            <View>
-              <View style={s.metaRow}>
-                <Text style={s.metaLabel}>Deliveries remaining</Text>
-                <Text style={s.metaValueGreen}>{remaining}/{mealsTotal}</Text>
-              </View>
-              <View style={s.progressTrack}>
-                <View style={[s.progressFill, { width: `${progress}%` }]} />
-              </View>
+              {todayOrder.meal_templates?.image_url && (
+                <Image source={{ uri: todayOrder.meal_templates.image_url }} style={s.todayThumb} />
+              )}
             </View>
           </View>
-        </View>
+        ) : (
+          <View style={s.noDeliveryCard}>
+            <Text style={s.noDeliveryText}>No delivery today</Text>
+            {nextOrder && (
+              <Text style={s.noDeliveryMeta}>Next meal on {fmtDate(nextOrder.delivery_date)}</Text>
+            )}
+          </View>
+        )}
 
-        {/* Actions */}
-        <View style={s.actionCard}>
-          {actions.map(({ label, Icon, onPress }, i) => (
-            <Pressable
-              key={label}
-              style={({ pressed }) => [s.actionRow, i < actions.length && s.actionRowBorder, pressed && s.rowPressed]}
-              onPress={onPress}
-            >
-              <Icon size={18} color={Colors.text} />
-              <Text style={[s.actionLabel, { flex: 1 }]}>{label}</Text>
-              <ArrowRight size={15} color={Colors.textLight} />
-            </Pressable>
-          ))}
-          <Pressable style={({ pressed }) => [s.actionRow, pressed && s.rowPressedDanger]} onPress={() => setCancelOpen(true)}>
-            <X size={18} color={Colors.danger} />
-            <Text style={[s.actionLabel, { color: Colors.danger }]}>Cancel subscription</Text>
+        {/* THIS WEEK STRIP — tappable, shows meal thumbnail when available */}
+        <Text style={s.sectionLabel}>This week</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.weekStripContent}
+          style={s.weekStrip}
+        >
+          {weekDates.map((date, i) => {
+            const dateStr = toISO(date)
+            const order = orderMap.get(dateStr)
+            const isToday = i === 0
+            const hasImage = !!order?.meal_templates?.image_url
+            const mealWord = order?.meal_templates?.name?.split(' ')[0] ?? '—'
+            return (
+              <Pressable
+                key={dateStr}
+                style={({ pressed }) => [s.dayCell, isToday && s.dayCellToday, pressed && { opacity: 0.7 }]}
+                onPress={() => setSelectedDay({ dateStr, date })}
+              >
+                <Text style={[s.dayDow, isToday && s.dayDowToday]}>{fmtDow(date)}</Text>
+                {hasImage ? (
+                  <Image
+                    source={{ uri: order!.meal_templates!.image_url! }}
+                    style={s.dayThumb}
+                  />
+                ) : (
+                  <Text style={[s.dayMeal, isToday && s.dayMealToday]} numberOfLines={1}>
+                    {mealWord}
+                  </Text>
+                )}
+              </Pressable>
+            )
+          })}
+        </ScrollView>
+        <Text style={s.lockNote}>Tap a day to see or swap your meal · Changes lock at 8 PM the night before</Text>
+
+        {/* QUICK ACTIONS */}
+        <View style={s.quickActions}>
+          <Pressable
+            style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
+            onPress={() => nextOrder ? setSkipConfirm(nextOrder.delivery_date) : null}
+          >
+            <SkipForward size={20} color={nextOrder ? Colors.primary : Colors.textLight} />
+            <Text style={[s.actionBoxLabel, !nextOrder && { color: Colors.textLight }]}>Skip next</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
+            onPress={() => router.push('/(app)/plan-settings')}
+          >
+            {sub.status === 'paused'
+              ? <Play size={20} color={Colors.primary} />
+              : <Pause size={20} color={Colors.primary} />}
+            <Text style={s.actionBoxLabel}>{sub.status === 'paused' ? 'Resume' : 'Pause'}</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
+            onPress={() => router.push('/(app)/plan-settings')}
+          >
+            <ArrowUpDown size={20} color={Colors.primary} />
+            <Text style={s.actionBoxLabel}>Change plan</Text>
           </Pressable>
         </View>
+
+        {/* DELIVERIES REMAINING */}
+        <View style={s.progressCard}>
+          <View style={s.progressRow}>
+            <Text style={s.progressLabel}>Deliveries remaining</Text>
+            <Text style={s.progressCount}>{remaining}/{mealsTotal}</Text>
+          </View>
+          <View style={s.progressTrack}>
+            <View style={[s.progressFill, { width: `${progress}%` }]} />
+          </View>
+          {sub.end_date && (
+            <Text style={s.renewNote}>Renews {fmtDate(sub.end_date)}</Text>
+          )}
+        </View>
+
+        {/* WALLET */}
+        {walletBalance !== null && (
+          <View style={s.walletCard}>
+            <View style={s.walletRow}>
+              <Wallet size={16} color={Colors.accent} />
+              <Text style={s.walletTitle}>Wallet</Text>
+            </View>
+            <View style={s.walletBody}>
+              <View>
+                <Text style={s.walletBalance}>₹{(walletBalance / 100).toLocaleString('en-IN')}</Text>
+                <Text style={s.walletSub}>Available balance</Text>
+              </View>
+              <View style={s.walletBtn}>
+                <Text style={s.walletBtnText}>Add money</Text>
+              </View>
+            </View>
+            <Text style={s.walletLink}>View transactions</Text>
+          </View>
+        )}
+
+        {/* DELIVERY ADDRESS */}
+        {address && (
+          <View style={s.addressCard}>
+            <View style={s.addressHeader}>
+              <MapPin size={14} color={Colors.primary} />
+              <Text style={s.addressLabel}>{address.label || 'Delivery address'}</Text>
+            </View>
+            <Text style={s.addressLine} numberOfLines={2}>{address.line1}</Text>
+            <Pressable onPress={() => router.push('/(app)/plan-settings')}>
+              <Text style={s.addressEdit}>Edit →</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* VIEW PLAN & SETTINGS */}
+        <Pressable
+          style={({ pressed }) => [s.settingsRow, pressed && { opacity: 0.8 }]}
+          onPress={() => router.push('/(app)/plan-settings')}
+        >
+          <Text style={s.settingsRowText}>View plan & settings</Text>
+          <ArrowRight size={16} color={Colors.primary} />
+        </Pressable>
       </ScrollView>
 
-      <PauseModal    visible={pauseOpen}      subId={sub.id} onClose={() => setPauseOpen(false)}      onDone={() => { setPauseOpen(false);      fetchSub() }} />
-      <SkipModal     visible={skipOpen}       subId={sub.id} userId={user!.id} onClose={() => setSkipOpen(false)}       onDone={() => { setSkipOpen(false);       fetchSub() }} />
-      <ChangePlanModal visible={changePlanOpen} subId={sub.id} currentPlanName={planName} onClose={() => setChangePlanOpen(false)} onDone={() => { setChangePlanOpen(false); fetchSub() }} />
-      <CancelModal   visible={cancelOpen}     subId={sub.id} onClose={() => setCancelOpen(false)}     onDone={() => { setCancelOpen(false);     fetchSub() }} />
-      <DietaryModal  visible={dietaryOpen}    userId={user!.id} onClose={() => setDietaryOpen(false)} onDone={() => setDietaryOpen(false)} />
-      <AddressModal  visible={addressOpen}    userId={user!.id} onClose={() => setAddressOpen(false)} onDone={() => setAddressOpen(false)} />
-    </View>
-  )
-}
-
-// ── PauseModal ─────────────────────────────────────────────────────────────
-
-function PauseModal({ visible, subId, onClose, onDone }: {
-  visible: boolean; subId: string; onClose: () => void; onDone: () => void
-}) {
-  const [step, setStep] = useState<'from' | 'until'>('from')
-  const [fromDate, setFromDate] = useState<string | null>(null)
-  const [untilDate, setUntilDate] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  const fromDates = generateDates(30, 1)
-  const untilDates = fromDate
-    ? generateDates(14, Math.ceil((new Date(fromDate + 'T00:00:00').getTime() - Date.now()) / 86400000) + 1)
-    : []
-
-  async function handlePause() {
-    if (!fromDate || !untilDate) return
-    setSaving(true); setError('')
-    try {
-      const { error } = await supabase.functions.invoke('manage-subscription', {
-        body: { action: 'pause', subscription_id: subId, pause_from: fromDate, pause_until: untilDate },
-      })
-      if (error) throw error
-      onDone()
-    } catch { setError('Something went wrong. Please try again.') }
-    finally { setSaving(false) }
-  }
-
-  function reset() { setStep('from'); setFromDate(null); setUntilDate(null); setError(''); onClose() }
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={reset}>
-      <View style={m.overlay}>
-        <View style={m.sheet}>
-          <View style={m.handle} />
-          <SheetHeader title="Pause subscription" onClose={reset} />
-
-          {step === 'from' ? (
-            <>
-              <Text style={m.stepLabel}>Select pause start date</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={m.dateRow}>
-                {fromDates.map((d) => {
-                  const iso = toISO(d); const active = iso === fromDate
-                  return (
-                    <Pressable key={iso} style={[m.dateChip, active && m.dateChipActive]} onPress={() => setFromDate(iso)}>
-                      <Text style={[m.dateDow, active && m.dateDowActive]}>{fmtDow(d)}</Text>
-                      <Text style={[m.dateNum, active && m.dateNumActive]}>{fmtShort(d)}</Text>
-                    </Pressable>
-                  )
-                })}
-              </ScrollView>
-              <Pressable style={[m.btn, !fromDate && m.btnDisabled]} disabled={!fromDate} onPress={() => setStep('until')}>
-                <Text style={m.btnText}>Next: pick end date</Text>
+      {/* Skip confirm dialog */}
+      <Modal
+        visible={!!skipConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSkipConfirm(null)}
+      >
+        <View style={s.confirmOverlay}>
+          <View style={s.confirmCard}>
+            <Text style={s.confirmTitle}>Skip this delivery?</Text>
+            <Text style={s.confirmBody}>
+              Delivery on {fmtDate(skipConfirm)}.{'\n'}This meal will be removed from your week.
+            </Text>
+            <View style={s.confirmBtns}>
+              <Pressable
+                style={[s.confirmBtn, s.confirmBtnGhost]}
+                onPress={() => setSkipConfirm(null)}
+              >
+                <Text style={s.confirmBtnGhostText}>Cancel</Text>
               </Pressable>
-            </>
-          ) : (
-            <>
-              <Text style={m.stepLabel}>Select pause end date</Text>
-              <Text style={m.stepSub}>From {fmtDate(fromDate)}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={m.dateRow}>
-                {untilDates.map((d) => {
-                  const iso = toISO(d)
-                  if (fromDate && iso <= fromDate) return null
-                  const active = iso === untilDate
-                  return (
-                    <Pressable key={iso} style={[m.dateChip, active && m.dateChipActive]} onPress={() => setUntilDate(iso)}>
-                      <Text style={[m.dateDow, active && m.dateDowActive]}>{fmtDow(d)}</Text>
-                      <Text style={[m.dateNum, active && m.dateNumActive]}>{fmtShort(d)}</Text>
-                    </Pressable>
-                  )
-                })}
-              </ScrollView>
-              {error ? <Text style={m.errorText}>{error}</Text> : null}
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <Pressable style={[m.btn, m.btnGhost, { flex: 1 }]} onPress={() => setStep('from')}>
-                  <Text style={m.btnGhostText}>Back</Text>
-                </Pressable>
-                <Pressable style={[m.btn, (!untilDate || saving) && m.btnDisabled, { flex: 1 }]} disabled={!untilDate || saving} onPress={handlePause}>
-                  {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Confirm pause</Text>}
-                </Pressable>
-              </View>
-            </>
-          )}
-        </View>
-      </View>
-    </Modal>
-  )
-}
-
-// ── SkipModal ──────────────────────────────────────────────────────────────
-
-function SkipModal({ visible, subId, userId, onClose, onDone }: {
-  visible: boolean; subId: string; userId: string; onClose: () => void; onDone: () => void
-}) {
-  const [orders, setOrders] = useState<UpcomingOrder[]>([])
-  const [loadingOrders, setLoadingOrders] = useState(false)
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (!visible) return
-    setLoadingOrders(true)
-    const todayStr = new Date().toISOString().split('T')[0]
-    const future = new Date(); future.setDate(future.getDate() + 14)
-    supabase.from('orders')
-      .select('id, delivery_date, meal_templates ( name )')
-      .eq('subscription_id', subId)
-      .gte('delivery_date', todayStr).lte('delivery_date', future.toISOString().split('T')[0])
-      .in('status', ['scheduled', 'confirmed'])
-      .order('delivery_date')
-      .then(({ data }) => { setOrders((data as unknown as UpcomingOrder[]) ?? []); setLoadingOrders(false) })
-  }, [visible, subId])
-
-  async function handleSkip() {
-    if (!selectedDate) return
-    setSaving(true); setError('')
-    try {
-      const { error } = await supabase.functions.invoke('manage-subscription', {
-        body: { action: 'skip', subscription_id: subId, delivery_date: selectedDate },
-      })
-      if (error) throw error
-      onDone()
-    } catch { setError('Something went wrong. Please try again.') }
-    finally { setSaving(false) }
-  }
-
-  function reset() { setSelectedDate(null); setError(''); onClose() }
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={reset}>
-      <View style={m.overlay}>
-        <View style={m.sheet}>
-          <View style={m.handle} />
-          <SheetHeader title="Skip a delivery" onClose={reset} />
-          <Text style={m.stepLabel}>Select a day to skip</Text>
-          {loadingOrders ? (
-            <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
-          ) : orders.length === 0 ? (
-            <Text style={m.emptyText}>No upcoming deliveries in the next 14 days.</Text>
-          ) : (
-            <View style={{ gap: 10, marginBottom: 20 }}>
-              {[...new Map(orders.map(o => [o.delivery_date, o])).values()].map((o) => {
-                const active = o.delivery_date === selectedDate
-                return (
-                  <Pressable key={o.delivery_date} style={[m.selectRow, active && m.selectRowActive]} onPress={() => setSelectedDate(o.delivery_date)}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[m.selectRowTitle, active && { color: Colors.primary }]}>{fmtDate(o.delivery_date)}</Text>
-                      <Text style={m.selectRowSub}>{o.meal_templates?.name ?? '—'}</Text>
-                    </View>
-                    <View style={[m.radio, active && m.radioActive]}>{active && <View style={m.radioDot} />}</View>
-                  </Pressable>
-                )
-              })}
+              <Pressable
+                style={[s.confirmBtn, s.confirmBtnPrimary, skipping && { opacity: 0.5 }]}
+                onPress={handleSkipConfirm}
+                disabled={skipping}
+              >
+                {skipping
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={s.confirmBtnText}>Skip it</Text>}
+              </Pressable>
             </View>
-          )}
-          {error ? <Text style={m.errorText}>{error}</Text> : null}
-          <Pressable style={[m.btn, (!selectedDate || saving) && m.btnDisabled]} disabled={!selectedDate || saving} onPress={handleSkip}>
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Skip this delivery</Text>}
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  )
-}
-
-// ── ChangePlanModal ────────────────────────────────────────────────────────
-
-function ChangePlanModal({ visible, subId, currentPlanName, onClose, onDone }: {
-  visible: boolean; subId: string; currentPlanName: string; onClose: () => void; onDone: () => void
-}) {
-  const [plans, setPlans] = useState<Plan[]>([])
-  const [loadingPlans, setLoadingPlans] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (!visible) return
-    setLoadingPlans(true)
-    supabase.from('plans').select('id, name, meals_total, days_per_week, base_price')
-      .eq('is_active', true).order('base_price')
-      .then(({ data }) => { setPlans((data as Plan[]) ?? []); setLoadingPlans(false) })
-  }, [visible])
-
-  async function handleChange() {
-    if (!selectedId) return
-    const plan = plans.find((p) => p.id === selectedId)
-    if (!plan) return
-    setSaving(true); setError('')
-    try {
-      const { error: err } = await supabase.from('subscriptions')
-        .update({ plan_id: selectedId, plan_name: plan.name, deliveries_remaining: plan.meals_total })
-        .eq('id', subId)
-      if (err) throw err
-      onDone()
-    } catch { setError('Something went wrong. Please try again.') }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={m.overlay}>
-        <View style={m.sheet}>
-          <View style={m.handle} />
-          <SheetHeader title="Change plan" onClose={onClose} />
-          <Text style={m.stepLabel}>Currently on: {currentPlanName}</Text>
-          {loadingPlans ? (
-            <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
-          ) : (
-            <View style={{ gap: 10, marginBottom: 20 }}>
-              {plans.map((plan) => {
-                const active = plan.id === selectedId
-                const isCurrent = plan.name === currentPlanName
-                return (
-                  <Pressable
-                    key={plan.id}
-                    style={[m.selectRow, active && m.selectRowActive, isCurrent && m.selectRowCurrent]}
-                    onPress={() => !isCurrent && setSelectedId(plan.id)}
-                    disabled={isCurrent}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[m.selectRowTitle, active && { color: Colors.primary }]}>{plan.name}</Text>
-                      <Text style={m.selectRowSub}>{plan.meals_total} meals · {plan.days_per_week} days/week</Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                      <Text style={[m.planPrice, active && { color: Colors.primary }]}>₹{plan.base_price.toLocaleString('en-IN')}</Text>
-                      {isCurrent && <Text style={m.currentBadge}>Current</Text>}
-                    </View>
-                  </Pressable>
-                )
-              })}
-            </View>
-          )}
-          {error ? <Text style={m.errorText}>{error}</Text> : null}
-          <Pressable style={[m.btn, (!selectedId || saving) && m.btnDisabled]} disabled={!selectedId || saving} onPress={handleChange}>
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Confirm change</Text>}
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  )
-}
-
-// ── CancelModal ────────────────────────────────────────────────────────────
-
-function CancelModal({ visible, subId, onClose, onDone }: {
-  visible: boolean; subId: string; onClose: () => void; onDone: () => void
-}) {
-  const [saving, setSaving] = useState(false)
-
-  async function handleCancel() {
-    setSaving(true)
-    try {
-      await supabase.functions.invoke('manage-subscription', {
-        body: { action: 'cancel', subscription_id: subId },
-      })
-      onDone()
-    } finally { setSaving(false) }
-  }
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={m.centreOverlay}>
-        <View style={m.centreCard}>
-          <Text style={m.centreTitle}>Cancel subscription?</Text>
-          <Text style={m.centreBody}>
-            All upcoming deliveries will be cancelled. Contact support to reinstate.
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
-            <Pressable style={[m.btn, m.btnGhost, { flex: 1 }]} onPress={onClose}>
-              <Text style={m.btnGhostText}>Keep it</Text>
-            </Pressable>
-            <Pressable style={[m.btn, m.btnDanger, { flex: 1 }]} onPress={handleCancel} disabled={saving}>
-              {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Cancel plan</Text>}
-            </Pressable>
           </View>
         </View>
-      </View>
-    </Modal>
-  )
-}
+      </Modal>
 
-// ── DietaryModal ───────────────────────────────────────────────────────────
+      {/* Day detail / meal swap panel */}
+      <Modal
+        visible={!!selectedDay}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedDay(null)}
+      >
+        <Pressable style={s.dayModalOverlay} onPress={() => setSelectedDay(null)}>
+          <Pressable style={s.dayModalSheet} onPress={(e) => e.stopPropagation()}>
+            {/* Handle */}
+            <View style={s.dayModalHandle} />
 
-function DietaryModal({ visible, userId, onClose, onDone }: {
-  visible: boolean; userId: string; onClose: () => void; onDone: () => void
-}) {
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [allergens, setAllergens] = useState<string[]>([])
-  const [dietaryPref, setDietaryPref] = useState('none')
-  const [proteinPref, setProteinPref] = useState<string[]>([])
-  const [baseAvoidance, setBaseAvoidance] = useState<string[]>([])
-  const [veggieAvoidance, setVeggieAvoidance] = useState<string[]>([])
-  const [spice, setSpice] = useState('')
-  const [dressing, setDressing] = useState('')
-  const [freeText, setFreeText] = useState('')
+            {/* Header */}
+            <View style={s.dayModalHeader}>
+              <Text style={s.dayModalDate}>
+                {selectedDay ? fmtDateLong(selectedDay.dateStr) : ''}
+              </Text>
+              <Pressable onPress={() => setSelectedDay(null)} hitSlop={10}>
+                <X size={20} color={Colors.textMuted} />
+              </Pressable>
+            </View>
 
-  useEffect(() => {
-    if (!visible) return
-    setLoading(true)
-    supabase.from('dietary_profiles').select('*').eq('user_id', userId).maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          setAllergens(data.allergens ?? [])
-          setDietaryPref(data.dietary_preference ?? 'none')
-          setProteinPref(data.protein_preference ?? [])
-          setBaseAvoidance(data.base_avoidance ?? [])
-          setVeggieAvoidance(data.veggie_avoidance ?? [])
-          setSpice(data.spice_preference ?? '')
-          setDressing(data.dressing_preference ?? '')
-          setFreeText(data.free_text ?? '')
-        }
-        setLoading(false)
-      })
-  }, [visible, userId])
-
-  function toggle(arr: string[], val: string, setter: (v: string[]) => void) {
-    setter(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val])
-  }
-
-  async function handleSave() {
-    setSaving(true); setError('')
-    try {
-      const { error: err } = await supabase.from('dietary_profiles').upsert({
-        user_id: userId, allergens, dietary_preference: dietaryPref,
-        protein_preference: proteinPref, base_avoidance: baseAvoidance,
-        veggie_avoidance: veggieAvoidance, spice_preference: spice,
-        dressing_preference: dressing, free_text: freeText,
-      }, { onConflict: 'user_id' })
-      if (err) throw err
-      onDone()
-    } catch { setError('Could not save. Please try again.') }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={m.overlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <View style={[m.sheet, { maxHeight: '90%' }]}>
-            <View style={m.handle} />
-            <SheetHeader title="Dietary preferences" onClose={onClose} />
-            {loading ? (
-              <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-                <DietSection title="Allergies">
-                  <PillRow options={ALLERGENS} selected={allergens} onToggle={(v) => toggle(allergens, v, setAllergens)} />
-                </DietSection>
-                <DietSection title="Dietary preference">
-                  {DIETARY_PREFS.map((opt) => (
-                    <Pressable key={opt} style={m.radioRow} onPress={() => setDietaryPref(opt)}>
-                      <View style={[m.radio, dietaryPref === opt && m.radioActive]}>
-                        {dietaryPref === opt && <View style={m.radioDot} />}
-                      </View>
-                      <Text style={m.radioLabel}>{opt.charAt(0).toUpperCase() + opt.slice(1)}</Text>
-                    </Pressable>
-                  ))}
-                </DietSection>
-                <DietSection title="Protein preference">
-                  <PillRow options={PROTEINS} selected={proteinPref} onToggle={(v) => toggle(proteinPref, v, setProteinPref)} />
-                </DietSection>
-                <DietSection title="Bases to avoid">
-                  <PillRow options={BASES} selected={baseAvoidance} onToggle={(v) => toggle(baseAvoidance, v, setBaseAvoidance)} />
-                </DietSection>
-                <DietSection title="Vegetables to skip">
-                  <PillRow options={VEGGIES} selected={veggieAvoidance} onToggle={(v) => toggle(veggieAvoidance, v, setVeggieAvoidance)} />
-                </DietSection>
-                <DietSection title="Spice level">
-                  {SPICES.map((opt) => (
-                    <Pressable key={opt} style={m.radioRow} onPress={() => setSpice(opt.toLowerCase())}>
-                      <View style={[m.radio, spice === opt.toLowerCase() && m.radioActive]}>
-                        {spice === opt.toLowerCase() && <View style={m.radioDot} />}
-                      </View>
-                      <Text style={m.radioLabel}>{opt}</Text>
-                    </Pressable>
-                  ))}
-                </DietSection>
-                <DietSection title="Dressing">
-                  {DRESSINGS.map(({ label, value }) => (
-                    <Pressable key={value} style={m.radioRow} onPress={() => setDressing(value)}>
-                      <View style={[m.radio, dressing === value && m.radioActive]}>
-                        {dressing === value && <View style={m.radioDot} />}
-                      </View>
-                      <Text style={m.radioLabel}>{label}</Text>
-                    </Pressable>
-                  ))}
-                </DietSection>
-                <DietSection title="Anything else?">
-                  <TextInput
-                    style={m.textarea}
-                    placeholder="Any other preferences or notes"
-                    value={freeText}
-                    onChangeText={setFreeText}
-                    multiline
-                    maxLength={250}
-                    placeholderTextColor={Colors.textLight}
-                    textAlignVertical="top"
-                  />
-                </DietSection>
-                {error ? <Text style={[m.errorText, { marginHorizontal: 16, marginBottom: 8 }]}>{error}</Text> : null}
-              </ScrollView>
-            )}
-            <Pressable style={[m.btn, m.btnSaveRow, (saving || loading) && m.btnDisabled]} disabled={saving || loading} onPress={handleSave}>
-              {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Save preferences</Text>}
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  )
-}
-
-// ── AddressModal ───────────────────────────────────────────────────────────
-
-function AddressModal({ visible, userId, onClose, onDone }: {
-  visible: boolean; userId: string; onClose: () => void; onDone: () => void
-}) {
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [addressId, setAddressId] = useState<string | null>(null)
-  const [line1, setLine1] = useState('')
-  const [landmark, setLandmark] = useState('')
-  const [pincode, setPincode] = useState('')
-  const [label, setLabel] = useState('Home')
-  const [type, setType] = useState<'home' | 'office' | 'other'>('home')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-
-  useEffect(() => {
-    if (!visible) return
-    setLoading(true)
-    supabase.from('addresses').select('id, line1, landmark, pincode, label, type')
-      .eq('user_id', userId).order('created_at').limit(1).maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          setAddressId(data.id); setLine1(data.line1 ?? ''); setLandmark(data.landmark ?? '')
-          setPincode(data.pincode ?? ''); setLabel(data.label ?? 'Home'); setType((data.type as any) ?? 'home')
-        }
-        setLoading(false)
-      })
-  }, [visible, userId])
-
-  function validate() {
-    const e: Record<string, string> = {}
-    if (!line1.trim() || line1.trim().length < 5) e.line1 = 'Enter a valid street address'
-    if (!/^\d{6}$/.test(pincode)) e.pincode = 'Pincode must be 6 digits'
-    return e
-  }
-
-  async function handleSave() {
-    const fe = validate()
-    if (Object.keys(fe).length > 0) { setFieldErrors(fe); return }
-    setSaving(true); setError('')
-    try {
-      if (addressId) {
-        const { error: err } = await supabase.from('addresses')
-          .update({ line1: line1.trim(), landmark: landmark.trim(), pincode, label, type }).eq('id', addressId)
-        if (err) throw err
-      } else {
-        const { error: err } = await supabase.from('addresses')
-          .insert({ user_id: userId, line1: line1.trim(), landmark: landmark.trim(), pincode, label, type })
-        if (err) throw err
-      }
-      onDone()
-    } catch { setError('Could not save address. Please try again.') }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={m.overlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <View style={[m.sheet, { maxHeight: '85%' }]}>
-            <View style={m.handle} />
-            <SheetHeader title="Delivery address" onClose={onClose} />
-            {loading ? (
-              <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-                <AddrField label="Street address" error={fieldErrors.line1}>
-                  <TextInput
-                    style={[m.input, fieldErrors.line1 && m.inputError]}
-                    placeholder="House/flat no., street name"
-                    value={line1}
-                    onChangeText={(t) => { setLine1(t); setFieldErrors((e) => ({ ...e, line1: '' })) }}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </AddrField>
-                <AddrField label="Landmark (optional)">
-                  <TextInput
-                    style={m.input}
-                    placeholder="e.g. Near the blue gate"
-                    value={landmark}
-                    onChangeText={setLandmark}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </AddrField>
-                <AddrField label="Pincode" error={fieldErrors.pincode}>
-                  <TextInput
-                    style={[m.input, fieldErrors.pincode && m.inputError]}
-                    placeholder="6-digit pincode"
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    value={pincode}
-                    onChangeText={(t) => { setPincode(t.replace(/\D/g, '')); setFieldErrors((e) => ({ ...e, pincode: '' })) }}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </AddrField>
-                <AddrField label="Address type">
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {ADDR_TYPES.map((t) => (
-                      <Pressable
-                        key={t.id}
-                        style={[m.typeBtn, type === t.id && m.typeBtnActive]}
-                        onPress={() => { setType(t.id); setLabel(t.id.charAt(0).toUpperCase() + t.id.slice(1)) }}
-                      >
-                        <Text style={[m.typeBtnText, type === t.id && m.typeBtnTextActive]}>{t.label}</Text>
-                      </Pressable>
-                    ))}
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+              {/* Current meal */}
+              {dayOrder ? (
+                <View style={s.dayModalCurrentSection}>
+                  <Text style={s.dayModalSectionLabel}>Your meal</Text>
+                  <View style={s.dayModalCurrentCard}>
+                    {dayOrder.meal_templates?.image_url && (
+                      <Image
+                        source={{ uri: dayOrder.meal_templates.image_url }}
+                        style={s.dayModalCurrentImg}
+                      />
+                    )}
+                    <Text style={s.dayModalCurrentName}>
+                      {dayOrder.meal_templates?.name ?? 'Your meal'}
+                    </Text>
+                    {(dayOrder.meal_templates?.kcal || dayOrder.meal_templates?.protein) && (
+                      <Text style={s.dayModalCurrentMeta}>
+                        {dayOrder.meal_templates.kcal ? `${dayOrder.meal_templates.kcal} kcal` : ''}
+                        {dayOrder.meal_templates.kcal && dayOrder.meal_templates.protein ? ' · ' : ''}
+                        {dayOrder.meal_templates.protein ? `${dayOrder.meal_templates.protein}g protein` : ''}
+                      </Text>
+                    )}
+                    <View style={s.dayModalStatusRow}>
+                      <Text style={s.dayModalStatus}>{statusLabel(dayOrder.status)}</Text>
+                    </View>
                   </View>
-                </AddrField>
-                <AddrField label="Label (optional)">
-                  <TextInput
-                    style={m.input}
-                    placeholder="e.g. Home, Mom's Place"
-                    value={label}
-                    onChangeText={setLabel}
-                    maxLength={40}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </AddrField>
-                {error ? <Text style={m.errorText}>{error}</Text> : null}
-              </ScrollView>
-            )}
-            <Pressable style={[m.btn, m.btnSaveRow, (saving || loading) && m.btnDisabled]} disabled={saving || loading} onPress={handleSave}>
-              {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Save address</Text>}
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  )
-}
+                </View>
+              ) : (
+                <View style={s.dayModalNoOrder}>
+                  <Text style={s.dayModalNoOrderText}>No delivery scheduled for this day</Text>
+                </View>
+              )}
 
-// ── Shared sub-components ──────────────────────────────────────────────────
-
-function SheetHeader({ title, onClose }: { title: string; onClose: () => void }) {
-  return (
-    <View style={m.sheetHeader}>
-      <Text style={m.sheetTitle}>{title}</Text>
-      <Pressable onPress={onClose} hitSlop={12}><X size={20} color={Colors.textMuted} /></Pressable>
-    </View>
-  )
-}
-
-function DietSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={{ marginBottom: 20, paddingHorizontal: 16 }}>
-      <Text style={{ fontFamily: Fonts.headingSemi, fontSize: 14, color: Colors.text, marginBottom: 10 }}>{title}</Text>
-      {children}
-    </View>
-  )
-}
-
-function PillRow({ options, selected, onToggle }: { options: string[]; selected: string[]; onToggle: (v: string) => void }) {
-  return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      {options.map((opt) => {
-        const active = selected.includes(opt)
-        return (
-          <Pressable key={opt} style={[m.pill, active && m.pillActive]} onPress={() => onToggle(opt)}>
-            <Text style={[m.pillText, active && m.pillTextActive]}>{opt}</Text>
+              {/* Swap section */}
+              {dayOrder && (
+                <View style={s.dayModalSwapSection}>
+                  {dayLocked ? (
+                    <View style={s.dayModalLockBanner}>
+                      <Text style={s.dayModalLockText}>
+                        🔒 Changes for this day are locked
+                      </Text>
+                      <Text style={s.dayModalLockSub}>
+                        Swaps close at 8 PM the night before delivery
+                      </Text>
+                    </View>
+                  ) : (
+                    <>
+                      <Text style={s.dayModalSectionLabel}>Swap for something else</Text>
+                      {swapError ? (
+                        <Text style={s.dayModalSwapError}>{swapError}</Text>
+                      ) : null}
+                      {allMeals.map((meal) => {
+                        const isCurrent = meal.id === (dayOrder.meal_templates as any)?.id
+                        return (
+                          <Pressable
+                            key={meal.id}
+                            style={({ pressed }) => [
+                              s.mealRow,
+                              isCurrent && s.mealRowCurrent,
+                              pressed && !isCurrent && { opacity: 0.7 },
+                            ]}
+                            onPress={() => {
+                              if (!isCurrent && !swapping) handleSwapMeal(dayOrder.id, meal.id)
+                            }}
+                            disabled={swapping || isCurrent}
+                          >
+                            {meal.image_url ? (
+                              <Image source={{ uri: meal.image_url }} style={s.mealRowThumb} />
+                            ) : (
+                              <View style={s.mealRowPlaceholder}>
+                                <Text style={s.mealRowCategory}>{meal.category[0].toUpperCase()}</Text>
+                              </View>
+                            )}
+                            <View style={s.mealRowInfo}>
+                              <Text style={s.mealRowName} numberOfLines={2}>{meal.name}</Text>
+                              <Text style={s.mealRowMeta}>
+                                {meal.kcal ? `${meal.kcal} kcal` : meal.category}
+                                {meal.protein ? ` · ${meal.protein}g protein` : ''}
+                              </Text>
+                            </View>
+                            {isCurrent && (
+                              <View style={s.mealRowCurrentBadge}>
+                                <Check size={14} color={Colors.primary} strokeWidth={2.5} />
+                              </View>
+                            )}
+                            {swapping && !isCurrent && (
+                              <ActivityIndicator size="small" color={Colors.textLight} />
+                            )}
+                          </Pressable>
+                        )
+                      })}
+                      <View style={{ height: 32 }} />
+                    </>
+                  )}
+                </View>
+              )}
+            </ScrollView>
           </Pressable>
-        )
-      })}
-    </View>
-  )
-}
-
-function AddrField({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
-  return (
-    <View style={{ marginBottom: 16 }}>
-      <Text style={{ fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text, marginBottom: 8 }}>{label}</Text>
-      {children}
-      {error ? <Text style={m.errorText}>{error}</Text> : null}
+        </Pressable>
+      </Modal>
     </View>
   )
 }
@@ -905,9 +653,14 @@ function AddrField({ label, error, children }: { label: string; error?: string; 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
-  header: { paddingHorizontal: 16, paddingBottom: 8 },
-  scroll: { paddingHorizontal: 16, paddingBottom: 32 },
+  titleWrap: { paddingHorizontal: 16, paddingBottom: 8 },
+  scroll: { paddingHorizontal: 16, paddingBottom: 40 },
   title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 16 },
+
+  sectionLabel: {
+    fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textLight,
+    textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8,
+  },
 
   // CoD limited view
   codHeroCard: {
@@ -917,10 +670,6 @@ const s = StyleSheet.create({
   codHeroEmoji: { fontSize: 40, marginBottom: 8 },
   codHeroTitle: { fontFamily: Fonts.heading, fontSize: 19, color: Colors.text, textAlign: 'center', marginBottom: 6 },
   codHeroSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, textAlign: 'center', lineHeight: 20 },
-  codSectionLabel: {
-    fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textLight,
-    textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10,
-  },
   codMealCard: { backgroundColor: '#fff', borderRadius: 14, padding: 18, marginBottom: 24, borderWidth: 1, borderColor: Colors.border },
   codMealName: { fontFamily: Fonts.headingSemi, fontSize: 18, color: Colors.text, marginBottom: 4 },
   codMealDate: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
@@ -932,118 +681,180 @@ const s = StyleSheet.create({
   codPayTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text, marginBottom: 4 },
   codPayDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19 },
 
-  planCard: {
-    backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', marginBottom: 16,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
+  // Today's delivery card
+  todayCard: {
+    backgroundColor: Colors.primary, borderRadius: 16, padding: 20, marginBottom: 16,
   },
-  planCardHeader: { backgroundColor: Colors.primary, paddingHorizontal: 16, paddingVertical: 16 },
-  planCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  planCardNameLight: { fontFamily: Fonts.heading, fontSize: 18, color: '#fff' },
-  planCardMetaLight: { fontFamily: Fonts.body, fontSize: 13, color: Colors.primaryMid, marginTop: 4 },
-  activeBadge: { backgroundColor: Colors.accent, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
-  activeBadgeText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.text },
-  planCardBody: { paddingHorizontal: 16, paddingVertical: 16, gap: 14 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  metaLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
-  metaValue: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.text },
-  metaValueGreen: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.primary },
-  progressTrack: { height: 10, backgroundColor: Colors.border, borderRadius: 999, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 999 },
-  actionCard: {
-    backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
+  todayCardRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  todayThumb: { width: 72, height: 72, borderRadius: 12 },
+  statusBadge: {
+    backgroundColor: Colors.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4,
+    alignSelf: 'flex-start', marginBottom: 12,
   },
-  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 16, minHeight: 56 },
-  actionRowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
-  actionLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text },
-  rowPressed: { backgroundColor: Colors.hover },
-  rowPressedDanger: { backgroundColor: Colors.dangerLight },
-})
+  statusBadgeText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.text },
+  todayMealName: { fontFamily: Fonts.heading, fontSize: 20, color: '#fff', marginBottom: 6 },
+  todayMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.primaryMid },
+  noDeliveryCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 20, marginBottom: 16,
+    alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
+  },
+  noDeliveryText: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.text, marginBottom: 4 },
+  noDeliveryMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
 
-const m = StyleSheet.create({
-  // Backdrop & sheet
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingBottom: 32 },
-  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 999, alignSelf: 'center', marginBottom: 12 },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  sheetTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
-  // Text
-  stepLabel: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.text, marginBottom: 12 },
-  stepSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 12 },
-  emptyText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, textAlign: 'center', marginVertical: 24 },
-  errorText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger, marginBottom: 12 },
-  // Date chips
-  dateRow: { paddingBottom: 16, gap: 8 },
-  dateChip: {
-    alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12,
-    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: '#fff', minWidth: 64,
+  // Week strip
+  weekStrip: { marginBottom: 0 },
+  weekStripContent: { gap: 8, paddingBottom: 4, paddingTop: 2 },
+  dayCell: {
+    alignItems: 'center',
+    width: 60,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 6,
   },
-  dateChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  dateDow: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  dateDowActive: { color: Colors.primaryMid },
-  dateNum: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginTop: 2 },
-  dateNumActive: { color: '#fff' },
-  // Buttons
-  btn: {
-    backgroundColor: Colors.primary, borderRadius: 999, paddingVertical: 15,
-    alignItems: 'center', justifyContent: 'center', minHeight: 52,
+  dayCellToday: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dayDow: { fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 },
+  dayDowToday: { color: Colors.primaryMid },
+  dayThumb: { width: 40, height: 40, borderRadius: 8 },
+  dayMeal: { fontFamily: Fonts.bodyBold, fontSize: 10, color: Colors.text, maxWidth: 52, textAlign: 'center' },
+  dayMealToday: { color: '#fff' },
+  lockNote: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, marginTop: 8, marginBottom: 16 },
+
+  // Quick actions
+  quickActions: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  actionBox: {
+    flex: 1, backgroundColor: '#fff', borderRadius: 14, paddingVertical: 16, alignItems: 'center',
+    gap: 6, borderWidth: 1, borderColor: Colors.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1,
   },
-  btnDisabled: { opacity: 0.4 },
-  btnGhost: { backgroundColor: Colors.primaryLight },
-  btnDanger: { backgroundColor: Colors.danger },
-  btnSaveRow: { marginHorizontal: 16, marginTop: 8 },
-  btnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
-  btnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.primary },
-  // Selectable rows
-  selectRow: {
-    flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 14,
-    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: '#fff',
+  actionBoxLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.text, textAlign: 'center' },
+
+  // Deliveries remaining
+  progressCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
   },
-  selectRowActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  selectRowCurrent: { opacity: 0.5 },
-  selectRowTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
-  selectRowSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
-  planPrice: { fontFamily: Fonts.heading, fontSize: 16, color: Colors.text },
-  currentBadge: { fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.primary },
-  // Radio
-  radio: {
-    width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff',
+  progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  progressLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
+  progressCount: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.primary },
+  progressTrack: { height: 8, backgroundColor: Colors.border, borderRadius: 999, overflow: 'hidden', marginBottom: 8 },
+  progressFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 999 },
+  renewNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight },
+
+  // Wallet
+  walletCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
   },
-  radioActive: { borderColor: Colors.primary },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.primary },
-  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
-  radioLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text },
-  // Centre modal (cancel)
-  centreOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  centreCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%', maxWidth: 320 },
-  centreTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text, marginBottom: 8 },
-  centreBody: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, marginBottom: 20, lineHeight: 20 },
-  // Dietary pills
-  pill: {
-    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999,
-    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: '#fff',
+  walletRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  walletTitle: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
+  walletBody: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  walletBalance: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text },
+  walletSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
+  walletBtn: { backgroundColor: Colors.primary, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9 },
+  walletBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
+  walletLink: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.primary },
+
+  // Delivery address
+  addressCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
   },
-  pillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  pillText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
-  pillTextActive: { color: '#fff' },
-  // Textarea
-  textarea: {
-    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12,
-    padding: 14, fontFamily: Fonts.body, fontSize: 14, color: Colors.text, minHeight: 80,
+  addressHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  addressLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
+  addressLine: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.text, marginBottom: 10 },
+  addressEdit: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
+
+  // Settings link
+  settingsRow: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
   },
-  // Address form
-  input: {
-    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 13, fontFamily: Fonts.body, fontSize: 15, color: Colors.text,
+  settingsRowText: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.primary },
+
+  // Skip confirm dialog
+  confirmOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center', justifyContent: 'center', padding: 24,
   },
-  inputError: { borderColor: Colors.danger },
-  fieldError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 4 },
-  typeBtn: {
-    flex: 1, paddingVertical: 11, borderRadius: 999, borderWidth: 1.5,
-    borderColor: Colors.border, backgroundColor: '#fff', alignItems: 'center',
+  confirmCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%', maxWidth: 320 },
+  confirmTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text, marginBottom: 8 },
+  confirmBody: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, marginBottom: 20, lineHeight: 20 },
+  confirmBtns: { flexDirection: 'row', gap: 12 },
+  confirmBtn: { flex: 1, borderRadius: 999, paddingVertical: 13, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  confirmBtnGhost: { backgroundColor: Colors.primaryLight },
+  confirmBtnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.primary },
+  confirmBtnPrimary: { backgroundColor: Colors.primary },
+  confirmBtnText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
+
+  // Day detail / meal swap modal
+  dayModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  dayModalSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '85%',
+    paddingBottom: 0,
   },
-  typeBtnActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  typeBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
-  typeBtnTextActive: { color: Colors.primary },
+  dayModalHandle: {
+    width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2,
+    alignSelf: 'center', marginTop: 12, marginBottom: 4,
+  },
+  dayModalHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: Colors.borderFaint,
+  },
+  dayModalDate: { fontFamily: Fonts.headingSemi, fontSize: 17, color: Colors.text },
+
+  dayModalCurrentSection: { padding: 20 },
+  dayModalSectionLabel: {
+    fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textLight,
+    textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12,
+  },
+  dayModalCurrentCard: {
+    backgroundColor: Colors.primaryLight, borderRadius: 16, padding: 16,
+    borderWidth: 1.5, borderColor: Colors.primary,
+  },
+  dayModalCurrentImg: { width: '100%', height: 160, borderRadius: 12, marginBottom: 12 },
+  dayModalCurrentName: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text, marginBottom: 4 },
+  dayModalCurrentMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 8 },
+  dayModalStatusRow: { flexDirection: 'row' },
+  dayModalStatus: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
+
+  dayModalNoOrder: { padding: 24, alignItems: 'center' },
+  dayModalNoOrderText: { fontFamily: Fonts.body, fontSize: 15, color: Colors.textMuted },
+
+  dayModalSwapSection: { paddingHorizontal: 20, paddingTop: 4 },
+  dayModalSwapError: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger, marginBottom: 12 },
+  dayModalLockBanner: {
+    backgroundColor: Colors.background, borderRadius: 12, padding: 16, marginBottom: 12,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  dayModalLockText: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginBottom: 4 },
+  dayModalLockSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
+
+  // Meal rows in swap list
+  mealRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint,
+  },
+  mealRowCurrent: { opacity: 0.7 },
+  mealRowThumb: { width: 52, height: 52, borderRadius: 10, flexShrink: 0 },
+  mealRowPlaceholder: {
+    width: 52, height: 52, borderRadius: 10, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  mealRowCategory: { fontFamily: Fonts.bodyBold, fontSize: 18, color: Colors.primary },
+  mealRowInfo: { flex: 1 },
+  mealRowName: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginBottom: 3 },
+  mealRowMeta: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, textTransform: 'capitalize' },
+  mealRowCurrentBadge: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
 })

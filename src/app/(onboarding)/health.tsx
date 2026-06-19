@@ -8,12 +8,15 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { ChevronDown } from 'lucide-react-native'
 import { useOnboardingStore, type HealthGoal } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import SectionProgress from '@/components/SectionProgress'
 
 const GOALS: { id: HealthGoal; label: string; icon: string }[] = [
   { id: 'build-muscle', label: 'Build Muscle', icon: '💪' },
@@ -22,14 +25,29 @@ const GOALS: { id: HealthGoal; label: string; icon: string }[] = [
   { id: 'boost-energy', label: 'Boost Energy', icon: '⚡' },
 ]
 
-const EXERCISE_TYPES = ['Gym', 'Running', 'Yoga', 'Other', 'None']
-
-const FREQUENCIES = [
-  'Daily',
-  '3–4x per week',
-  '1–2x per week',
-  'Rarely or never',
+const EXERCISE_TYPES = [
+  'Gym / Weight Training',
+  'Running / Cardio',
+  'Yoga / Pilates',
+  'Sports',
+  'Walk',
+  'No regular exercise',
 ]
+
+// Exact strings — these drive the meal-count engine (src/lib/recommendation.ts).
+const FREQUENCIES = ['Daily', '4-5 times a week', '2-3 times a week', 'Rarely']
+
+const OCCUPATIONS = [
+  'Doctor',
+  'Student',
+  'Working Professional',
+  'Business Owner',
+  'Freelancer',
+  'Content Creator',
+  'Other',
+]
+
+const NO_EXERCISE = 'No regular exercise'
 
 export default function HealthScreen() {
   const router = useRouter()
@@ -38,19 +56,21 @@ export default function HealthScreen() {
 
   const [height, setHeight] = useState('')
   const [weight, setWeight] = useState('')
+  const [proteinTarget, setProteinTarget] = useState('')
   const [goal, setGoal] = useState<HealthGoal | null>(null)
   const [exerciseType, setExerciseType] = useState<string[]>([])
   const [frequency, setFrequency] = useState('')
   const [occupation, setOccupation] = useState('')
+  const [occupationOpen, setOccupationOpen] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   function toggleExercise(type: string) {
-    if (type === 'None') {
-      setExerciseType(['None'])
+    if (type === NO_EXERCISE) {
+      setExerciseType([NO_EXERCISE])
       return
     }
     setExerciseType((prev) => {
-      const without = prev.filter((t) => t !== 'None')
+      const without = prev.filter((t) => t !== NO_EXERCISE)
       return without.includes(type)
         ? without.filter((t) => t !== type)
         : [...without, type]
@@ -78,6 +98,7 @@ export default function HealthScreen() {
     setHealthProfile({
       height,
       weight,
+      proteinTarget,
       healthGoal: goal!,
       exerciseType,
       exerciseFrequency: frequency,
@@ -92,8 +113,8 @@ export default function HealthScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]} showsVerticalScrollIndicator={false}>
+        <SectionProgress current={1} />
         <View style={styles.header}>
-          <Text style={styles.step}>Step 1 of 6</Text>
           <Text style={styles.title}>Tell us about yourself</Text>
           <Text style={styles.subtitle}>We'll use this to build your personalised plan.</Text>
         </View>
@@ -126,6 +147,21 @@ export default function HealthScreen() {
             />
             {errors.weight ? <Text style={styles.error}>{errors.weight}</Text> : null}
           </View>
+        </View>
+
+        {/* Daily protein target (optional) */}
+        <View style={styles.field}>
+          <Text style={styles.label}>Daily protein target (g) <Text style={styles.optional}>(optional)</Text></Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. 120"
+            keyboardType="number-pad"
+            value={proteinTarget}
+            onChangeText={(t) => setProteinTarget(t.replace(/\D/g, ''))}
+            placeholderTextColor={Colors.textLight}
+            maxLength={3}
+          />
+          <Text style={styles.hint}>Helps us show how each meal contributes to your goal.</Text>
         </View>
 
         {/* Primary Goal */}
@@ -181,19 +217,40 @@ export default function HealthScreen() {
           ))}
         </View>
 
-        {/* Occupation (optional) */}
+        {/* Occupation (optional dropdown) */}
         <Text style={styles.sectionLabel}>Occupation <Text style={styles.optional}>(optional)</Text></Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Software Engineer"
-          value={occupation}
-          onChangeText={setOccupation}
-          placeholderTextColor={Colors.textLight}
-          maxLength={100}
-        />
+        <TouchableOpacity style={styles.dropdown} onPress={() => setOccupationOpen(true)}>
+          <Text style={[styles.dropdownText, !occupation && styles.dropdownPlaceholder]}>
+            {occupation || 'Select your occupation'}
+          </Text>
+          <ChevronDown size={18} color={Colors.textMuted} />
+        </TouchableOpacity>
 
-        <Button onPress={handleNext} style={{ marginTop: 8 }}>Next →</Button>
+        <Button onPress={handleNext} style={{ marginTop: 16 }}>Next →</Button>
       </ScrollView>
+
+      {/* Occupation picker */}
+      <Modal
+        visible={occupationOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setOccupationOpen(false)}
+      >
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setOccupationOpen(false)} />
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + 24 }]}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>Occupation</Text>
+          {OCCUPATIONS.map((opt) => (
+            <TouchableOpacity
+              key={opt}
+              style={styles.sheetOption}
+              onPress={() => { setOccupation(opt); setOccupationOpen(false) }}
+            >
+              <Text style={[styles.sheetOptionText, occupation === opt && styles.textPrimary]}>{opt}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   )
 }
@@ -201,13 +258,14 @@ export default function HealthScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scroll: { padding: 24, paddingBottom: 40 },
-  header: { marginBottom: 28 },
-  step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
+  header: { marginBottom: 24 },
   title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 6 },
   subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20 },
-  row2: { flexDirection: 'row', gap: 12, marginBottom: 24 },
+  row2: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   inputGroup: { flex: 1 },
+  field: { marginBottom: 20 },
   label: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text, marginBottom: 8 },
+  optional: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
   input: {
     backgroundColor: '#fff',
     borderWidth: 1.5,
@@ -220,6 +278,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   inputError: { borderColor: Colors.danger },
+  hint: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 6 },
   error: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 4, marginBottom: 4 },
   sectionLabel: { fontFamily: Fonts.headingSemi, fontSize: 15, color: Colors.text, marginBottom: 12, marginTop: 8 },
   goalGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
@@ -263,5 +322,29 @@ const styles = StyleSheet.create({
   radioActive: { borderColor: Colors.primary },
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.primary },
   radioLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text },
-  optional: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
+  dropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  dropdownText: { fontFamily: Fonts.body, fontSize: 16, color: Colors.text },
+  dropdownPlaceholder: { color: Colors.textLight },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+  },
+  sheetHandle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  sheetTitle: { fontFamily: Fonts.headingSemi, fontSize: 17, color: Colors.text, marginBottom: 8 },
+  sheetOption: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  sheetOptionText: { fontFamily: Fonts.body, fontSize: 15, color: Colors.text },
+  textPrimary: { color: Colors.primary, fontFamily: Fonts.bodySemi },
 })

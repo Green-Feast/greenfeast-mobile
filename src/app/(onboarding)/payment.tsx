@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { useOnboardingStore } from '@/store/onboarding'
@@ -16,6 +17,7 @@ import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
 import RazorpayWebView from '@/components/RazorpayWebView'
+import SectionProgress from '@/components/SectionProgress'
 
 type Method = 'razorpay' | 'cod'
 type Phase = 'summary' | 'creating' | 'checkout' | 'success'
@@ -52,6 +54,7 @@ function fmtRupees(paise: number) {
 
 export default function PaymentScreen() {
   const insets = useSafeAreaInsets()
+  const router = useRouter()
   const { setOnboarded, setHasSubscription, phone } = useAuthStore()
   const store = useOnboardingStore()
 
@@ -98,18 +101,15 @@ export default function PaymentScreen() {
       .single()
     if (addrErr) throw addrErr
 
-    // 2. Upsert dietary profile
+    // 2. Upsert dietary profile — only the basics collected pre-payment.
+    //    Detailed customisations are written by the post-payment customise screen,
+    //    so we must NOT overwrite those columns with empty values here.
     const { error: dietErr } = await supabase
       .from('dietary_profiles')
       .upsert({
         user_id: user.id,
         allergens: store.allergens,
         dietary_preference: store.dietaryPreference,
-        protein_preference: store.proteinPreference,
-        base_avoidance: store.baseAvoidance,
-        veggie_avoidance: store.veggieAvoidance,
-        spice_preference: store.spicePreference || null,
-        dressing_preference: store.dressingPreference || null,
         free_text: store.dietaryFreeText || null,
         health_goal: store.healthGoal,
         weight: store.weight || null,
@@ -120,8 +120,8 @@ export default function PaymentScreen() {
       }, { onConflict: 'user_id' })
     if (dietErr) throw dietErr
 
-    // 3. Upsert questionnaire response
-    if (store.q1Answer) {
+    // 3. Upsert questionnaire response (incl. derived constraints)
+    if (store.q1Answer && store.recommendation) {
       await supabase
         .from('questionnaire_responses')
         .upsert({
@@ -129,8 +129,9 @@ export default function PaymentScreen() {
           health_goal: store.healthGoal,
           q1_answer: store.q1Answer,
           q2_answer: store.q2Answer || null,
-          derived_menu: store.derivedMenu,
-          derived_addons: store.derivedAddons,
+          derived_menu: store.recommendation.menuType,
+          derived_addons: store.recommendation.derivedAddons,
+          derived_constraints: store.recommendation.derivedConstraints,
         }, { onConflict: 'user_id' })
     }
 
@@ -146,7 +147,7 @@ export default function PaymentScreen() {
         user_id: user.id,
         plan_id: store.planId,
         plan_name: store.planName || null,
-        menu_type: store.derivedMenu || null,
+        menu_type: store.recommendation?.menuType || null,
         status: 'pending',
         payment_method: method === 'cod' ? 'cod' : 'online',
         delivery_mode: store.deliveryMode,
@@ -194,7 +195,7 @@ export default function PaymentScreen() {
     }
 
     // 8. Create wallet (idempotent)
-    await supabase.from('wallets').upsert({ user_id: user.id, balance: 0 }, { onConflict: 'user_id' })
+    await supabase.from('wallets').upsert({ user_id: user.id, balance: 0 }, { onConflict: 'user_id', ignoreDuplicates: true })
 
     return sub.id
   }
@@ -264,6 +265,15 @@ export default function PaymentScreen() {
   async function handlePaymentSuccess(paymentId: string) {
     // Optimistically activate — webhook will also fire and do the same (idempotent)
     await activateSubscription(subscriptionId)
+    // Instantiate orders now too. The webhook also does this, but it depends on
+    // a publicly reachable function URL; doing it here guarantees the user's
+    // first deliveries exist the moment they land on My Plan. The unique
+    // (subscription_id, delivery_date) constraint makes the webhook's repeat safe.
+    const { data: { session } } = await supabase.auth.getSession()
+    await supabase.functions.invoke('instantiate-orders', {
+      body: { subscription_id: subscriptionId },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    })
     setPhase('success')
   }
 
@@ -280,6 +290,11 @@ export default function PaymentScreen() {
       const subId = await createRecords()
       setSubscriptionId(subId)
       await activateSubscription(subId)
+      const { data: { session } } = await supabase.auth.getSession()
+      await supabase.functions.invoke('instantiate-orders', {
+        body: { subscription_id: subId },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      })
       setPhase('success')
     } catch (e: any) {
       setError(e?.message ?? 'Dev skip failed')
@@ -317,6 +332,7 @@ export default function PaymentScreen() {
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 120 }]}
       >
+        <SectionProgress current={4} />
         <Text style={styles.title}>Complete your order</Text>
 
         {/* Order recap */}
@@ -426,10 +442,10 @@ export default function PaymentScreen() {
                 : `Payment confirmed.\nYour subscription is active!\nFirst delivery: ${firstDelivery}`}
             </Text>
             <Button
-              onPress={() => { store.reset() }}
+              onPress={() => router.replace('/(onboarding)/customise')}
               style={{ marginTop: 8 }}
             >
-              Go to home →
+              Finish setup →
             </Button>
           </View>
         </View>

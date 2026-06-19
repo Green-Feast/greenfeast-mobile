@@ -1,145 +1,189 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
-import { useRouter } from 'expo-router'
+import { useEffect, useState, useCallback } from 'react'
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native'
+import { useRouter, useFocusEffect } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useOnboardingStore } from '@/store/onboarding'
+import { Check } from 'lucide-react-native'
+import { supabase } from '@/lib/supabase'
+import { useOnboardingStore, type AddOnSelection } from '@/store/onboarding'
+import { MENU_LABELS, M2_INFO } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import SectionProgress from '@/components/SectionProgress'
 
-const ADDON_LABELS: Record<string, string> = {
-  'smoothie': 'Smoothie',
-  'exotic-fruits': 'Exotic Cut Fruits',
-  'cheese': 'Extra Cheese',
-}
+type Plan = { id: string; name: string; meals_total: number; base_price: number }
+type Addon = { id: string; name: string; description: string | null; price_per_meal: number }
 
-const MENU_LABELS: Record<string, string> = {
-  M1: 'Global Menu',
-  M2: 'Gut Health Menu',
-}
+// Representative protein per meal — makes the "toward your target" line concrete
+// without committing to a specific dish (real value varies 18–28g across the menu).
+const AVG_PROTEIN_PER_MEAL = 25
 
-const GOAL_LABELS: Record<string, string> = {
-  'build-muscle': 'building muscle',
-  'lose-weight': 'losing weight',
-  'improve-wellness': 'improving wellness',
-  'boost-energy': 'boosting energy',
-}
-
-function derivePlanName(goal: string, q1: string): string {
-  if (goal === 'build-muscle') return q1 === 'cut' ? 'Lean & Strong' : 'Fuel & Grow'
-  if (goal === 'lose-weight') {
-    if (q1 === 'bloating') return 'Gut Reset'
-    if (q1 === 'lean-out') return 'Lean & Clean'
-    return 'Balance & Heal'
-  }
-  if (goal === 'improve-wellness') return q1 === 'clean' ? 'Everyday Green' : 'Gut Health Pro'
-  return q1 === 'crash' ? 'Energy Reset' : 'Power Up'
+function fmt(paise: number) {
+  return `₹${(paise / 100).toLocaleString('en-IN')}`
 }
 
 export default function RecommendationScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { healthGoal, derivedMenu, derivedAddons, q1Answer, setPlan } = useOnboardingStore()
+  const { recommendation, allergens, proteinTarget, setPlan } = useOnboardingStore()
 
-  const planName = derivePlanName(healthGoal ?? '', q1Answer)
+  const [plans, setPlans] = useState<Plan[]>([])
+  const [addons, setAddons] = useState<Addon[]>([])
+  const [loading, setLoading] = useState(true)
 
-  function buildAddOnSelections() {
-    return derivedAddons.map((id) => ({
-      id,
-      name: ADDON_LABELS[id] ?? id,
-      pricePerMeal: id === 'smoothie' ? 6000 : id === 'exotic-fruits' ? 5000 : 3000,
-    }))
+  useEffect(() => {
+    Promise.all([
+      supabase.from('plans').select('*').eq('is_active', true),
+      supabase.from('addons').select('*').eq('is_active', true),
+    ]).then(([{ data: p }, { data: a }]) => {
+      setPlans((p ?? []) as Plan[])
+      setAddons((a ?? []) as Addon[])
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }, [])
+
+  // Guard: only redirect when this screen is actually focused (not during background re-renders)
+  useFocusEffect(
+    useCallback(() => {
+      if (!recommendation) router.replace('/(onboarding)/health')
+    }, [recommendation, router])
+  )
+
+  if (!recommendation) return null
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={Colors.primary} size="large" />
+      </View>
+    )
+  }
+
+  const { planName, tagline, menuType, derivedAddons, recommendedMealCount, recommendedPlanId } = recommendation
+
+  const plan = plans.find((p) => p.id === recommendedPlanId)
+  const trialPlan = plans.find((p) => p.id === 'trial')
+  const addonRows = addons.filter((a) => derivedAddons.includes(a.id))
+  const addonPerMeal = addonRows.reduce((s, a) => s + a.price_per_meal, 0)
+
+  const perMealAllIn = plan ? Math.round(plan.base_price / plan.meals_total) + addonPerMeal : 0
+  const total = plan ? plan.base_price + addonPerMeal * plan.meals_total : 0
+  const trialTotal = trialPlan ? trialPlan.base_price + addonPerMeal * trialPlan.meals_total : 0
+
+  const proteinNum = parseInt(proteinTarget)
+  const showProtein = !isNaN(proteinNum) && proteinNum > 0
+
+  function buildAddOns(): AddOnSelection[] {
+    return addonRows.map((a) => ({ id: a.id, name: a.name, pricePerMeal: a.price_per_meal }))
   }
 
   function handleAccept() {
-    setPlan('plan30', planName, buildAddOnSelections())
+    setPlan(recommendedPlanId, planName, buildAddOns())
     router.push('/(onboarding)/days')
   }
 
   function handleTrial() {
-    setPlan('trial', planName, buildAddOnSelections())
+    setPlan('trial', planName, buildAddOns())
     router.push('/(onboarding)/days')
-  }
-
-  function handleChooseDifferent() {
-    router.push('/(onboarding)/plan')
   }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}>
-      <View style={styles.header}>
-        <Text style={styles.step}>Step 4 of 6</Text>
-        <Text style={styles.title}>Your personalised plan</Text>
-        <Text style={styles.subtitle}>
-          Based on your goal of {GOAL_LABELS[healthGoal ?? ''] ?? 'wellness'}
-        </Text>
-      </View>
+      <SectionProgress current={3} />
 
       {/* Main plan card */}
       <View style={styles.planCard}>
         <View style={styles.planCardTop}>
+          <Text style={styles.eyebrow}>Built for you</Text>
           <Text style={styles.planName}>{planName}</Text>
-
-          {derivedMenu && (
-            <View style={styles.menuBadge}>
-              <Text style={styles.menuBadgeText}>{MENU_LABELS[derivedMenu]}</Text>
-            </View>
-          )}
-
-          {derivedMenu === 'M2' && (
-            <Text style={styles.menuDesc}>
-              Built around anti-inflammatory ingredients and gut-friendly portions.
-            </Text>
-          )}
+          <Text style={styles.tagline}>{tagline}</Text>
+          <View style={styles.menuBadge}>
+            <Text style={styles.menuBadgeText}>{MENU_LABELS[menuType]}</Text>
+          </View>
         </View>
 
         <View style={styles.divider} />
 
         <View style={styles.planCardBottom}>
-          <View style={styles.mealsRow}>
-            <Text style={styles.mealCount}>30</Text>
-            <Text style={styles.mealCountLabel}>meals</Text>
-            <Text style={styles.mealCountSub}>· Monthly plan · ₹7,499</Text>
+          {/* Checklist */}
+          <View style={styles.checklist}>
+            {addonRows.map((a) => (
+              <ChecklistItem key={a.id} label={`${a.name} included`} />
+            ))}
+            <ChecklistItem label={`${recommendedMealCount} meals a month`} />
+            <ChecklistItem label="No repeat meals for 12+ days" />
           </View>
 
-          {derivedAddons.length > 0 && (
-            <View style={styles.addonsRow}>
-              <Text style={styles.addonsLabel}>Recommended add-ons:</Text>
-              <View style={styles.addonPills}>
-                {derivedAddons.map((id) => (
-                  <View key={id} style={styles.addonPill}>
-                    <Text style={styles.addonPillText}>{ADDON_LABELS[id] ?? id}</Text>
-                  </View>
-                ))}
-              </View>
+          {/* Allergen trust badges */}
+          {allergens.length > 0 && (
+            <View style={styles.badgeRow}>
+              {allergens.map((a) => (
+                <View key={a} style={styles.badge}>
+                  <Text style={styles.badgeText}>{a} Free</Text>
+                </View>
+              ))}
             </View>
           )}
+
+          {showProtein && (
+            <Text style={styles.proteinLine}>
+              Each meal contributes ~{AVG_PROTEIN_PER_MEAL}g protein toward your {proteinNum}g daily target.
+            </Text>
+          )}
+
+          {/* Price */}
+          <View style={styles.priceRow}>
+            <Text style={styles.perMeal}>{fmt(perMealAllIn)}<Text style={styles.perMealUnit}>/meal</Text></Text>
+            <Text style={styles.total}>{fmt(total)} total</Text>
+          </View>
+
+          <Text style={styles.social}>People on the {planName} plan stick with it longer.</Text>
         </View>
       </View>
 
+      {/* M2 informational moment — describes the menu flavour, not the plan name */}
+      {menuType === 'M2' && (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoMenuLabel}>YOUR MENU STYLE</Text>
+          <Text style={styles.infoTitle}>{M2_INFO.title}</Text>
+          <Text style={styles.infoBody}>{M2_INFO.body}</Text>
+        </View>
+      )}
+
+      <Button onPress={handleAccept} style={{ marginBottom: 16 }}>Get this plan →</Button>
+
       {/* Trial sub-card */}
+      <Text style={styles.trialPrompt}>Not ready for full commitment?</Text>
       <TouchableOpacity style={styles.trialCard} onPress={handleTrial}>
         <View>
-          <Text style={styles.trialTitle}>Try this as a 5-meal plan first</Text>
-          <Text style={styles.trialSub}>Small commitment · ₹1,499</Text>
+          <Text style={styles.trialTitle}>Try 5 meals first</Text>
+          <Text style={styles.trialSub}>Same plan, same add-ons · {fmt(trialTotal)}</Text>
         </View>
         <Text style={styles.trialArrow}>→</Text>
       </TouchableOpacity>
+      <Text style={styles.trialFootnote}>Small commitments lead to great results.</Text>
 
-      <Button onPress={handleAccept} style={{ marginBottom: 14 }}>Yes, I'll try this →</Button>
-
-      <TouchableOpacity style={styles.rejectLink} onPress={handleChooseDifferent}>
-        <Text style={styles.rejectLinkText}>Choose a different plan</Text>
+      <TouchableOpacity style={styles.rejectLink} onPress={() => router.push('/(onboarding)/plan')}>
+        <Text style={styles.rejectLinkText}>or choose a different plan</Text>
       </TouchableOpacity>
     </ScrollView>
   )
 }
 
+function ChecklistItem({ label }: { label: string }) {
+  return (
+    <View style={styles.checkItem}>
+      <View style={styles.checkIcon}>
+        <Check size={13} color="#fff" strokeWidth={3} />
+      </View>
+      <Text style={styles.checkLabel}>{label}</Text>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
   container: { flex: 1, backgroundColor: Colors.background },
   scroll: { padding: 24, paddingBottom: 48 },
-  header: { marginBottom: 24 },
-  step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 6 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
   planCard: {
     backgroundColor: '#fff',
     borderRadius: 20,
@@ -154,38 +198,52 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   planCardTop: { padding: 24, backgroundColor: Colors.primaryLight },
-  planName: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.primary, marginBottom: 10 },
+  eyebrow: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
+  planName: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 6 },
+  tagline: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20, marginBottom: 14 },
   menuBadge: {
     alignSelf: 'flex-start',
     backgroundColor: Colors.primary,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    marginBottom: 8,
   },
   menuBadgeText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: '#fff' },
-  menuDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 18 },
   divider: { height: 1, backgroundColor: Colors.border },
   planCardBottom: { padding: 24 },
-  mealsRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginBottom: 16 },
-  mealCount: { fontFamily: Fonts.heading, fontSize: 36, color: Colors.text },
-  mealCountLabel: { fontFamily: Fonts.headingSemi, fontSize: 18, color: Colors.text },
-  mealCountSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
-  addonsRow: { gap: 8 },
-  addonsLabel: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
-  addonPills: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  addonPill: {
-    backgroundColor: Colors.primaryLight,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+  checklist: { gap: 12, marginBottom: 18 },
+  checkItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  checkIcon: {
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center',
   },
-  addonPillText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
+  checkLabel: { fontFamily: Fonts.bodyMed, fontSize: 15, color: Colors.text },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 },
+  badge: { backgroundColor: Colors.background, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: Colors.border },
+  badgeText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted },
+  proteinLine: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 18, marginBottom: 18 },
+  priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginBottom: 8 },
+  perMeal: { fontFamily: Fonts.heading, fontSize: 34, color: Colors.text },
+  perMealUnit: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.textMuted },
+  total: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
+  social: { fontFamily: Fonts.body, fontSize: 13, color: Colors.primary },
+  infoCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+  },
+  infoMenuLabel: { fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 },
+  infoTitle: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.text, marginBottom: 6 },
+  infoBody: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19 },
+  trialPrompt: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, marginBottom: 10 },
   trialCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 18,
-    marginBottom: 20,
+    marginBottom: 8,
     borderWidth: 1.5,
     borderColor: Colors.border,
     flexDirection: 'row',
@@ -195,6 +253,7 @@ const styles = StyleSheet.create({
   trialTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text, marginBottom: 4 },
   trialSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
   trialArrow: { fontFamily: Fonts.bodyBold, fontSize: 20, color: Colors.primary },
+  trialFootnote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginBottom: 24 },
   rejectLink: { alignItems: 'center' },
   rejectLinkText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, textDecorationLine: 'underline' },
 })

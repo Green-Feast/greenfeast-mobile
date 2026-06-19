@@ -1,9 +1,9 @@
-import { Slot } from 'expo-router'
+import { Stack } from 'expo-router'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 
 export default function AppLayout() {
-  // Register / refresh the Expo push token whenever the authenticated user
-  // enters the app section. Non-fatal if device is a simulator or user denies.
   usePushNotifications()
-  return <Slot />
+  // Stack instead of Slot so that screens pushed on top of tabs (e.g.
+  // plan-settings) have a real navigation history and back-swipe works.
+  return <Stack screenOptions={{ headerShown: false }} />
 }

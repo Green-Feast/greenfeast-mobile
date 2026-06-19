@@ -14,98 +14,33 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import SectionProgress from '@/components/SectionProgress'
 
-const ALLERGENS = ['Peanuts', 'Shellfish', 'Dairy', 'Sesame', 'Soy', 'Nuts', 'Gluten', 'Egg']
+// Allergens are safety-critical and shown as trust badges on the recommendation
+// screen (stack-logic.txt §03). Detailed customisations are collected later, on
+// the post-payment customise screen.
+const ALLERGENS = ['Peanuts', 'Dairy', 'Quinoa', 'Soy', 'Nuts', 'Gluten', 'Lactose']
 const DIETARY_PREFS = [
   { id: 'none', label: 'No restriction' },
   { id: 'vegetarian', label: 'Vegetarian' },
   { id: 'vegan', label: 'Vegan' },
 ] as const
 
-const PROTEINS = ['Paneer', 'Tofu']
-const BASES = ['Quinoa', 'Couscous', 'Rice', 'Pasta', 'Soba noodles']
-const VEGGIES = ['Bell pepper', 'Mushroom', 'Broccoli', 'Onion']
-const SPICES = ['Mild', 'Medium', 'Spicy'] as const
-const DRESSINGS = ['Mixed in', 'On the side'] as const
-
-function MultiPill({
-  options,
-  selected,
-  onToggle,
-}: {
-  options: string[]
-  selected: string[]
-  onToggle: (val: string) => void
-}) {
-  return (
-    <View style={styles.pillRow}>
-      {options.map((opt) => (
-        <TouchableOpacity
-          key={opt}
-          style={[styles.pill, selected.includes(opt) && styles.pillActive]}
-          onPress={() => onToggle(opt)}
-        >
-          <Text style={[styles.pillText, selected.includes(opt) && styles.pillTextActive]}>
-            {opt}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  )
-}
-
-function RadioRow({
-  options,
-  selected,
-  onSelect,
-}: {
-  options: readonly string[]
-  selected: string
-  onSelect: (val: string) => void
-}) {
-  return (
-    <View style={styles.radioGroup}>
-      {options.map((opt) => (
-        <TouchableOpacity key={opt} style={styles.radioRow} onPress={() => onSelect(opt)}>
-          <View style={[styles.radio, selected === opt && styles.radioActive]}>
-            {selected === opt && <View style={styles.radioDot} />}
-          </View>
-          <Text style={styles.radioLabel}>{opt}</Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  )
-}
-
 export default function DietaryScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { setDietary } = useOnboardingStore()
+  const { setDietaryBasics } = useOnboardingStore()
 
   const [allergens, setAllergens] = useState<string[]>([])
   const [dietaryPref, setDietaryPref] = useState<'none' | 'vegetarian' | 'vegan'>('none')
-  const [proteinPref, setProteinPref] = useState<string[]>([])
-  const [baseAvoidance, setBaseAvoidance] = useState<string[]>([])
-  const [veggieAvoidance, setVeggieAvoidance] = useState<string[]>([])
-  const [spice, setSpice] = useState<'Mild' | 'Medium' | 'Spicy' | ''>('')
-  const [dressing, setDressing] = useState<'Mixed in' | 'On the side' | ''>('')
   const [freeText, setFreeText] = useState('')
 
-  function toggle(arr: string[], val: string, setter: (v: string[]) => void) {
-    setter(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val])
+  function toggleAllergen(val: string) {
+    setAllergens((prev) => (prev.includes(val) ? prev.filter((x) => x !== val) : [...prev, val]))
   }
 
   function handleNext() {
-    setDietary({
-      allergens,
-      dietaryPreference: dietaryPref,
-      proteinPreference: proteinPref,
-      baseAvoidance,
-      veggieAvoidance,
-      spicePreference: spice.toLowerCase() as any,
-      dressingPreference: dressing === 'Mixed in' ? 'mixed-in' : dressing === 'On the side' ? 'on-the-side' : '',
-      dietaryFreeText: freeText,
-    })
+    setDietaryBasics({ allergens, dietaryPreference: dietaryPref, dietaryFreeText: freeText })
     router.push('/(onboarding)/loading')
   }
 
@@ -115,29 +50,40 @@ export default function DietaryScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]} showsVerticalScrollIndicator={false}>
+        <SectionProgress current={2} />
         <View style={styles.header}>
-          <Text style={styles.step}>Step 3 of 6</Text>
-          <Text style={styles.title}>Dietary preferences</Text>
-          <Text style={styles.subtitle}>We'll customise your meals around these.</Text>
+          <Text style={styles.title}>Allergies & diet</Text>
+          <Text style={styles.subtitle}>We'll never put these in your meals.</Text>
         </View>
 
         {/* Allergens */}
-        <Section title="Allergies" subtitle="Select all that apply">
-          <MultiPill
-            options={ALLERGENS}
-            selected={allergens}
-            onToggle={(v) => toggle(allergens, v, setAllergens)}
-          />
-        </Section>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Allergies</Text>
+          <Text style={styles.sectionSubtitle}>Select all that apply</Text>
+          <View style={styles.pillRow}>
+            {ALLERGENS.map((opt) => (
+              <TouchableOpacity
+                key={opt}
+                style={[styles.pill, allergens.includes(opt) && styles.pillActive]}
+                onPress={() => toggleAllergen(opt)}
+              >
+                <Text style={[styles.pillText, allergens.includes(opt) && styles.pillTextActive]}>
+                  {opt}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
         {/* Dietary preference */}
-        <Section title="Dietary preference">
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Dietary preference</Text>
           <View style={styles.radioGroup}>
             {DIETARY_PREFS.map((opt) => (
               <TouchableOpacity
                 key={opt.id}
                 style={styles.radioRow}
-                onPress={() => setDietaryPref(opt.id as any)}
+                onPress={() => setDietaryPref(opt.id)}
               >
                 <View style={[styles.radio, dietaryPref === opt.id && styles.radioActive]}>
                   {dietaryPref === opt.id && <View style={styles.radioDot} />}
@@ -146,50 +92,15 @@ export default function DietaryScreen() {
               </TouchableOpacity>
             ))}
           </View>
-        </Section>
-
-        {/* Protein preference */}
-        <Section title="Protein preference" subtitle="What proteins do you prefer?">
-          <MultiPill
-            options={PROTEINS}
-            selected={proteinPref}
-            onToggle={(v) => toggle(proteinPref, v, setProteinPref)}
-          />
-        </Section>
-
-        {/* Base avoidance */}
-        <Section title="Bases to avoid" subtitle="We'll leave these out of your bowls">
-          <MultiPill
-            options={BASES}
-            selected={baseAvoidance}
-            onToggle={(v) => toggle(baseAvoidance, v, setBaseAvoidance)}
-          />
-        </Section>
-
-        {/* Veggie avoidance */}
-        <Section title="Vegetables to skip">
-          <MultiPill
-            options={VEGGIES}
-            selected={veggieAvoidance}
-            onToggle={(v) => toggle(veggieAvoidance, v, setVeggieAvoidance)}
-          />
-        </Section>
-
-        {/* Spice */}
-        <Section title="Spice level">
-          <RadioRow options={SPICES} selected={spice} onSelect={(v) => setSpice(v as any)} />
-        </Section>
-
-        {/* Dressing */}
-        <Section title="Dressing">
-          <RadioRow options={DRESSINGS} selected={dressing} onSelect={(v) => setDressing(v as any)} />
-        </Section>
+        </View>
 
         {/* Free text */}
-        <Section title="Anything else?" subtitle="Optional">
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Any other allergies?</Text>
+          <Text style={styles.sectionSubtitle}>Optional</Text>
           <TextInput
             style={styles.textarea}
-            placeholder="e.g. I'm gluten intolerant, love spicy food, avoid raw onion"
+            placeholder="e.g. Sesame, shellfish, specific intolerances"
             value={freeText}
             onChangeText={setFreeText}
             multiline
@@ -199,7 +110,7 @@ export default function DietaryScreen() {
             textAlignVertical="top"
           />
           <Text style={styles.charCount}>{freeText.length}/250</Text>
-        </Section>
+        </View>
 
         <Button onPress={handleNext} style={{ marginTop: 8 }}>Next →</Button>
       </ScrollView>
@@ -207,29 +118,10 @@ export default function DietaryScreen() {
   )
 }
 
-function Section({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string
-  subtitle?: string
-  children: React.ReactNode
-}) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {subtitle && <Text style={styles.sectionSubtitle}>{subtitle}</Text>}
-      {children}
-    </View>
-  )
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scroll: { padding: 24, paddingBottom: 40 },
   header: { marginBottom: 28 },
-  step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
   title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 6 },
   subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
   section: { marginBottom: 24 },

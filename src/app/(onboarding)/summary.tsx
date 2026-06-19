@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import SectionProgress from '@/components/SectionProgress'
 
 type Plan = { id: string; name: string; meals_total: number; base_price: number }
 
@@ -57,8 +58,8 @@ export default function SummaryScreen() {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]} showsVerticalScrollIndicator={false}>
+        <SectionProgress current={4} />
         <View style={styles.header}>
-          <Text style={styles.step}>Step 7 of 7</Text>
           <Text style={styles.title}>Your subscription</Text>
         </View>
 
@@ -99,8 +100,6 @@ export default function SummaryScreen() {
           {store.dietaryPreference !== 'none' && (
             <Row label="Preference" value={store.dietaryPreference.charAt(0).toUpperCase() + store.dietaryPreference.slice(1)} />
           )}
-          {store.spicePreference ? <Row label="Spice" value={store.spicePreference} /> : null}
-          {store.dressingPreference ? <Row label="Dressing" value={store.dressingPreference === 'mixed-in' ? 'Mixed in' : 'On the side'} /> : null}
           {store.dietaryFreeText ? (
             <View style={styles.noteBox}>
               <Text style={styles.noteText}>{store.dietaryFreeText}</Text>

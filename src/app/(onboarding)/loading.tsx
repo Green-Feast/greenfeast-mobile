@@ -4,10 +4,10 @@ import { useRouter } from 'expo-router'
 import { Colors, Fonts } from '@/constants/colors'
 
 const STEPS = [
-  'Analysing your fitness goals...',
-  'Checking your allergens...',
-  'Matching meals to your preferences...',
-  'Selecting your plan...',
+  'Calculating your daily protein requirement...',
+  'Matching meals to your goal and dietary needs...',
+  'Filtering out allergens and restrictions...',
+  'Building your personalised plan...',
 ]
 
 export default function LoadingScreen() {

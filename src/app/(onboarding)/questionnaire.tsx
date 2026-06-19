@@ -1,50 +1,12 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
-import { useOnboardingStore, type MenuType } from '@/store/onboarding'
+import { useRouter, useFocusEffect } from 'expo-router'
+import { useOnboardingStore } from '@/store/onboarding'
+import { computeRecommendation } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-
-// ── Recommendation logic ─────────────────────────────────────────────────────
-
-type RecommendationResult = {
-  planName: string
-  menuType: MenuType
-  derivedAddons: string[]  // addon IDs from DB
-}
-
-function computeRecommendation(
-  goal: string,
-  q1: string,
-  q2: string,
-): RecommendationResult {
-  if (goal === 'build-muscle') {
-    if (q1 === 'cut') return { planName: 'Lean & Strong', menuType: 'M1', derivedAddons: ['exotic-fruits'] }
-    return { planName: 'Fuel & Grow', menuType: 'M1', derivedAddons: ['smoothie', 'exotic-fruits'] }
-  }
-  if (goal === 'lose-weight') {
-    if (q1 === 'bloating') {
-      return {
-        planName: 'Gut Reset',
-        menuType: 'M2',
-        derivedAddons: q2 === 'exercise' ? ['exotic-fruits'] : [],
-      }
-    }
-    if (q1 === 'lean-out') {
-      return { planName: 'Lean & Clean', menuType: 'M1', derivedAddons: ['exotic-fruits'] }
-    }
-    // health condition
-    return { planName: 'Balance & Heal', menuType: 'M2', derivedAddons: ['exotic-fruits'] }
-  }
-  if (goal === 'improve-wellness') {
-    if (q1 === 'clean') return { planName: 'Everyday Green', menuType: 'M1', derivedAddons: [] }
-    return { planName: 'Gut Health Pro', menuType: 'M2', derivedAddons: ['exotic-fruits'] }
-  }
-  // boost-energy
-  if (q1 === 'crash') return { planName: 'Energy Reset', menuType: 'M1', derivedAddons: ['exotic-fruits'] }
-  return { planName: 'Power Up', menuType: 'M1', derivedAddons: ['exotic-fruits'] }
-}
+import SectionProgress from '@/components/SectionProgress'
 
 // ── Questions by goal ─────────────────────────────────────────────────────────
 
@@ -105,14 +67,17 @@ const QUESTIONS: Record<string, QuestionSet> = {
 export default function QuestionnaireScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { healthGoal, setQuestionnaire } = useOnboardingStore()
+  const { healthGoal, exerciseFrequency, setQuestionnaire } = useOnboardingStore()
   const [q1Answer, setQ1Answer] = useState('')
   const [q2Answer, setQ2Answer] = useState('')
 
-  if (!healthGoal) {
-    router.replace('/(onboarding)/health')
-    return null
-  }
+  useFocusEffect(
+    useCallback(() => {
+      if (!healthGoal) router.replace('/(onboarding)/health')
+    }, [healthGoal, router])
+  )
+
+  if (!healthGoal) return null
 
   const qs = QUESTIONS[healthGoal]
   const needsQ2 = !!qs.q2
@@ -120,21 +85,20 @@ export default function QuestionnaireScreen() {
 
   function handleNext() {
     if (!canProceed) return
-    const { planName, menuType, derivedAddons } = computeRecommendation(healthGoal!, q1Answer, q2Answer)
-    setQuestionnaire({
-      q1Answer,
-      q2Answer,
-      derivedMenu: menuType,
-      derivedAddons,
+    const recommendation = computeRecommendation({
+      goal: healthGoal!,
+      q1: q1Answer,
+      q2: q2Answer,
+      exerciseFrequency,
     })
-    // planName is saved later when user accepts recommendation
+    setQuestionnaire({ q1Answer, q2Answer, recommendation })
     router.push('/(onboarding)/dietary')
   }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}>
+      <SectionProgress current={2} />
       <View style={styles.header}>
-        <Text style={styles.step}>Step 2 of 6</Text>
         <Text style={styles.title}>A few quick questions</Text>
         <Text style={styles.subtitle}>Help us get your plan right.</Text>
       </View>

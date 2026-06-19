@@ -9,6 +9,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Dimensions,
+  Image,
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
@@ -28,6 +29,7 @@ type Meal = {
   carbs: number | null
   fat: number | null
   tags: string[]
+  image_url?: string | null
 }
 
 const CATEGORIES = [
@@ -59,14 +61,19 @@ export default function MenuScreen() {
   const [selected, setSelected] = useState<Meal | null>(null)
 
   useEffect(() => {
-    supabase
-      .from('meal_templates')
-      .select('*')
-      .eq('is_active', true)
-      .then(({ data }) => {
+    ;(async () => {
+      try {
+        const { data } = await supabase
+          .from('meal_templates')
+          .select('*')
+          .eq('is_active', true)
         setMeals(data ?? [])
+      } catch {
+        // transient/network — stop the spinner regardless
+      } finally {
         setLoading(false)
-      })
+      }
+    })()
   }, [])
 
   const filtered = activeCategory === 'all'
@@ -113,9 +120,13 @@ export default function MenuScreen() {
           columnWrapperStyle={styles.row}
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.card} onPress={() => setSelected(item)}>
-              <View style={styles.cardEmoji}>
-                <Text style={styles.emojiText}>{CATEGORY_EMOJIS[item.category] ?? '🍽️'}</Text>
-              </View>
+              {item.image_url ? (
+                <Image source={{ uri: item.image_url }} style={styles.cardImage} />
+              ) : (
+                <View style={styles.cardEmoji}>
+                  <Text style={styles.emojiText}>{CATEGORY_EMOJIS[item.category] ?? '🍽️'}</Text>
+                </View>
+              )}
               <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
               <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>
               {item.tags.length > 0 && (
@@ -142,9 +153,13 @@ export default function MenuScreen() {
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
             <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.sheetEmoji}>
-                <Text style={styles.sheetEmojiText}>{CATEGORY_EMOJIS[selected.category] ?? '🍽️'}</Text>
-              </View>
+              {selected.image_url ? (
+                <Image source={{ uri: selected.image_url }} style={styles.sheetImage} />
+              ) : (
+                <View style={styles.sheetEmoji}>
+                  <Text style={styles.sheetEmojiText}>{CATEGORY_EMOJIS[selected.category] ?? '🍽️'}</Text>
+                </View>
+              )}
               <View style={styles.sheetBody}>
                 <Text style={styles.sheetName}>{selected.name}</Text>
                 <Text style={styles.sheetPrice}>{formatPrice(selected.price)}</Text>
@@ -227,6 +242,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  cardImage: { width: '100%', height: 100, borderRadius: 10, marginBottom: 8 },
   cardEmoji: {
     width: 56,
     height: 56,
@@ -264,6 +280,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 8,
   },
+  sheetImage: { width: '100%', height: 200, borderRadius: 16, marginBottom: 16 },
   sheetEmoji: {
     height: 120,
     backgroundColor: Colors.primaryLight,
