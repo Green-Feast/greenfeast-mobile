@@ -83,6 +83,17 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({ subscription_id: paymentRow.subscription_id }),
         }).catch(err => console.error('Failed to trigger instantiate-orders:', err))
+
+        // Fund the wallet (authoritative server-side credit; idempotent on
+        // subscription_id, so the app's optimistic call won't double-count).
+        await fetch(`${SUPABASE_URL}/functions/v1/fund-subscription-wallet`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SERVICE_KEY}`,
+          },
+          body: JSON.stringify({ subscription_id: paymentRow.subscription_id }),
+        }).catch(err => console.error('Failed to trigger fund-subscription-wallet:', err))
       }
     }
 

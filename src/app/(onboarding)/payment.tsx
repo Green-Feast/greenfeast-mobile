@@ -215,6 +215,17 @@ export default function PaymentScreen() {
     setHasSubscription(true) // sub is now active — unlock My Plan tab without app reload
   }
 
+  // Credit the wallet with the plan's grand total (computed server-side). The
+  // wallet is the billing ledger — meals debit from this opening balance.
+  // Idempotent (reference_id = subscription_id), so the webhook repeating is safe.
+  async function fundWallet(subId: string) {
+    const { data: { session } } = await supabase.auth.getSession()
+    await supabase.functions.invoke('fund-subscription-wallet', {
+      body: { subscription_id: subId },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    })
+  }
+
   async function handleProceed() {
     setError('')
     setPhase('creating')
@@ -236,6 +247,9 @@ export default function PaymentScreen() {
           await supabase.from('users').update({ onboarded: true }).eq('id', user.id)
           setOnboarded(true)
         }
+        // CoD: cash is collected on delivery, but we fund the wallet now so the
+        // ledger reflects the plan total and per-meal debits draw it down.
+        await fundWallet(subId)
         setHasSubscription(true) // limited CoD plan — first meal + pay banner
         setPhase('success')
         return
@@ -274,6 +288,7 @@ export default function PaymentScreen() {
       body: { subscription_id: subscriptionId },
       headers: { Authorization: `Bearer ${session?.access_token}` },
     })
+    await fundWallet(subscriptionId)
     setPhase('success')
   }
 
@@ -295,6 +310,7 @@ export default function PaymentScreen() {
         body: { subscription_id: subId },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       })
+      await fundWallet(subId) // gives the wallet real (test) money to exercise billing
       setPhase('success')
     } catch (e: any) {
       setError(e?.message ?? 'Dev skip failed')
