@@ -80,7 +80,8 @@ async function processSubscription(supabase: any, subId: string): Promise<number
 
   for (const date of next14Days()) {
     const dow = DOW_NAMES[date.getUTCDay()]
-    const dowNum = date.getUTCDay() // 0=Sun, 1=Mon, ..., 6=Sat
+    // weekly_menu uses Mon=0..Sun=6 to match the Kitchen admin UI convention
+    const dowNum = (date.getUTCDay() + 6) % 7
     const dateStr = toISO(date)
 
     // Skip pause range
