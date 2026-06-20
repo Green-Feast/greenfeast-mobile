@@ -15,10 +15,14 @@ export default function GateScreen() {
 
   async function handleExplore() {
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    await supabase.from('users').update({ onboarded: true }).eq('id', user!.id)
-    setOnboarded(true)
-    // _layout.tsx gate redirects to app automatically
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      await supabase.from('users').update({ onboarded: true }).eq('id', user!.id)
+      setOnboarded(true)
+      router.replace('/(app)/(tabs)')
+    } catch {
+      setLoading(false)
+    }
   }
 
   return (
