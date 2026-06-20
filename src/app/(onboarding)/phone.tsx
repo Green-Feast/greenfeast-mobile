@@ -55,7 +55,7 @@ export default function OnboardingPhoneScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={[styles.inner, { paddingTop: insets.top + 24 }]}>
         <Text style={styles.step}>Verification</Text>

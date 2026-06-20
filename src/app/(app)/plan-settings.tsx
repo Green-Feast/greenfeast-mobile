@@ -591,7 +591,7 @@ function DietaryModal({ visible, userId, onClose, onDone }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={m.overlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <View style={[m.sheet, { maxHeight: '90%', flex: 1 }]}>
             <View style={m.handle} />
             <SheetHeader title="Dietary preferences" onClose={onClose} />
@@ -725,7 +725,7 @@ function AddressModal({ visible, userId, onClose, onDone }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={m.overlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <View style={[m.sheet, { maxHeight: '85%', flex: 1 }]}>
             <View style={m.handle} />
             <SheetHeader title="Delivery address" onClose={onClose} />
