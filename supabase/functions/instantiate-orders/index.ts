@@ -51,18 +51,22 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       .eq('menu_type', sub.menu_type ?? 'M1'),
   ])
 
-  if (!schedule || schedule.length === 0) return 0
-
   // day_of_week → meal_template_id lookup from subscription_schedule (fallback)
   const scheduleMap: Record<string, string> = {}
-  for (const row of schedule) scheduleMap[row.day_of_week] = row.meal_template_id
+  for (const row of (schedule ?? [])) {
+    if (row.meal_template_id) scheduleMap[row.day_of_week] = row.meal_template_id
+  }
 
-  // (day_of_week, meal_slot) → meal_template_id lookup from weekly_menu
-  const weeklyMenuMap: Record<string, Record<string, string>> = {}
+  // (day_of_week integer, meal_slot) → meal_template_id lookup from weekly_menu
+  const weeklyMenuMap: Record<number, Record<string, string>> = {}
   for (const row of (weeklyMenus ?? [])) {
     if (!weeklyMenuMap[row.day_of_week]) weeklyMenuMap[row.day_of_week] = {}
-    weeklyMenuMap[row.day_of_week][row.meal_slot] = row.meal_template_id
+    if (row.meal_template_id) weeklyMenuMap[row.day_of_week][row.meal_slot] = row.meal_template_id
   }
+
+  // Bail only if neither source has any meals to offer
+  const hasScheduleDays = Object.keys(scheduleMap).length > 0
+  if (!hasScheduleDays && Object.keys(weeklyMenuMap).length === 0) return 0
 
   // ingredient snapshot cache — avoids re-querying the same meal template
   const ingredientCache: Record<string, any[]> = {}
@@ -86,6 +90,9 @@ async function processSubscription(supabase: any, subId: string): Promise<number
 
     // Skip pause range
     if (sub.pause_from && sub.pause_until && dateStr >= sub.pause_from && dateStr <= sub.pause_until) continue
+
+    // If the subscription has explicit delivery days, honour them — don't deliver on off days
+    if (hasScheduleDays && !Object.prototype.hasOwnProperty.call(scheduleMap, dow)) continue
 
     const slots: Array<'lunch' | 'dinner'> = []
     if ((sub.meals_lunch ?? 1) > 0) slots.push('lunch')
