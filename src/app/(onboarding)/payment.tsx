@@ -84,22 +84,37 @@ export default function PaymentScreen() {
     const { data: profile } = await supabase.from('users').select('name').eq('id', user.id).single()
     setUserName(profile?.name ?? (user.user_metadata?.full_name as string) ?? '')
 
-    // 1. Create address
-    const { data: addr, error: addrErr } = await supabase
+    // 1. Upsert address — address.tsx may have already written this incrementally;
+    //    if a default address exists for the user, update it in-place instead of
+    //    creating a duplicate.
+    const addressFields = {
+      user_id: user.id,
+      label: store.addressLabel,
+      type: store.addressType,
+      line1: store.addressLine1,
+      city: 'Jaipur',
+      pincode: store.addressPincode,
+      landmark: store.addressLandmark || null,
+      is_default: true,
+    }
+    const { data: existingAddr } = await supabase
       .from('addresses')
-      .insert({
-        user_id: user.id,
-        label: store.addressLabel,
-        type: store.addressType,
-        line1: store.addressLine1,
-        city: 'Jaipur',
-        pincode: store.addressPincode,
-        landmark: store.addressLandmark || null,
-        is_default: true,
-      })
       .select('id')
-      .single()
-    if (addrErr) throw addrErr
+      .eq('user_id', user.id)
+      .eq('is_default', true)
+      .maybeSingle()
+
+    let addrId: string
+    if (existingAddr) {
+      const { error: addrErr } = await supabase.from('addresses').update(addressFields).eq('id', existingAddr.id)
+      if (addrErr) throw addrErr
+      addrId = existingAddr.id
+    } else {
+      const { data: addr, error: addrErr } = await supabase.from('addresses').insert(addressFields).select('id').single()
+      if (addrErr) throw addrErr
+      addrId = addr.id
+    }
+    void addrId // used by instantiate-orders via user's default address lookup
 
     // 2. Upsert dietary profile — only the basics collected pre-payment.
     //    Detailed customisations are written by the post-payment customise screen,

@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { useOnboardingStore } from '@/store/onboarding'
+import { useAuthStore } from '@/store/auth'
+import { supabase } from '@/lib/supabase'
 import { computeRecommendation } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
@@ -68,6 +70,7 @@ export default function QuestionnaireScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { healthGoal, exerciseFrequency, setQuestionnaire } = useOnboardingStore()
+  const { user } = useAuthStore()
   const [q1Answer, setQ1Answer] = useState('')
   const [q2Answer, setQ2Answer] = useState('')
 
@@ -92,6 +95,19 @@ export default function QuestionnaireScreen() {
       exerciseFrequency,
     })
     setQuestionnaire({ q1Answer, q2Answer, recommendation })
+    if (user) {
+      ;(async () => {
+        await supabase.from('questionnaire_responses').upsert({
+          user_id: user.id,
+          health_goal: healthGoal,
+          q1_answer: q1Answer,
+          q2_answer: q2Answer || null,
+          derived_menu: recommendation.menuType,
+          derived_addons: recommendation.derivedAddons,
+          derived_constraints: recommendation.derivedConstraints,
+        }, { onConflict: 'user_id' })
+      })().catch(() => {})
+    }
     router.push('/(onboarding)/dietary')
   }
 

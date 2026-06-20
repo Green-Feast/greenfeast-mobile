@@ -12,6 +12,8 @@ import {
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useOnboardingStore } from '@/store/onboarding'
+import { useAuthStore } from '@/store/auth'
+import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
@@ -30,6 +32,7 @@ export default function DietaryScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { setDietaryBasics } = useOnboardingStore()
+  const { user } = useAuthStore()
 
   const [allergens, setAllergens] = useState<string[]>([])
   const [dietaryPref, setDietaryPref] = useState<'none' | 'vegetarian' | 'vegan'>('none')
@@ -41,6 +44,18 @@ export default function DietaryScreen() {
 
   function handleNext() {
     setDietaryBasics({ allergens, dietaryPreference: dietaryPref, dietaryFreeText: freeText })
+    // Merge into dietary_profiles — onConflict update only writes these columns,
+    // leaving health fields (height, weight etc.) set by health.tsx intact
+    if (user) {
+      ;(async () => {
+        await supabase.from('dietary_profiles').upsert({
+          user_id: user.id,
+          allergens,
+          dietary_preference: dietaryPref,
+          free_text: freeText || null,
+        }, { onConflict: 'user_id' })
+      })().catch(() => {})
+    }
     router.push('/(onboarding)/loading')
   }
 

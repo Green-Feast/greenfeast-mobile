@@ -12,6 +12,8 @@ import {
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useOnboardingStore } from '@/store/onboarding'
+import { useAuthStore } from '@/store/auth'
+import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
@@ -26,6 +28,7 @@ export default function AddressScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { setAddress } = useOnboardingStore()
+  const { user } = useAuthStore()
 
   const [line1, setLine1] = useState('')
   const [pincode, setPincode] = useState('')
@@ -47,13 +50,37 @@ export default function AddressScreen() {
       setErrors(e)
       return
     }
+    const resolvedLabel = label || type.charAt(0).toUpperCase() + type.slice(1)
     setAddress({
       addressLine1: line1.trim(),
       addressLandmark: landmark.trim(),
       addressPincode: pincode,
-      addressLabel: label || type.charAt(0).toUpperCase() + type.slice(1),
+      addressLabel: resolvedLabel,
       addressType: type,
     })
+    // Incremental save: update existing default address if one exists, otherwise insert.
+    // payment.tsx will do the same check so no duplicate is created.
+    if (user) {
+      const fields = {
+        user_id: user.id,
+        label: resolvedLabel,
+        type,
+        line1: line1.trim(),
+        city: 'Jaipur',
+        pincode,
+        landmark: landmark.trim() || null,
+        is_default: true,
+      }
+      ;(async () => {
+        const { data: existing } = await supabase
+          .from('addresses').select('id').eq('user_id', user.id).eq('is_default', true).maybeSingle()
+        if (existing) {
+          await supabase.from('addresses').update(fields).eq('id', existing.id)
+        } else {
+          await supabase.from('addresses').insert(fields)
+        }
+      })().catch(() => {})
+    }
     router.push('/(onboarding)/summary')
   }
 

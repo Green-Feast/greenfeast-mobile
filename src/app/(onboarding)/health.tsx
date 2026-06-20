@@ -14,6 +14,8 @@ import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChevronDown } from 'lucide-react-native'
 import { useOnboardingStore, type HealthGoal } from '@/store/onboarding'
+import { useAuthStore } from '@/store/auth'
+import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
@@ -53,6 +55,7 @@ export default function HealthScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { setHealthProfile } = useOnboardingStore()
+  const { user } = useAuthStore()
 
   const [height, setHeight] = useState('')
   const [weight, setWeight] = useState('')
@@ -104,6 +107,20 @@ export default function HealthScreen() {
       exerciseFrequency: frequency,
       occupation,
     })
+    // Incremental save — captures abandoners; payment.tsx upserts the final state
+    if (user) {
+      ;(async () => {
+        await supabase.from('dietary_profiles').upsert({
+          user_id: user.id,
+          health_goal: goal,
+          weight: weight || null,
+          height: height || null,
+          exercise_type: exerciseType,
+          exercise_frequency: frequency || null,
+          occupation: occupation || null,
+        }, { onConflict: 'user_id' })
+      })().catch(() => {})
+    }
     router.push('/(onboarding)/questionnaire')
   }
 
