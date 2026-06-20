@@ -21,7 +21,7 @@ function next14Days(): Date[] {
 async function processSubscription(supabase: any, subId: string): Promise<number> {
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, user_id, batch_id, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type')
+    .select('id, user_id, batch_id, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id')
     .eq('id', subId)
     .single()
 
@@ -30,7 +30,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
   const eligible = sub && (sub.status === 'active' || (sub.status === 'pending' && sub.payment_method === 'cod'))
   if (!eligible) return 0
 
-  const [{ data: schedule }, { data: addr }, { data: subAddons }, { data: weeklyMenus }] = await Promise.all([
+  const [{ data: schedule }, { data: addr }, { data: subAddons }, { data: weeklyMenus }, { data: plan }] = await Promise.all([
     supabase
       .from('subscription_schedule')
       .select('day_of_week, meal_template_id')
@@ -43,12 +43,17 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       .maybeSingle(),
     supabase
       .from('subscription_addons')
-      .select('addon_id, sub_option')
+      .select('addon_id, sub_option, addons(price_per_meal)')
       .eq('subscription_id', subId),
     supabase
       .from('weekly_menu')
       .select('day_of_week, meal_slot, meal_template_id')
       .eq('menu_type', sub.menu_type ?? 'M1'),
+    supabase
+      .from('plans')
+      .select('base_price, meals_total')
+      .eq('id', sub.plan_id)
+      .maybeSingle(),
   ])
 
   // day_of_week → meal_template_id lookup from subscription_schedule (fallback)
@@ -67,6 +72,13 @@ async function processSubscription(supabase: any, subId: string): Promise<number
   // Bail only if neither source has any meals to offer
   const hasScheduleDays = Object.keys(scheduleMap).length > 0
   if (!hasScheduleDays && Object.keys(weeklyMenuMap).length === 0) return 0
+
+  // Compute per-meal unit_price (paise) to snapshot on each order.
+  // round(base_price / meals_total) + sum of addon prices.
+  const addonTotal = (subAddons ?? []).reduce((sum: number, a: any) => sum + (a.addons?.price_per_meal ?? 0), 0)
+  const unitPrice: number | null = plan
+    ? Math.round(plan.base_price / Math.max(plan.meals_total, 1)) + addonTotal
+    : null
 
   // ingredient snapshot cache — avoids re-querying the same meal template
   const ingredientCache: Record<string, any[]> = {}
@@ -105,6 +117,8 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       if (!mealTemplateId) mealTemplateId = scheduleMap[dow]
       if (!mealTemplateId) continue
 
+      const slotQty = slot === 'lunch' ? (sub.meals_lunch ?? 1) : (sub.meals_dinner ?? 1)
+
       const { data: order, error: insertErr } = await supabase
         .from('orders')
         .insert({
@@ -117,6 +131,8 @@ async function processSubscription(supabase: any, subId: string): Promise<number
           meal_slot: slot,
           status: 'scheduled',
           is_customized: false,
+          quantity: slotQty,
+          unit_price: unitPrice,
         })
         .select('id')
         .single()

@@ -21,6 +21,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
+import RazorpayWebView from '@/components/RazorpayWebView'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -421,34 +422,174 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
 function ChangePlanModal({ visible, subId, currentPlanName, onClose, onDone }: {
   visible: boolean; subId: string; currentPlanName: string; onClose: () => void; onDone: () => void
 }) {
+  const { user } = useAuthStore()
   const [plans, setPlans] = useState<Plan[]>([])
   const [loadingPlans, setLoadingPlans] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [timing, setTiming] = useState<'now' | 'queue' | null>(null)
+  const [walletBalance, setWalletBalance] = useState(0)
+  const [addonPerMeal, setAddonPerMeal] = useState(0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [razorpayOrderId, setRazorpayOrderId] = useState<string | null>(null)
+  const [razorpayAmountPaise, setRazorpayAmountPaise] = useState(0)
 
   useEffect(() => {
-    if (!visible) return
+    if (!visible || !user) return
+    setSelectedId(null); setTiming(null); setError('')
     setLoadingPlans(true)
-    supabase.from('plans').select('id, name, meals_total, days_per_week, base_price')
-      .eq('is_active', true).order('base_price')
-      .then(({ data }) => { setPlans((data as Plan[]) ?? []); setLoadingPlans(false) })
-  }, [visible])
+    Promise.all([
+      supabase.from('plans').select('id, name, meals_total, days_per_week, base_price')
+        .eq('is_active', true).order('base_price'),
+      supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle(),
+      supabase.from('subscription_addons').select('addons(price_per_meal)').eq('subscription_id', subId),
+    ]).then(([{ data: plansData }, { data: walletData }, { data: addonsData }]) => {
+      setPlans((plansData as Plan[]) ?? [])
+      setWalletBalance(walletData?.balance ?? 0)
+      const perMeal = ((addonsData ?? []) as any[]).reduce(
+        (sum: number, row: any) => sum + (row.addons?.price_per_meal ?? 0), 0
+      )
+      setAddonPerMeal(perMeal)
+      setLoadingPlans(false)
+    })
+  }, [visible, user, subId])
 
-  async function handleChange() {
-    if (!selectedId) return
-    const plan = plans.find((p) => p.id === selectedId)
-    if (!plan) return
+  const selectedPlan = plans.find((p) => p.id === selectedId) ?? null
+
+  function newPlanTotal(plan: Plan) {
+    return plan.base_price + addonPerMeal * plan.meals_total
+  }
+
+  function chargeNow(plan: Plan) {
+    return Math.max(0, newPlanTotal(plan) - walletBalance)
+  }
+
+  async function applyNow(plan: Plan, charge: number) {
+    // Optimistic: update subscription immediately. Wallet credit happens via webhook.
+    const { error: err } = await supabase.from('subscriptions')
+      .update({ plan_id: plan.id, plan_name: plan.name, deliveries_remaining: plan.meals_total })
+      .eq('id', subId)
+    if (err) throw err
+
+    // Cancel future un-customized orders so they get re-instantiated with new plan
+    const today = new Date().toISOString().split('T')[0]
+    await supabase.from('orders').delete()
+      .eq('subscription_id', subId)
+      .gte('delivery_date', today)
+      .eq('is_customized', false)
+      .in('status', ['scheduled', 'confirmed'])
+
+    // Kick off order creation
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) {
+      supabase.functions.invoke('instantiate-orders', {
+        body: { subscription_id: subId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }).catch(() => {})
+    }
+  }
+
+  async function applyQueue(plan: Plan) {
+    // Create a new pending subscription; it activates when the current one ends.
+    const { data: currentSub } = await supabase.from('subscriptions')
+      .select('end_date, menu_type, meals_lunch, meals_dinner')
+      .eq('id', subId).single()
+
+    const { error: err } = await supabase.from('subscriptions').insert({
+      user_id: user!.id,
+      plan_id: plan.id,
+      plan_name: plan.name,
+      status: 'pending',
+      payment_method: 'online',
+      deliveries_remaining: plan.meals_total,
+      menu_type: currentSub?.menu_type ?? 'M1',
+      meals_lunch: currentSub?.meals_lunch ?? 1,
+      meals_dinner: currentSub?.meals_dinner ?? 0,
+      start_date: currentSub?.end_date ?? null,
+    })
+    if (err) throw err
+  }
+
+  async function handleConfirm() {
+    if (!selectedPlan || !timing) return
     setSaving(true); setError('')
     try {
-      const { error: err } = await supabase.from('subscriptions')
-        .update({ plan_id: selectedId, plan_name: plan.name, deliveries_remaining: plan.meals_total })
-        .eq('id', subId)
-      if (err) throw err
+      if (timing === 'now') {
+        const charge = chargeNow(selectedPlan)
+        if (charge > 0) {
+          // Create a wallet top-up Razorpay order for the charge amount
+          const { data: { session } } = await supabase.auth.getSession()
+          if (!session) throw new Error('Not authenticated')
+          const { data, error: fnErr } = await supabase.functions.invoke('wallet-topup', {
+            body: { amount_paise: charge },
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          })
+          if (fnErr || data?.error) throw new Error(data?.error ?? 'Payment order failed')
+          setRazorpayOrderId(data.order_id)
+          setRazorpayAmountPaise(charge)
+          setSaving(false)
+          return // Razorpay will call onPaymentSuccess
+        }
+        await applyNow(selectedPlan, 0)
+      } else {
+        const total = newPlanTotal(selectedPlan)
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) throw new Error('Not authenticated')
+        const { data, error: fnErr } = await supabase.functions.invoke('wallet-topup', {
+          body: { amount_paise: total },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        })
+        if (fnErr || data?.error) throw new Error(data?.error ?? 'Payment order failed')
+        setRazorpayOrderId(data.order_id)
+        setRazorpayAmountPaise(total)
+        setSaving(false)
+        return // Razorpay will call onPaymentSuccess
+      }
       onDone()
-    } catch { setError('Something went wrong. Please try again.') }
-    finally { setSaving(false) }
+    } catch (e: any) {
+      setError(e?.message ?? 'Something went wrong. Please try again.')
+    } finally {
+      setSaving(false)
+    }
   }
+
+  async function onPaymentSuccess(_paymentId: string) {
+    if (!selectedPlan || !timing) return
+    setSaving(true); setError('')
+    try {
+      if (timing === 'now') {
+        await applyNow(selectedPlan, razorpayAmountPaise)
+      } else {
+        await applyQueue(selectedPlan)
+      }
+      setRazorpayOrderId(null)
+      onDone()
+    } catch (e: any) {
+      setRazorpayOrderId(null)
+      setError(e?.message ?? 'Payment succeeded but plan update failed. Contact support.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (razorpayOrderId) {
+    return (
+      <RazorpayWebView
+        orderId={razorpayOrderId}
+        amount={razorpayAmountPaise}
+        keyId={process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID ?? ''}
+        userName={user?.user_metadata?.name ?? user?.email ?? 'User'}
+        userPhone={user?.phone ?? ''}
+        onSuccess={onPaymentSuccess}
+        onFailure={() => { setRazorpayOrderId(null); setError('Payment failed. Please try again.') }}
+        onDismiss={() => setRazorpayOrderId(null)}
+      />
+    )
+  }
+
+  const showTiming = !!selectedId && !loadingPlans
+  const charge = selectedPlan && timing === 'now' ? chargeNow(selectedPlan) : null
+  const queueTotal = selectedPlan && timing === 'queue' ? newPlanTotal(selectedPlan) : null
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -456,37 +597,113 @@ function ChangePlanModal({ visible, subId, currentPlanName, onClose, onDone }: {
         <View style={m.sheet}>
           <View style={m.handle} />
           <SheetHeader title="Change plan" onClose={onClose} />
-          <Text style={m.stepLabel}>Currently on: {currentPlanName}</Text>
-          {loadingPlans ? (
-            <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
-          ) : (
-            <View style={{ gap: 10, marginBottom: 20 }}>
-              {plans.map((plan) => {
-                const active = plan.id === selectedId
-                const isCurrent = plan.name === currentPlanName
-                return (
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+            <Text style={m.stepLabel}>Currently on: {currentPlanName}</Text>
+            {loadingPlans ? (
+              <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
+            ) : (
+              <View style={{ gap: 10, marginBottom: 16 }}>
+                {plans.map((plan) => {
+                  const active = plan.id === selectedId
+                  const isCurrent = plan.name === currentPlanName
+                  return (
+                    <Pressable
+                      key={plan.id}
+                      style={[m.selectRow, active && m.selectRowActive, isCurrent && m.selectRowCurrent]}
+                      onPress={() => { if (!isCurrent) { setSelectedId(plan.id); setTiming(null) } }}
+                      disabled={isCurrent}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={[m.selectRowTitle, active && { color: Colors.primary }]}>{plan.name}</Text>
+                        <Text style={m.selectRowSub}>{plan.meals_total} meals · {plan.days_per_week} days/week</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                        <Text style={[m.planPrice, active && { color: Colors.primary }]}>₹{fmt(plan.base_price)}</Text>
+                        {isCurrent && <Text style={m.currentBadge}>Current</Text>}
+                      </View>
+                    </Pressable>
+                  )
+                })}
+              </View>
+            )}
+
+            {showTiming && (
+              <>
+                <Text style={[m.stepLabel, { marginTop: 8 }]}>When should this take effect?</Text>
+                <View style={{ gap: 10, marginBottom: 16 }}>
                   <Pressable
-                    key={plan.id}
-                    style={[m.selectRow, active && m.selectRowActive, isCurrent && m.selectRowCurrent]}
-                    onPress={() => !isCurrent && setSelectedId(plan.id)}
-                    disabled={isCurrent}
+                    style={[m.selectRow, timing === 'now' && m.selectRowActive]}
+                    onPress={() => setTiming('now')}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text style={[m.selectRowTitle, active && { color: Colors.primary }]}>{plan.name}</Text>
-                      <Text style={m.selectRowSub}>{plan.meals_total} meals · {plan.days_per_week} days/week</Text>
+                      <Text style={[m.selectRowTitle, timing === 'now' && { color: Colors.primary }]}>Switch now</Text>
+                      <Text style={m.selectRowSub}>Start immediately, reset deliveries</Text>
                     </View>
-                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                      <Text style={[m.planPrice, active && { color: Colors.primary }]}>₹{fmt(plan.base_price)}</Text>
-                      {isCurrent && <Text style={m.currentBadge}>Current</Text>}
+                    <View style={[m.radio, timing === 'now' && m.radioActive]}>
+                      {timing === 'now' && <View style={m.radioDot} />}
                     </View>
                   </Pressable>
-                )
-              })}
-            </View>
-          )}
-          {error ? <Text style={m.errorText}>{error}</Text> : null}
-          <Pressable style={[m.btn, (!selectedId || saving) && m.btnDisabled]} disabled={!selectedId || saving} onPress={handleChange}>
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Confirm change</Text>}
+                  <Pressable
+                    style={[m.selectRow, timing === 'queue' && m.selectRowActive]}
+                    onPress={() => setTiming('queue')}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[m.selectRowTitle, timing === 'queue' && { color: Colors.primary }]}>Start after current ends</Text>
+                      <Text style={m.selectRowSub}>Continues when current plan's deliveries run out</Text>
+                    </View>
+                    <View style={[m.radio, timing === 'queue' && m.radioActive]}>
+                      {timing === 'queue' && <View style={m.radioDot} />}
+                    </View>
+                  </Pressable>
+                </View>
+              </>
+            )}
+
+            {timing === 'now' && selectedPlan && (
+              <View style={m.chargeBreakdown}>
+                <Text style={m.chargeLabel}>Payment breakdown</Text>
+                <View style={m.chargeRow}>
+                  <Text style={m.chargeItem}>New plan total</Text>
+                  <Text style={m.chargeValue}>₹{fmt(newPlanTotal(selectedPlan))}</Text>
+                </View>
+                <View style={m.chargeRow}>
+                  <Text style={m.chargeItem}>Wallet balance</Text>
+                  <Text style={m.chargeValue}>−₹{fmt(walletBalance)}</Text>
+                </View>
+                <View style={[m.chargeRow, m.chargeTotalRow]}>
+                  <Text style={m.chargeTotalLabel}>You pay now</Text>
+                  <Text style={m.chargeTotalValue}>₹{fmt(charge ?? 0)}</Text>
+                </View>
+              </View>
+            )}
+
+            {timing === 'queue' && selectedPlan && (
+              <View style={m.chargeBreakdown}>
+                <Text style={m.chargeLabel}>Payment</Text>
+                <View style={[m.chargeRow, m.chargeTotalRow]}>
+                  <Text style={m.chargeTotalLabel}>Full plan amount</Text>
+                  <Text style={m.chargeTotalValue}>₹{fmt(queueTotal ?? 0)}</Text>
+                </View>
+                <Text style={m.chargeNote}>Activates automatically when your current plan ends</Text>
+              </View>
+            )}
+
+            {error ? <Text style={m.errorText}>{error}</Text> : null}
+            <View style={{ height: 16 }} />
+          </ScrollView>
+
+          <Pressable
+            style={[m.btn, m.btnSaveRow, (!selectedId || !timing || saving) && m.btnDisabled]}
+            disabled={!selectedId || !timing || saving}
+            onPress={handleConfirm}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={m.btnText}>
+                {timing === 'now' && charge === 0 ? 'Switch now (no charge)' : 'Pay & confirm'}
+              </Text>
+            )}
           </Pressable>
         </View>
       </View>
@@ -962,4 +1179,18 @@ const m = StyleSheet.create({
   typeBtnActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
   typeBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
   typeBtnTextActive: { color: Colors.primary },
+
+  // Change plan charge breakdown
+  chargeBreakdown: {
+    backgroundColor: Colors.primaryLight, borderRadius: 14, padding: 16, marginBottom: 12,
+    borderWidth: 1, borderColor: Colors.primary + '40',
+  },
+  chargeLabel: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.textLight, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
+  chargeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  chargeItem: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
+  chargeValue: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text },
+  chargeTotalRow: { borderTopWidth: 1, borderTopColor: Colors.border, marginTop: 6, paddingTop: 10 },
+  chargeTotalLabel: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
+  chargeTotalValue: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.primary },
+  chargeNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 8 },
 })

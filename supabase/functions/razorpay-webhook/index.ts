@@ -54,8 +54,19 @@ Deno.serve(async (req) => {
           razorpay_payment_id: payment.id,
         })
         .eq('razorpay_order_id', payment.order_id)
-        .select('subscription_id')
+        .select('subscription_id, user_id, amount')
         .single()
+
+      // Wallet top-up: no subscription, credit the captured amount directly.
+      if (paymentRow && !paymentRow.subscription_id) {
+        const capturedPaise = payment.amount // Razorpay sends amount in paise
+        await supabase.rpc('wallet_credit', {
+          p_user: paymentRow.user_id,
+          p_amount: capturedPaise,
+          p_reason: 'Wallet top-up',
+          p_reference_id: payment.id,
+        })
+      }
 
       if (paymentRow?.subscription_id) {
         const { data: sub } = await supabase

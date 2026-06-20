@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Modal,
   Image,
+  TextInput,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -30,6 +31,7 @@ type SubData = {
   end_date: string | null
   pause_from: string | null
   pause_until: string | null
+  menu_type: string | null
   plans: { name: string; meals_total: number; days_per_week: number; base_price: number } | null
 }
 
@@ -38,8 +40,9 @@ type FirstMeal = { delivery_date: string; meal_templates: { name: string } | nul
 type OrderItem = {
   id: string
   delivery_date: string
+  meal_slot: string
   status: string
-  meal_templates: { name: string; kcal: number | null; protein: number | null; image_url: string | null } | null
+  meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; image_url: string | null } | null
 }
 
 type MealTemplate = {
@@ -115,6 +118,12 @@ export default function SubscriptionScreen() {
   const [showAddMoney, setShowAddMoney] = useState(false)
   const [showRazorpay, setShowRazorpay] = useState(false)
   const [funding, setFunding] = useState(false)
+  const [counterpartMealId, setCounterpartMealId] = useState<string | null>(null)
+  const [topupAmountPaise, setTopupAmountPaise] = useState(50000) // ₹500 default
+  const [topupCustom, setTopupCustom] = useState('')
+  const [razorpayOrderId, setRazorpayOrderId] = useState<string | null>(null)
+  const [razorpayAmountPaise, setRazorpayAmountPaise] = useState(0)
+  const [creatingTopup, setCreatingTopup] = useState(false)
   const didAutoSync = useRef(false)
 
   const fetchAll = useCallback(async () => {
@@ -123,7 +132,7 @@ export default function SubscriptionScreen() {
 
     const { data: subData } = await supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_name, deliveries_remaining, end_date, pause_from, pause_until, plans ( name, meals_total, days_per_week, base_price )')
+      .select('id, status, payment_method, plan_name, deliveries_remaining, end_date, pause_from, pause_until, menu_type, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
       .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
       .order('created_at', { ascending: false })
@@ -158,7 +167,7 @@ export default function SubscriptionScreen() {
     const [ordersRes, walletRes, addrRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, status, meal_templates ( name, kcal, protein, image_url )')
+        .select('id, delivery_date, meal_slot, status, meal_templates ( id, name, kcal, protein, image_url )')
         .eq('subscription_id', s.id)
         .gte('delivery_date', today)
         .lte('delivery_date', in7Str)
@@ -215,6 +224,26 @@ export default function SubscriptionScreen() {
     })()
   }, [loading, sub, weekOrders.length, fetchAll])
 
+  // When a day is selected, look up the counterpart menu's meal so we can show "Free" vs "+₹20"
+  useEffect(() => {
+    if (!selectedDay || !sub) { setCounterpartMealId(null); return }
+    const dayOrder = weekOrders.find(o => o.delivery_date === selectedDay.dateStr)
+    if (!dayOrder) { setCounterpartMealId(null); return }
+    const myMenuType = sub.menu_type ?? 'M1'
+    const counterpart = myMenuType === 'M1' ? 'M2' : 'M1'
+    const dowNum = (selectedDay.date.getDay() + 6) % 7
+    ;(async () => {
+      const { data } = await supabase
+        .from('weekly_menu')
+        .select('meal_template_id')
+        .eq('menu_type', counterpart)
+        .eq('day_of_week', dowNum)
+        .eq('meal_slot', dayOrder.meal_slot)
+        .maybeSingle()
+      setCounterpartMealId(data?.meal_template_id ?? null)
+    })()
+  }, [selectedDay, sub, weekOrders])
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     await fetchAll()
@@ -238,11 +267,18 @@ export default function SubscriptionScreen() {
     setSwapping(true)
     setSwapError('')
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ meal_template_id: newMealId, is_customized: true })
-        .eq('id', orderId)
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+      const { data, error } = await supabase.functions.invoke('switch-meal', {
+        body: { order_id: orderId, meal_template_id: newMealId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
       if (error) throw error
+      if (data?.error === 'insufficient_balance') {
+        setSwapError('Insufficient wallet balance (₹20 required). Add money first.')
+        return
+      }
+      if (data?.error) throw new Error(data.error)
       setSelectedDay(null)
       await fetchAll()
     } catch (e: any) {
@@ -263,32 +299,48 @@ export default function SubscriptionScreen() {
     setTransactions((data as WalletTransaction[]) ?? [])
   }
 
-  async function fundWallet(subscriptionId: string, amount: number) {
+  async function createTopupOrder() {
     if (!user) return
+    const amount = topupCustom ? Math.round(parseFloat(topupCustom) * 100) : topupAmountPaise
+    if (!amount || amount < 10000) return // min ₹100
+    setCreatingTopup(true)
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not authenticated')
-      const { data } = await supabase.functions.invoke('fund-subscription-wallet', {
-        body: { subscription_id: subscriptionId },
+      const { data, error } = await supabase.functions.invoke('wallet-topup', {
+        body: { amount_paise: amount },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (data?.error) throw new Error(data.error)
-      await fetchAll()
+      if (error || data?.error) throw new Error(data?.error ?? 'Failed to create order')
+      setRazorpayOrderId(data.order_id)
+      setRazorpayAmountPaise(amount)
+      setShowAddMoney(false)
+      setShowRazorpay(true)
     } catch (e: any) {
-      console.error('Fund wallet failed:', e)
-      throw e
+      console.error('createTopupOrder:', e)
+    } finally {
+      setCreatingTopup(false)
     }
   }
 
   async function handleAddMoneyDev() {
-    if (!sub) return
+    if (!user) return
+    const amount = topupCustom ? Math.round(parseFloat(topupCustom) * 100) : topupAmountPaise
+    if (!amount || amount < 10000) return
     setFunding(true)
     try {
-      await fundWallet(sub.id, sub.plans?.base_price ?? 0)
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+      await supabase.rpc('wallet_credit', {
+        p_user: user.id,
+        p_amount: amount,
+        p_reason: 'Wallet top-up',
+        p_reference_id: `dev-topup-${Date.now()}`,
+      })
       setShowAddMoney(false)
-      setShowTransactions(true)
+      await fetchAll()
     } catch {
-      /* error shown in toast */
+      /* silent */
     } finally {
       setFunding(false)
     }
@@ -681,10 +733,18 @@ export default function SubscriptionScreen() {
                     <>
                       <Text style={s.dayModalSectionLabel}>Swap for something else</Text>
                       {swapError ? (
-                        <Text style={s.dayModalSwapError}>{swapError}</Text>
+                        <View style={s.swapErrorRow}>
+                          <Text style={s.dayModalSwapError}>{swapError}</Text>
+                          {swapError.includes('balance') && (
+                            <Pressable onPress={() => { setSelectedDay(null); setSwapError(''); setShowAddMoney(true) }}>
+                              <Text style={s.swapErrorLink}>Add money →</Text>
+                            </Pressable>
+                          )}
+                        </View>
                       ) : null}
                       {allMeals.map((meal) => {
-                        const isCurrent = meal.id === (dayOrder.meal_templates as any)?.id
+                        const isCurrent = meal.id === dayOrder.meal_templates?.id
+                        const isFree = !isCurrent && meal.id === counterpartMealId
                         return (
                           <Pressable
                             key={meal.id}
@@ -715,6 +775,13 @@ export default function SubscriptionScreen() {
                             {isCurrent && (
                               <View style={s.mealRowCurrentBadge}>
                                 <Check size={14} color={Colors.primary} strokeWidth={2.5} />
+                              </View>
+                            )}
+                            {!isCurrent && !swapping && (
+                              <View style={[s.switchBadge, isFree && s.switchBadgeFree]}>
+                                <Text style={[s.switchBadgeText, isFree && s.switchBadgeTextFree]}>
+                                  {isFree ? 'Free' : '+₹20'}
+                                </Text>
                               </View>
                             )}
                             {swapping && !isCurrent && (
@@ -797,15 +864,47 @@ export default function SubscriptionScreen() {
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
-              <Text style={s.amountDisplayLabel}>Plan amount</Text>
-              <Text style={s.amountDisplay}>₹{fmt(payAmount)}</Text>
+              <Text style={s.amountDisplayLabel}>Select amount</Text>
+
+              {/* Quick chips */}
+              <View style={s.topupChips}>
+                {[50000, 100000, 200000].map((amt) => (
+                  <Pressable
+                    key={amt}
+                    style={[s.topupChip, topupAmountPaise === amt && !topupCustom && s.topupChipActive]}
+                    onPress={() => { setTopupAmountPaise(amt); setTopupCustom('') }}
+                  >
+                    <Text style={[s.topupChipText, topupAmountPaise === amt && !topupCustom && s.topupChipTextActive]}>
+                      ₹{amt / 100}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={[s.amountDisplayLabel, { marginTop: 16 }]}>Or enter a custom amount</Text>
+              <TextInput
+                style={s.topupInput}
+                keyboardType="number-pad"
+                placeholder="₹ Amount (min ₹100)"
+                placeholderTextColor={Colors.textLight}
+                value={topupCustom}
+                onChangeText={setTopupCustom}
+              />
+
+              <Text style={s.amountDisplay}>
+                ₹{topupCustom
+                  ? (parseFloat(topupCustom) || 0).toLocaleString('en-IN')
+                  : fmt(topupAmountPaise)}
+              </Text>
 
               <Pressable
-                style={({ pressed }) => [s.addMoneyBtn, pressed && { opacity: 0.8 }]}
-                onPress={() => { setShowAddMoney(false); setShowRazorpay(true) }}
-                disabled={funding}
+                style={({ pressed }) => [s.addMoneyBtn, pressed && { opacity: 0.8 }, creatingTopup && { opacity: 0.6 }]}
+                onPress={createTopupOrder}
+                disabled={creatingTopup}
               >
-                <Text style={s.addMoneyBtnText}>Pay with Razorpay</Text>
+                {creatingTopup
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={s.addMoneyBtnText}>Pay with Razorpay</Text>}
               </Pressable>
 
               {__DEV__ && (
@@ -828,22 +927,23 @@ export default function SubscriptionScreen() {
         </Pressable>
       </Modal>
 
-      {/* Razorpay payment */}
-      {showRazorpay && sub && (
+      {/* Razorpay payment — for wallet top-ups */}
+      {showRazorpay && razorpayOrderId && (
         <RazorpayWebView
-          orderId={sub.id}
-          amount={payAmount}
+          orderId={razorpayOrderId}
+          amount={razorpayAmountPaise}
           keyId={process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID ?? ''}
           userName={user?.user_metadata?.name ?? user?.email ?? 'User'}
           userPhone={user?.phone ?? ''}
-          onSuccess={async (paymentId) => {
-            await fundWallet(sub.id, payAmount)
+          onSuccess={async (_paymentId) => {
             setShowRazorpay(false)
-            setShowAddMoney(false)
+            setRazorpayOrderId(null)
+            await fetchAll()
+            fetchTransactions()
             setShowTransactions(true)
           }}
-          onFailure={() => setShowRazorpay(false)}
-          onDismiss={() => setShowRazorpay(false)}
+          onFailure={() => { setShowRazorpay(false); setRazorpayOrderId(null) }}
+          onDismiss={() => { setShowRazorpay(false); setRazorpayOrderId(null) }}
         />
       )}
     </View>
@@ -991,8 +1091,8 @@ const s = StyleSheet.create({
   transactionDebit: { color: Colors.danger },
 
   // Add money
-  amountDisplayLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 4 },
-  amountDisplay: { fontFamily: Fonts.heading, fontSize: 36, color: Colors.text, marginBottom: 20 },
+  amountDisplayLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 8 },
+  amountDisplay: { fontFamily: Fonts.heading, fontSize: 36, color: Colors.text, marginBottom: 20, marginTop: 8 },
   addMoneyBtn: {
     backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 14,
     alignItems: 'center', marginBottom: 10,
@@ -1000,6 +1100,32 @@ const s = StyleSheet.create({
   addMoneyBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: '#fff' },
   addMoneyBtnDev: { backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primary },
   addMoneyBtnDevText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
+  topupChips: { flexDirection: 'row', gap: 10, marginBottom: 4 },
+  topupChip: {
+    flex: 1, borderRadius: 12, paddingVertical: 12, borderWidth: 1.5,
+    borderColor: Colors.border, backgroundColor: '#fff', alignItems: 'center',
+  },
+  topupChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  topupChipText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.textMuted },
+  topupChipTextActive: { color: Colors.primary },
+  topupInput: {
+    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12,
+    fontFamily: Fonts.body, fontSize: 16, color: Colors.text, marginBottom: 4,
+  },
+
+  // Swap error with link
+  swapErrorRow: { marginBottom: 10 },
+  swapErrorLink: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary, marginTop: 4 },
+
+  // Meal switch price badge
+  switchBadge: {
+    backgroundColor: Colors.background, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  switchBadgeFree: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
+  switchBadgeText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.textMuted },
+  switchBadgeTextFree: { color: Colors.primary },
 
   // Delivery address
   addressCard: {
