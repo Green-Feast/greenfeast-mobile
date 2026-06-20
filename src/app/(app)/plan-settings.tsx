@@ -586,7 +586,7 @@ function ChangePlanModal({ visible, subId, currentPlanName, onClose, onDone }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={m.overlay}>
-        <View style={m.sheet}>
+        <View style={[m.sheet, { flex: 1, maxHeight: '92%' }]}>
           <View style={m.handle} />
           <SheetHeader title="Change plan" onClose={onClose} />
           <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>

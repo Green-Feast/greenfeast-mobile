@@ -1240,6 +1240,7 @@ const s = StyleSheet.create({
     borderTopRightRadius: 28,
     maxHeight: '85%',
     paddingBottom: 0,
+    flex: 1,
   },
   dayModalHandle: {
     width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2,
