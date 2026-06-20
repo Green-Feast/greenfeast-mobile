@@ -7,7 +7,7 @@ CREATE TABLE public.weekly_menu (
   menu_type        VARCHAR(2)   NOT NULL CHECK (menu_type IN ('M1', 'M2')),
   day_of_week      SMALLINT     NOT NULL CHECK (day_of_week >= 0 AND day_of_week <= 6),
   meal_slot        VARCHAR(20)  NOT NULL DEFAULT 'lunch' CHECK (meal_slot IN ('lunch', 'dinner')),
-  meal_template_id UUID         REFERENCES meal_templates(id) ON DELETE SET NULL,
+  meal_template_id TEXT         REFERENCES meal_templates(id) ON DELETE SET NULL,
   updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   UNIQUE (menu_type, day_of_week, meal_slot)
 );
