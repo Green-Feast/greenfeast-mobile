@@ -53,12 +53,6 @@ const DRESSINGS = [
   { label: 'Mixed in', value: 'mixed-in' },
   { label: 'On the side', value: 'on-the-side' },
 ] as const
-const ADDR_TYPES = [
-  { id: 'home' as const, label: '🏠 Home' },
-  { id: 'office' as const, label: '🏢 Office' },
-  { id: 'other' as const, label: '📍 Other' },
-]
-
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fmt(paise: number) { return (paise / 100).toLocaleString('en-IN') }
@@ -90,7 +84,6 @@ export default function PlanSettingsScreen() {
   const [changePlanOpen, setChangePlanOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [dietaryOpen, setDietaryOpen] = useState(false)
-  const [addressOpen, setAddressOpen] = useState(false)
 
   const fetchSub = useCallback(async () => {
     if (!user) return
@@ -157,7 +150,7 @@ export default function PlanSettingsScreen() {
     { label: 'Skip a specific day',   Icon: SkipForward,     onPress: () => setSkipOpen(true) },
     { label: 'Change plan',           Icon: ArrowUpDown,     onPress: () => setChangePlanOpen(true) },
     { label: 'Edit dietary profile',  Icon: UtensilsCrossed, onPress: () => setDietaryOpen(true) },
-    { label: 'Edit delivery address', Icon: MapPin,          onPress: () => setAddressOpen(true) },
+    { label: 'Edit delivery address', Icon: MapPin,          onPress: () => router.push('/(app)/addresses') },
   ]
 
   const actions = sub.status === 'paused'
@@ -245,7 +238,6 @@ export default function PlanSettingsScreen() {
       <ChangePlanModal visible={changePlanOpen}  subId={sub.id} currentPlanName={planName} onClose={() => setChangePlanOpen(false)} onDone={() => { setChangePlanOpen(false); fetchSub() }} />
       <CancelModal     visible={cancelOpen}      subId={sub.id} onClose={() => setCancelOpen(false)}      onDone={() => { setCancelOpen(false);     fetchSub() }} />
       <DietaryModal    visible={dietaryOpen}     userId={user!.id} onClose={() => setDietaryOpen(false)}  onDone={() => setDietaryOpen(false)} />
-      <AddressModal    visible={addressOpen}     userId={user!.id} onClose={() => setAddressOpen(false)}  onDone={() => setAddressOpen(false)} />
     </View>
   )
 }
@@ -883,138 +875,6 @@ function DietaryModal({ visible, userId, onClose, onDone }: {
   )
 }
 
-// ── AddressModal ───────────────────────────────────────────────────────────
-
-function AddressModal({ visible, userId, onClose, onDone }: {
-  visible: boolean; userId: string; onClose: () => void; onDone: () => void
-}) {
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [addressId, setAddressId] = useState<string | null>(null)
-  const [line1, setLine1] = useState('')
-  const [landmark, setLandmark] = useState('')
-  const [pincode, setPincode] = useState('')
-  const [label, setLabel] = useState('Home')
-  const [type, setType] = useState<'home' | 'office' | 'other'>('home')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-
-  useEffect(() => {
-    if (!visible) return
-    setLoading(true)
-    supabase.from('addresses').select('id, line1, landmark, pincode, label, type')
-      .eq('user_id', userId).order('created_at').limit(1).maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          setAddressId(data.id); setLine1(data.line1 ?? ''); setLandmark(data.landmark ?? '')
-          setPincode(data.pincode ?? ''); setLabel(data.label ?? 'Home'); setType((data.type as any) ?? 'home')
-        }
-        setLoading(false)
-      })
-  }, [visible, userId])
-
-  function validate() {
-    const e: Record<string, string> = {}
-    if (!line1.trim() || line1.trim().length < 5) e.line1 = 'Enter a valid street address'
-    if (!/^\d{6}$/.test(pincode)) e.pincode = 'Pincode must be 6 digits'
-    return e
-  }
-
-  async function handleSave() {
-    const fe = validate()
-    if (Object.keys(fe).length > 0) { setFieldErrors(fe); return }
-    setSaving(true); setError('')
-    try {
-      if (addressId) {
-        const { error: err } = await supabase.from('addresses')
-          .update({ line1: line1.trim(), landmark: landmark.trim(), pincode, label, type }).eq('id', addressId)
-        if (err) throw err
-      } else {
-        const { error: err } = await supabase.from('addresses')
-          .insert({ user_id: userId, line1: line1.trim(), landmark: landmark.trim(), pincode, label, type })
-        if (err) throw err
-      }
-      onDone()
-    } catch { setError('Could not save address. Please try again.') }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={m.overlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <View style={[m.sheet, { maxHeight: '85%', flex: 1 }]}>
-            <View style={m.handle} />
-            <SheetHeader title="Delivery address" onClose={onClose} />
-            {loading ? (
-              <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-                <AddrField label="Street address" error={fieldErrors.line1}>
-                  <TextInput
-                    style={[m.input, fieldErrors.line1 && m.inputError]}
-                    placeholder="House/flat no., street name"
-                    value={line1}
-                    onChangeText={(t) => { setLine1(t); setFieldErrors((e) => ({ ...e, line1: '' })) }}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </AddrField>
-                <AddrField label="Landmark (optional)">
-                  <TextInput
-                    style={m.input}
-                    placeholder="e.g. Near the blue gate"
-                    value={landmark}
-                    onChangeText={setLandmark}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </AddrField>
-                <AddrField label="Pincode" error={fieldErrors.pincode}>
-                  <TextInput
-                    style={[m.input, fieldErrors.pincode && m.inputError]}
-                    placeholder="6-digit pincode"
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    value={pincode}
-                    onChangeText={(t) => { setPincode(t.replace(/\D/g, '')); setFieldErrors((e) => ({ ...e, pincode: '' })) }}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </AddrField>
-                <AddrField label="Address type">
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {ADDR_TYPES.map((t) => (
-                      <Pressable
-                        key={t.id}
-                        style={[m.typeBtn, type === t.id && m.typeBtnActive]}
-                        onPress={() => { setType(t.id); setLabel(t.id.charAt(0).toUpperCase() + t.id.slice(1)) }}
-                      >
-                        <Text style={[m.typeBtnText, type === t.id && m.typeBtnTextActive]}>{t.label}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </AddrField>
-                <AddrField label="Label (optional)">
-                  <TextInput
-                    style={m.input}
-                    placeholder="e.g. Home, Mom's Place"
-                    value={label}
-                    onChangeText={setLabel}
-                    maxLength={40}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </AddrField>
-                {error ? <Text style={m.errorText}>{error}</Text> : null}
-              </ScrollView>
-            )}
-            <Pressable style={[m.btn, m.btnSaveRow, (saving || loading) && m.btnDisabled]} disabled={saving || loading} onPress={handleSave}>
-              {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Save address</Text>}
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  )
-}
-
 // ── Shared sub-components ──────────────────────────────────────────────────
 
 function SheetHeader({ title, onClose }: { title: string; onClose: () => void }) {
@@ -1046,16 +906,6 @@ function PillRow({ options, selected, onToggle }: { options: string[]; selected:
           </Pressable>
         )
       })}
-    </View>
-  )
-}
-
-function AddrField({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
-  return (
-    <View style={{ marginBottom: 16 }}>
-      <Text style={{ fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text, marginBottom: 8 }}>{label}</Text>
-      {children}
-      {error ? <Text style={m.errorText}>{error}</Text> : null}
     </View>
   )
 }
@@ -1166,20 +1016,6 @@ const m = StyleSheet.create({
     backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12,
     padding: 14, fontFamily: Fonts.body, fontSize: 14, color: Colors.text, minHeight: 80,
   },
-  input: {
-    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 13, fontFamily: Fonts.body, fontSize: 15, color: Colors.text,
-  },
-  inputError: { borderColor: Colors.danger },
-  fieldError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 4 },
-  typeBtn: {
-    flex: 1, paddingVertical: 11, borderRadius: 999, borderWidth: 1.5,
-    borderColor: Colors.border, backgroundColor: '#fff', alignItems: 'center',
-  },
-  typeBtnActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  typeBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
-  typeBtnTextActive: { color: Colors.primary },
-
   // Change plan charge breakdown
   chargeBreakdown: {
     backgroundColor: Colors.primaryLight, borderRadius: 14, padding: 16, marginBottom: 12,

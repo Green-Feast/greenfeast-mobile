@@ -37,14 +37,6 @@ type SubData = {
 
 type FirstMeal = { delivery_date: string; meal_templates: { name: string } | null }
 
-type OrderItem = {
-  id: string
-  delivery_date: string
-  meal_slot: string
-  status: string
-  meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; image_url: string | null } | null
-}
-
 type MealTemplate = {
   id: string
   name: string
@@ -54,7 +46,16 @@ type MealTemplate = {
   image_url: string | null
 }
 
-type AddressData = { line1: string; landmark: string | null; label: string }
+type AddressData = { id: string; line1: string; landmark: string | null; label: string; is_default: boolean }
+
+type OrderItem = {
+  id: string
+  delivery_date: string
+  meal_slot: string
+  status: string
+  address_id: string | null
+  meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; image_url: string | null } | null
+}
 
 type WalletTransaction = {
   id: string
@@ -104,7 +105,8 @@ export default function SubscriptionScreen() {
   const [firstMeal, setFirstMeal] = useState<FirstMeal | null>(null)
   const [weekOrders, setWeekOrders] = useState<OrderItem[]>([])
   const [walletBalance, setWalletBalance] = useState<number | null>(null)
-  const [address, setAddress] = useState<AddressData | null>(null)
+  const [addresses, setAddresses] = useState<AddressData[]>([])
+  const [pickingAddressForOrder, setPickingAddressForOrder] = useState<string | null>(null)
   const [allMeals, setAllMeals] = useState<MealTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -167,7 +169,7 @@ export default function SubscriptionScreen() {
     const [ordersRes, walletRes, addrRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, meal_slot, status, meal_templates ( id, name, kcal, protein, image_url )')
+        .select('id, delivery_date, meal_slot, status, address_id, meal_templates ( id, name, kcal, protein, image_url )')
         .eq('subscription_id', s.id)
         .gte('delivery_date', today)
         .lte('delivery_date', in7Str)
@@ -180,16 +182,15 @@ export default function SubscriptionScreen() {
         .maybeSingle(),
       supabase
         .from('addresses')
-        .select('line1, landmark, label')
+        .select('id, line1, landmark, label, is_default')
         .eq('user_id', user.id)
-        .order('created_at')
-        .limit(1)
-        .maybeSingle(),
+        .order('is_default', { ascending: false })
+        .order('created_at'),
     ])
 
     setWeekOrders((ordersRes.data as unknown as OrderItem[]) ?? [])
     setWalletBalance(walletRes.data?.balance ?? null)
-    setAddress((addrRes.data as AddressData) ?? null)
+    setAddresses((addrRes.data as AddressData[]) ?? [])
   }, [user])
 
   // Fetch meal templates once on mount for the swap panel
@@ -223,6 +224,9 @@ export default function SubscriptionScreen() {
       fetchAll()
     })()
   }, [loading, sub, weekOrders.length, fetchAll])
+
+  // Reset address picker when day changes
+  useEffect(() => { setPickingAddressForOrder(null) }, [selectedDay])
 
   // When a day is selected, look up the counterpart menu's meal so we can show "Free" vs "+₹20"
   useEffect(() => {
@@ -605,18 +609,24 @@ export default function SubscriptionScreen() {
         )}
 
         {/* DELIVERY ADDRESS */}
-        {address && (
-          <View style={s.addressCard}>
-            <View style={s.addressHeader}>
-              <MapPin size={14} color={Colors.primary} />
-              <Text style={s.addressLabel}>{address.label || 'Delivery address'}</Text>
+        {addresses.length > 0 && (() => {
+          const defaultAddr = addresses.find(a => a.is_default) ?? addresses[0]
+          return (
+            <View style={s.addressCard}>
+              <View style={s.addressHeader}>
+                <MapPin size={14} color={Colors.primary} />
+                <Text style={s.addressLabel}>{defaultAddr.label || 'Delivery address'}</Text>
+                {addresses.length > 1 && (
+                  <Text style={s.addressCountBadge}>{addresses.length} addresses</Text>
+                )}
+              </View>
+              <Text style={s.addressLine} numberOfLines={2}>{defaultAddr.line1}</Text>
+              <Pressable onPress={() => router.push('/(app)/addresses')}>
+                <Text style={s.addressEdit}>Manage addresses →</Text>
+              </Pressable>
             </View>
-            <Text style={s.addressLine} numberOfLines={2}>{address.line1}</Text>
-            <Pressable onPress={() => router.push('/(app)/plan-settings')}>
-              <Text style={s.addressEdit}>Edit →</Text>
-            </Pressable>
-          </View>
-        )}
+          )
+        })()}
 
         {/* VIEW PLAN & SETTINGS */}
         <Pressable
@@ -667,9 +677,9 @@ export default function SubscriptionScreen() {
         visible={!!selectedDay}
         transparent
         animationType="slide"
-        onRequestClose={() => setSelectedDay(null)}
+        onRequestClose={() => { setSelectedDay(null); setPickingAddressForOrder(null) }}
       >
-        <Pressable style={s.dayModalOverlay} onPress={() => setSelectedDay(null)}>
+        <Pressable style={s.dayModalOverlay} onPress={() => { setSelectedDay(null); setPickingAddressForOrder(null) }}>
           <Pressable style={s.dayModalSheet} onPress={(e) => e.stopPropagation()}>
             {/* Handle */}
             <View style={s.dayModalHandle} />
@@ -792,6 +802,52 @@ export default function SubscriptionScreen() {
                       })}
                       <View style={{ height: 32 }} />
                     </>
+                  )}
+                </View>
+              )}
+
+              {/* Per-order address section */}
+              {dayOrder && !dayLocked && addresses.length > 0 && (
+                <View style={s.addrPickSection}>
+                  <Text style={s.dayModalSectionLabel}>Deliver to</Text>
+                  {pickingAddressForOrder === dayOrder.id ? (
+                    <View style={{ gap: 8, marginBottom: 8 }}>
+                      {addresses.map((addr) => {
+                        const isSelected = (dayOrder.address_id ?? addresses.find(a => a.is_default)?.id) === addr.id
+                        return (
+                          <Pressable
+                            key={addr.id}
+                            style={[s.addrPickRow, isSelected && s.addrPickRowActive]}
+                            onPress={async () => {
+                              await supabase.from('orders').update({ address_id: addr.id }).eq('id', dayOrder.id)
+                              setWeekOrders(prev => prev.map(o => o.id === dayOrder.id ? { ...o, address_id: addr.id } : o))
+                              setPickingAddressForOrder(null)
+                            }}
+                          >
+                            <View style={{ flex: 1 }}>
+                              <Text style={[s.addrPickLabel, isSelected && { color: Colors.primary }]}>{addr.label}</Text>
+                              <Text style={s.addrPickLine1} numberOfLines={1}>{addr.line1}</Text>
+                            </View>
+                            {isSelected && <Check size={16} color={Colors.primary} strokeWidth={2.5} />}
+                          </Pressable>
+                        )
+                      })}
+                    </View>
+                  ) : (
+                    <Pressable style={s.addrPickCurrent} onPress={() => setPickingAddressForOrder(dayOrder.id)}>
+                      {(() => {
+                        const sel = addresses.find(a => a.id === dayOrder.address_id) ?? addresses.find(a => a.is_default) ?? addresses[0]
+                        return (
+                          <>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.addrPickLabel}>{sel.label}</Text>
+                              <Text style={s.addrPickLine1} numberOfLines={1}>{sel.line1}</Text>
+                            </View>
+                            <Text style={s.addrPickChange}>Change</Text>
+                          </>
+                        )
+                      })()}
+                    </Pressable>
                   )}
                 </View>
               )}
@@ -1134,8 +1190,24 @@ const s = StyleSheet.create({
   },
   addressHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   addressLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
+  addressCountBadge: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.textLight, marginLeft: 4 },
   addressLine: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.text, marginBottom: 10 },
   addressEdit: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
+
+  // Per-order address picker in day modal
+  addrPickSection: { paddingHorizontal: 20, paddingBottom: 16 },
+  addrPickCurrent: {
+    flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 14,
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.primaryLight,
+  },
+  addrPickRow: {
+    flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 14,
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: '#fff',
+  },
+  addrPickRowActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  addrPickLabel: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text },
+  addrPickLine1: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  addrPickChange: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
 
   // Settings link
   settingsRow: {
