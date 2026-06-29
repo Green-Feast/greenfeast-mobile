@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Slot, useRouter, useSegments } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
-import { View } from 'react-native'
+import { Platform, View } from 'react-native'
+import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
 import {
   Poppins_500Medium,
@@ -61,7 +62,9 @@ function AuthGate() {
     const inAppGroup = segments[0] === '(app)'
 
     if (!session) {
-      if (!inAuthGroup) router.replace('/(auth)/phone')
+      // Guests can browse /(app)/ and authenticate via /(auth)/.
+      // Anything else → send to tabs.
+      if (!inAppGroup && !inAuthGroup) router.replace('/(app)/(tabs)')
       return
     }
 
@@ -91,6 +94,22 @@ function AuthGate() {
 }
 
 export default function RootLayout() {
+  // Handle OAuth redirect at root level so it survives Expo Router navigation.
+  // greenfeast:///?code=... triggers Expo Router to navigate to "/" which
+  // unmounts the login screen — this listener is always alive.
+  const handledCode = useRef<string | null>(null)
+  useEffect(() => {
+    if (Platform.OS === 'web') return
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      const { queryParams } = Linking.parse(url)
+      const code = queryParams?.code as string | undefined
+      if (!code || handledCode.current === code) return
+      handledCode.current = code
+      supabase.auth.exchangeCodeForSession(code)
+    })
+    return () => sub.remove()
+  }, [])
+
   const [fontsLoaded] = useFonts({
     Poppins_500Medium,
     Poppins_600SemiBold,
