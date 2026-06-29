@@ -6,6 +6,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -33,7 +34,7 @@ export default function OnboardingPhoneScreen() {
 
     try {
       const response = await OTPWidget.sendOTP({ identifier: msg91Phone })
-      reportDevError(new Error(`sendOTP response: ${JSON.stringify(response)}`), 'sendOTP')
+      Alert.alert('MSG91 sendOTP response', JSON.stringify(response, null, 2))
       if (response?.type === 'success' || response?.reqId) {
         router.push({
           pathname: '/(onboarding)/otp',

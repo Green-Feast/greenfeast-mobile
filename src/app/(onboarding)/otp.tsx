@@ -16,6 +16,7 @@ import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import { reportDevError } from '@/components/DevErrorOverlay'
+import { Alert } from 'react-native'
 
 export default function OnboardingOTPScreen() {
   const { phone, reqId } = useLocalSearchParams<{ phone: string; reqId: string }>()
@@ -33,8 +34,7 @@ export default function OnboardingOTPScreen() {
     setError('')
     try {
       const response = await OTPWidget.verifyOTP({ reqId, otp })
-      // Log full response so dev overlay shows actual MSG91 shape
-      reportDevError(new Error(`verifyOTP response: ${JSON.stringify(response)}`), 'verifyOTP')
+      Alert.alert('MSG91 verifyOTP response', JSON.stringify(response, null, 2))
       const isVerified =
         response?.type === 'success' ||
         (typeof response?.message === 'string' &&
