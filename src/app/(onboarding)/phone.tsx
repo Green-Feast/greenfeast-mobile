@@ -6,48 +6,37 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { OTPWidget } from '@/lib/otp'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import { reportDevError } from '@/components/DevErrorOverlay'
 
 export default function OnboardingPhoneScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const [phone, setPhone] = useState('')
+  const { setPhone } = useAuthStore()
+  const [phone, setPhoneInput] = useState('')
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   const isValid = phone.replace(/\D/g, '').length === 10
 
-  async function handleSendOTP() {
+  async function handleContinue() {
     if (!isValid) return
     setLoading(true)
     setError('')
     const cleanPhone = '+91' + phone.replace(/\D/g, '')
-    const msg91Phone = '91' + phone.replace(/\D/g, '') // no +, with country code
-
     try {
-      const response = await OTPWidget.sendOTP({ identifier: msg91Phone })
-      Alert.alert('MSG91 sendOTP response', JSON.stringify(response, null, 2))
-      if (response?.type === 'success' || response?.reqId) {
-        router.push({
-          pathname: '/(onboarding)/otp',
-          params: { phone: cleanPhone, reqId: response.reqId ?? '' },
-        })
-      } else {
-        const msg = response?.message ?? response?.error ?? JSON.stringify(response)
-        reportDevError(new Error(`MSG91 bad response: ${msg}`), 'sendOTP')
-        setError('Could not send OTP. Please try again.')
-      }
+      const { data: { user } } = await supabase.auth.getUser()
+      await supabase.from('users').update({ phone: cleanPhone }).eq('id', user!.id)
+      setPhone(cleanPhone)
+      router.replace('/(onboarding)/menu')
     } catch (e: any) {
-      reportDevError(e, 'sendOTP')
-      setError(e?.message ?? 'Could not send OTP. Please try again.')
+      setError(e?.message ?? 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -59,9 +48,9 @@ export default function OnboardingPhoneScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={[styles.inner, { paddingTop: insets.top + 24 }]}>
-        <Text style={styles.step}>Verification</Text>
-        <Text style={styles.title}>Verify your number</Text>
-        <Text style={styles.subtitle}>We need your mobile number to coordinate your deliveries.</Text>
+        <Text style={styles.step}>Setup</Text>
+        <Text style={styles.title}>Your mobile number</Text>
+        <Text style={styles.subtitle}>We use this to coordinate your deliveries.</Text>
 
         <View style={styles.form}>
           <Text style={styles.label}>Mobile number</Text>
@@ -76,7 +65,7 @@ export default function OnboardingPhoneScreen() {
               maxLength={10}
               value={phone}
               onChangeText={(t) => {
-                setPhone(t.replace(/\D/g, ''))
+                setPhoneInput(t.replace(/\D/g, ''))
                 setError('')
               }}
               onFocus={() => setFocused(true)}
@@ -91,8 +80,8 @@ export default function OnboardingPhoneScreen() {
 
         <View style={{ flex: 1 }} />
 
-        <Button onPress={handleSendOTP} disabled={!isValid} loading={loading}>
-          Send OTP →
+        <Button onPress={handleContinue} disabled={!isValid} loading={loading}>
+          Continue →
         </Button>
       </View>
     </KeyboardAvoidingView>
