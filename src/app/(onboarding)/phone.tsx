@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -11,16 +10,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { OTPWidget } from '@/lib/otp'
-import { supabase } from '@/lib/supabase'
-import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
-import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
+import { reportDevError } from '@/components/DevErrorOverlay'
 
 export default function OnboardingPhoneScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { setPhone: setStorePhone } = useAuthStore()
   const [phone, setPhone] = useState('')
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -37,16 +33,20 @@ export default function OnboardingPhoneScreen() {
 
     try {
       const response = await OTPWidget.sendOTP({ identifier: msg91Phone })
+      reportDevError(new Error(`sendOTP response: ${JSON.stringify(response)}`), 'sendOTP')
       if (response?.type === 'success' || response?.reqId) {
         router.push({
           pathname: '/(onboarding)/otp',
           params: { phone: cleanPhone, reqId: response.reqId ?? '' },
         })
       } else {
+        const msg = response?.message ?? response?.error ?? JSON.stringify(response)
+        reportDevError(new Error(`MSG91 bad response: ${msg}`), 'sendOTP')
         setError('Could not send OTP. Please try again.')
       }
-    } catch {
-      setError('Could not send OTP. Please try again.')
+    } catch (e: any) {
+      reportDevError(e, 'sendOTP')
+      setError(e?.message ?? 'Could not send OTP. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -93,21 +93,6 @@ export default function OnboardingPhoneScreen() {
         <Button onPress={handleSendOTP} disabled={!isValid} loading={loading}>
           Send OTP →
         </Button>
-
-        {SHOW_DEV_SKIP && (
-          <TouchableOpacity
-            style={styles.devBtn}
-            onPress={async () => {
-              const devPhone = '+917777777777'
-              const { data: { user } } = await supabase.auth.getUser()
-              await supabase.from('users').update({ phone: devPhone }).eq('id', user!.id)
-              setStorePhone(devPhone)
-              router.replace('/(onboarding)/menu')
-            }}
-          >
-            <Text style={styles.devBtnText}>Dev: Skip Phone Verification</Text>
-          </TouchableOpacity>
-        )}
       </View>
     </KeyboardAvoidingView>
   )
@@ -151,6 +136,4 @@ const styles = StyleSheet.create({
   inputFocused: { borderColor: Colors.primary },
   hint: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 10 },
   error: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 8 },
-  devBtn: { marginTop: 16, alignItems: 'center', padding: 10 },
-  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, textDecorationLine: 'underline' },
 })
