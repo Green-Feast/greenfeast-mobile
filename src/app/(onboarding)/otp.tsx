@@ -14,14 +14,14 @@ import { OTPWidget } from '@/lib/otp'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
-import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
+import { reportDevError } from '@/components/DevErrorOverlay'
 
 export default function OnboardingOTPScreen() {
   const { phone, reqId } = useLocalSearchParams<{ phone: string; reqId: string }>()
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { setPhone } = useAuthStore()
+  const { setPhone, authOrigin, setAuthOrigin } = useAuthStore()
   const [otp, setOtp] = useState('')
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -33,11 +33,23 @@ export default function OnboardingOTPScreen() {
     setError('')
     try {
       const response = await OTPWidget.verifyOTP({ reqId, otp })
-      if (response?.type === 'success') {
+      // Log full response so dev overlay shows actual MSG91 shape
+      reportDevError(new Error(`verifyOTP response: ${JSON.stringify(response)}`), 'verifyOTP')
+      const isVerified =
+        response?.type === 'success' ||
+        (typeof response?.message === 'string' &&
+          (response.message.toLowerCase().includes('success') ||
+            response.message.toLowerCase().includes('verified')))
+      if (isVerified) {
         const { data: { user } } = await supabase.auth.getUser()
         await supabase.from('users').update({ phone }).eq('id', user!.id)
         setPhone(phone)
-        router.replace('/(onboarding)/menu')
+        if (authOrigin === 'subscribe') {
+          setAuthOrigin(null)
+          router.replace('/(onboarding)/health')
+        } else {
+          router.replace('/(onboarding)/menu')
+        }
       } else {
         setError('Incorrect OTP. Please try again.')
       }
@@ -49,7 +61,6 @@ export default function OnboardingOTPScreen() {
   }
 
   async function handleResend() {
-    const msg91Phone = phone.replace('+', '')
     await OTPWidget.retryOTP({ reqId })
   }
 
@@ -94,19 +105,7 @@ export default function OnboardingOTPScreen() {
           Verify →
         </Button>
 
-        {SHOW_DEV_SKIP && (
-          <TouchableOpacity
-            style={styles.devBtn}
-            onPress={async () => {
-              const { data: { user } } = await supabase.auth.getUser()
-              await supabase.from('users').update({ phone }).eq('id', user!.id)
-              setPhone(phone)
-              router.replace('/(onboarding)/menu')
-            }}
-          >
-            <Text style={styles.devBtnText}>Dev: Skip OTP</Text>
-          </TouchableOpacity>
-        )}
+
       </View>
     </KeyboardAvoidingView>
   )
@@ -133,6 +132,4 @@ const styles = StyleSheet.create({
   error: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger, marginTop: 12, textAlign: 'center' },
   resend: { alignItems: 'center', marginTop: 20 },
   resendText: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.primary },
-  devBtn: { marginTop: 16, alignItems: 'center', padding: 10 },
-  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, textDecorationLine: 'underline' },
 })
