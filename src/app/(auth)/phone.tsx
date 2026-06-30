@@ -7,9 +7,9 @@ import {
   ActivityIndicator,
   Platform,
   TextInput,
-  KeyboardAvoidingView,
   ScrollView,
 } from 'react-native'
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as WebBrowser from 'expo-web-browser'
 import * as Linking from 'expo-linking'

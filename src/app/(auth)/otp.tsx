@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import {
   View,
   Text,
@@ -6,13 +6,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors } from '@/constants/colors'
+import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 export default function OTPScreen() {
   const { phone } = useLocalSearchParams<{ phone: string }>()
@@ -21,6 +20,7 @@ export default function OTPScreen() {
   const [otp, setOtp] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const inputRef = useAutoFocus()
 
   async function handleVerify() {
     if (otp.length !== 6) return
@@ -48,61 +48,60 @@ export default function OTPScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScreen
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      contentContainerStyle={styles.inner}
     >
-      <View style={styles.inner}>
-        <TouchableOpacity style={styles.back} onPress={() => router.back()}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
+      <TouchableOpacity style={styles.back} onPress={() => router.back()}>
+        <Text style={styles.backText}>← Back</Text>
+      </TouchableOpacity>
 
-        <View style={styles.header}>
-          <Text style={styles.title}>Enter OTP</Text>
-          <Text style={styles.subtitle}>
-            Sent to {phone}
-          </Text>
-        </View>
-
-        <TextInput
-          style={styles.otpInput}
-          placeholder="• • • • • •"
-          keyboardType="number-pad"
-          maxLength={6}
-          value={otp}
-          onChangeText={(t) => {
-            setOtp(t.replace(/\D/g, ''))
-            setError('')
-          }}
-          textAlign="center"
-          placeholderTextColor={Colors.textLight}
-        />
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        <TouchableOpacity
-          style={[styles.button, (otp.length !== 6 || loading) && styles.buttonDisabled]}
-          onPress={handleVerify}
-          disabled={otp.length !== 6 || loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Verify OTP →</Text>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.resend} onPress={handleResend}>
-          <Text style={styles.resendText}>Didn't receive it? Resend OTP</Text>
-        </TouchableOpacity>
+      <View style={styles.header}>
+        <Text style={styles.title}>Enter OTP</Text>
+        <Text style={styles.subtitle}>
+          Sent to {phone}
+        </Text>
       </View>
-    </KeyboardAvoidingView>
+
+      <TextInput
+        ref={inputRef}
+        style={styles.otpInput}
+        placeholder="• • • • • •"
+        keyboardType="number-pad"
+        maxLength={6}
+        value={otp}
+        onChangeText={(t) => {
+          setOtp(t.replace(/\D/g, ''))
+          setError('')
+        }}
+        textAlign="center"
+        placeholderTextColor={Colors.textLight}
+      />
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <TouchableOpacity
+        style={[styles.button, (otp.length !== 6 || loading) && styles.buttonDisabled]}
+        onPress={handleVerify}
+        disabled={otp.length !== 6 || loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Verify OTP →</Text>
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.resend} onPress={handleResend}>
+        <Text style={styles.resendText}>Didn't receive it? Resend OTP</Text>
+      </TouchableOpacity>
+    </KeyboardAwareScreen>
   )
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  inner: { flex: 1, padding: 24, paddingTop: 60 },
+  inner: { flexGrow: 1, padding: 24, paddingTop: 60 },
   back: { marginBottom: 32 },
   backText: { fontSize: 16, color: Colors.primary, fontWeight: '600' },
   header: { marginBottom: 32 },
