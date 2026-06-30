@@ -1,12 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  InteractionManager,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -14,6 +11,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 export default function OnboardingPhoneScreen() {
   const router = useRouter()
@@ -23,20 +21,9 @@ export default function OnboardingPhoneScreen() {
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const inputRef = useRef<TextInput>(null)
+  const inputRef = useAutoFocus()
 
   const isValid = phone.replace(/\D/g, '').length === 10
-
-  // Focus AFTER the screen transition + first layout settle. Using `autoFocus`
-  // opens the keyboard mid-mount, before KeyboardAvoidingView has measured its
-  // full-height frame — which leaves the CTA stuck behind the keyboard until a
-  // second focus. Deferring lets it measure at full height first.
-  useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => {
-      setTimeout(() => inputRef.current?.focus(), 50)
-    })
-    return () => task.cancel()
-  }, [])
 
   async function handleContinue() {
     if (!isValid) return
@@ -56,53 +43,52 @@ export default function OnboardingPhoneScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScreen
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={[styles.inner, { paddingTop: insets.top + 24 }]}>
-        <Text style={styles.step}>Setup</Text>
-        <Text style={styles.title}>Your WhatsApp number</Text>
-        <Text style={styles.subtitle}>We'll send your order updates here on WhatsApp.</Text>
-
-        <View style={styles.form}>
-          <Text style={styles.label}>WhatsApp number</Text>
-          <View style={styles.inputRow}>
-            <View style={styles.countryCode}>
-              <Text style={styles.countryCodeText}>+91</Text>
-            </View>
-            <TextInput
-              ref={inputRef}
-              style={[styles.input, focused && styles.inputFocused]}
-              placeholder="98765 43210"
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={phone}
-              onChangeText={(t) => {
-                setPhoneInput(t.replace(/\D/g, ''))
-                setError('')
-              }}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              placeholderTextColor={Colors.textLight}
-            />
-          </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-        </View>
-
-        <View style={{ flex: 1 }} />
-
+      contentContainerStyle={[styles.inner, { paddingTop: insets.top + 24 }]}
+      footerStyle={styles.footer}
+      footer={
         <Button onPress={handleContinue} disabled={!isValid} loading={loading}>
           Continue →
         </Button>
+      }
+    >
+      <Text style={styles.step}>Setup</Text>
+      <Text style={styles.title}>Your WhatsApp number</Text>
+      <Text style={styles.subtitle}>We'll send your order updates here on WhatsApp.</Text>
+
+      <View style={styles.form}>
+        <Text style={styles.label}>WhatsApp number</Text>
+        <View style={styles.inputRow}>
+          <View style={styles.countryCode}>
+            <Text style={styles.countryCodeText}>+91</Text>
+          </View>
+          <TextInput
+            ref={inputRef}
+            style={[styles.input, focused && styles.inputFocused]}
+            placeholder="98765 43210"
+            keyboardType="phone-pad"
+            maxLength={10}
+            value={phone}
+            onChangeText={(t) => {
+              setPhoneInput(t.replace(/\D/g, ''))
+              setError('')
+            }}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholderTextColor={Colors.textLight}
+          />
+        </View>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScreen>
   )
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  inner: { flex: 1, paddingHorizontal: 24, paddingBottom: 32 },
+  inner: { flexGrow: 1, paddingHorizontal: 24 },
+  footer: { paddingHorizontal: 24 },
   step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
   title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 8 },
   subtitle: { fontFamily: Fonts.body, fontSize: 15, color: Colors.textMuted, lineHeight: 22, marginBottom: 28 },

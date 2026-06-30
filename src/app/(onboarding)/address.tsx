@@ -5,9 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -18,6 +15,7 @@ import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 import LocationPicker, { type LatLng } from '@/components/LocationPicker'
+import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 const ADDRESS_TYPES = [
   { id: 'home', label: '🏠 Home' },
@@ -38,6 +36,7 @@ export default function AddressScreen() {
   const [label, setLabel] = useState('Home')
   const [pin, setPin] = useState<LatLng | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const line1Ref = useAutoFocus()
 
   function validate() {
     const e: Record<string, string> = {}
@@ -96,28 +95,28 @@ export default function AddressScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScreen
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}
     >
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]} showsVerticalScrollIndicator={false}>
-        <SectionProgress current={4} />
-        <View style={styles.header}>
-          <Text style={styles.title}>Where do we deliver?</Text>
-          <Text style={styles.subtitle}>We currently deliver across Jaipur.</Text>
-        </View>
+      <SectionProgress current={4} />
+      <View style={styles.header}>
+        <Text style={styles.title}>Where do we deliver?</Text>
+        <Text style={styles.subtitle}>We currently deliver across Jaipur.</Text>
+      </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Street address</Text>
-          <TextInput
-            style={[styles.input, errors.line1 && styles.inputError]}
-            placeholder="Enter your street address"
-            value={line1}
-            onChangeText={(t) => { setLine1(t); setErrors((e) => ({ ...e, line1: '' })) }}
-            placeholderTextColor={Colors.textLight}
-          />
-          {errors.line1 ? <Text style={styles.error}>{errors.line1}</Text> : null}
-        </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>Street address</Text>
+        <TextInput
+          ref={line1Ref}
+          style={[styles.input, errors.line1 && styles.inputError]}
+          placeholder="Enter your street address"
+          value={line1}
+          onChangeText={(t) => { setLine1(t); setErrors((e) => ({ ...e, line1: '' })) }}
+          placeholderTextColor={Colors.textLight}
+        />
+        {errors.line1 ? <Text style={styles.error}>{errors.line1}</Text> : null}
+      </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Pincode</Text>
@@ -188,8 +187,7 @@ export default function AddressScreen() {
         </View>
 
         <Button onPress={handleNext} style={{ marginTop: 8 }}>Review order →</Button>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScreen>
   )
 }
 

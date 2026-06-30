@@ -4,16 +4,15 @@ import {
   Text,
   StyleSheet,
   Animated,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { ArrowLeft, Sparkles } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import { KeyboardStickyFooter } from '@/components/keyboard'
 
 export type WizardStep = {
   key: string
@@ -40,6 +39,7 @@ type Props = {
 export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, onExitFirst }: Props) {
   const insets = useSafeAreaInsets()
   const [index, setIndex] = useState(0)
+  const [footerHeight, setFooterHeight] = useState(0)
   const fade = useRef(new Animated.Value(1)).current
   const slide = useRef(new Animated.Value(0)).current
 
@@ -74,10 +74,7 @@ export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, on
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={styles.container}>
       {/* Progress header */}
       <View style={[styles.top, { paddingTop: insets.top + 12 }]}>
         <Pressable onPress={back} hitSlop={10} style={styles.backBtn}>
@@ -96,21 +93,23 @@ export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, on
             <View style={styles.content}>{step.render()}</View>
           </View>
         ) : (
-          <ScrollView
+          <KeyboardAwareScrollView
+            style={styles.fillView}
             contentContainerStyle={styles.scroll}
+            bottomOffset={24 + footerHeight}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
             <QuestionCard step={step} />
             <View style={styles.content}>{step.render()}</View>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         )}
       </Animated.View>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+      <KeyboardStickyFooter style={styles.footer} basePadding={16} onMeasure={setFooterHeight}>
         <Button onPress={next} disabled={!step.canNext}>{isLast ? nextLabel : 'Continue →'}</Button>
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardStickyFooter>
+    </View>
   )
 }
 
@@ -137,6 +136,7 @@ const styles = StyleSheet.create({
   count: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, minWidth: 32, textAlign: 'right' },
 
   body: { flex: 1 },
+  fillView: { flex: 1 },
   scroll: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24, flexGrow: 1 },
 
   // The question presented as a card with an icon badge — gives each step

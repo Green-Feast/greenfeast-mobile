@@ -1,18 +1,16 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  InteractionManager,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 export default function OnboardingNameScreen() {
   const router = useRouter()
@@ -21,7 +19,7 @@ export default function OnboardingNameScreen() {
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const inputRef = useRef<TextInput>(null)
+  const inputRef = useAutoFocus()
 
   const isValid = name.trim().length >= 2
 
@@ -32,17 +30,6 @@ export default function OnboardingNameScreen() {
       if (meta?.full_name) setName(meta.full_name)
       else if (meta?.name) setName(meta.name)
     })
-  }, [])
-
-  // Focus AFTER the screen transition + first layout settle. Using `autoFocus`
-  // opens the keyboard mid-mount, before KeyboardAvoidingView has measured its
-  // full-height frame — which leaves the CTA stuck behind the keyboard until a
-  // second focus. Deferring lets it measure at full height first.
-  useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => {
-      setTimeout(() => inputRef.current?.focus(), 50)
-    })
-    return () => task.cancel()
   }, [])
 
   async function handleContinue() {
@@ -71,48 +58,47 @@ export default function OnboardingNameScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScreen
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={[styles.inner, { paddingTop: insets.top + 24 }]}>
-        <Text style={styles.step}>Welcome</Text>
-        <Text style={styles.title}>Confirm your name</Text>
-
-        <View style={styles.form}>
-          <Text style={styles.label}>Your name</Text>
-          <TextInput
-            ref={inputRef}
-            style={[styles.input, focused && styles.inputFocused, !!error && styles.inputError]}
-            placeholder="Enter your full name"
-            value={name}
-            onChangeText={(t) => {
-              setName(t)
-              setError('')
-            }}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            placeholderTextColor={Colors.textLight}
-            autoCapitalize="words"
-            returnKeyType="done"
-            onSubmitEditing={handleContinue}
-          />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-        </View>
-
-        <View style={{ flex: 1 }} />
-
+      contentContainerStyle={[styles.inner, { paddingTop: insets.top + 24 }]}
+      footerStyle={styles.footer}
+      footer={
         <Button onPress={handleContinue} disabled={!isValid} loading={loading}>
           Continue →
         </Button>
+      }
+    >
+      <Text style={styles.step}>Welcome</Text>
+      <Text style={styles.title}>Confirm your name</Text>
+
+      <View style={styles.form}>
+        <Text style={styles.label}>Your name</Text>
+        <TextInput
+          ref={inputRef}
+          style={[styles.input, focused && styles.inputFocused, !!error && styles.inputError]}
+          placeholder="Enter your full name"
+          value={name}
+          onChangeText={(t) => {
+            setName(t)
+            setError('')
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholderTextColor={Colors.textLight}
+          autoCapitalize="words"
+          returnKeyType="done"
+          onSubmitEditing={handleContinue}
+        />
+        {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScreen>
   )
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  inner: { flex: 1, paddingHorizontal: 24, paddingBottom: 32 },
+  inner: { flexGrow: 1, paddingHorizontal: 24 },
+  footer: { paddingHorizontal: 24 },
   step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
   title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 28 },
   form: {
