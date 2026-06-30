@@ -14,8 +14,8 @@
 
 | Code | Screen | Next | Notes |
 |------|--------|------|-------|
-| 2A | Phone (Login) | 2B | OAuth + email/password |
-| 2B | OTP | 3A | Verify phone (if SMS) |
+| 2A | Sign Up | 3A | New account creation |
+| 2B | Sign In | 3A | Returning user login |
 | 3A | Name | 3B | Confirm full name |
 | 3B | Phone (Onboarding) | 3C | WhatsApp number |
 | 3C | What Would You Like to Explore? | SF1 (Build Plan) / Logged In Guest App | Skip or proceed |

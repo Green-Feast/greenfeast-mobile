@@ -41,7 +41,7 @@ export default function OnboardingNameScreen() {
     if (!user) {
       // Session points to a deleted/expired auth user — clear it and restart.
       await supabase.auth.signOut()
-      router.replace('/(auth)/phone')
+      router.replace('/(auth)/login')
       return
     }
     const { error: updateError } = await supabase

@@ -44,7 +44,7 @@ export default function AccountScreen() {
     await signOut()
     // AuthGate also redirects on session=null; this is an explicit fallback so
     // logout can never appear to do nothing.
-    router.replace('/(auth)/phone')
+    router.replace('/(auth)/login')
   }
 
   async function handleDevReset() {
