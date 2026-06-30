@@ -57,7 +57,7 @@
 | Code | Screen | Next | Notes |
 |------|--------|------|-------|
 | SF13 | Payment Screen | SF13B | Online / COD choice |
-| SF13B | Welcome to GreenFeast | Subscribed App | Success screen |
+| SF13B | Welcome to GreenFeast (modal) | Subscribed App | Success modal overlaid on SF13 — shows 🎉, payment confirmed, first delivery date, "Get started →" CTA |
 
 ### GUEST APP (Unsubscribed, Not Logged In)
 
