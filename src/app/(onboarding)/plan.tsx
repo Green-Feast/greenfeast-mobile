@@ -10,7 +10,7 @@ import {
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { ArrowLeft } from 'lucide-react-native'
+import { ArrowLeft, Info } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useOnboardingStore, type PlanId, type AddOnSelection } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
@@ -29,6 +29,10 @@ type Addon = {
   name: string
   description: string | null
   price_per_meal: number
+  kcal: number | null
+  protein: number | null
+  carbs: number | null
+  fat: number | null
 }
 
 const SMOOTHIE_OPTIONS = ['Berry Banana Protein', 'Watermelon Mint Chia', 'Creamy Avocado']
@@ -55,6 +59,7 @@ export default function PlanScreen() {
   })
   const [subOptions, setSubOptions] = useState<Record<string, string>>({})
   const [subOptionModal, setSubOptionModal] = useState<string | null>(null)
+  const [macroModal, setMacroModal] = useState<Addon | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -192,7 +197,16 @@ export default function PlanScreen() {
                   </TouchableOpacity>
                 )}
               </View>
-              <Text style={styles.addonPrice}>{fmt(a.price_per_meal)}/meal</Text>
+              <View style={styles.addonRight}>
+                <TouchableOpacity
+                  style={styles.infoBtn}
+                  onPress={() => setMacroModal(a)}
+                  hitSlop={8}
+                >
+                  <Info size={16} color={Colors.textMuted} />
+                </TouchableOpacity>
+                <Text style={styles.addonPrice}>{fmt(a.price_per_meal)}/meal</Text>
+              </View>
             </TouchableOpacity>
           )
         })}
@@ -253,7 +267,41 @@ export default function PlanScreen() {
           ))}
         </View>
       </Modal>
+
+      {/* Add-on macro popover */}
+      <Modal
+        visible={!!macroModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMacroModal(null)}
+      >
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setMacroModal(null)} />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          {macroModal && (
+            <>
+              <Text style={styles.sheetTitle}>{macroModal.name} · per meal</Text>
+              {macroModal.description && <Text style={styles.macroDesc}>{macroModal.description}</Text>}
+              <View style={styles.macroGrid}>
+                <MacroBox label="Kcal" value={macroModal.kcal != null ? `${macroModal.kcal}` : '—'} />
+                <MacroBox label="Protein" value={macroModal.protein != null ? `${macroModal.protein}g` : '—'} />
+                <MacroBox label="Carbs" value={macroModal.carbs != null ? `${macroModal.carbs}g` : '—'} />
+                <MacroBox label="Fat" value={macroModal.fat != null ? `${macroModal.fat}g` : '—'} />
+              </View>
+            </>
+          )}
+        </View>
+      </Modal>
     </ScrollView>
+  )
+}
+
+function MacroBox({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.macroBox}>
+      <Text style={styles.macroVal}>{value}</Text>
+      <Text style={styles.macroLbl}>{label}</Text>
+    </View>
   )
 }
 
@@ -325,6 +373,15 @@ const styles = StyleSheet.create({
   addonName: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
   addonDesc: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
   changeVariant: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, marginTop: 4 },
+  addonRight: { alignItems: 'flex-end', gap: 8 },
+  infoBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
   addonPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
   priceSummary: {
     backgroundColor: '#fff',
@@ -362,4 +419,9 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   sheetOptionText: { fontFamily: Fonts.body, fontSize: 15, color: Colors.text },
+  macroDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19, marginBottom: 16 },
+  macroGrid: { flexDirection: 'row', gap: 10 },
+  macroBox: { flex: 1, backgroundColor: Colors.primaryLight, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  macroVal: { fontFamily: Fonts.headingSemi, fontSize: 18, color: Colors.primary },
+  macroLbl: { fontFamily: Fonts.body, fontSize: 11, color: Colors.primary, marginTop: 2 },
 })

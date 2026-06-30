@@ -1,4 +1,6 @@
-// Full menu browse — restyled to match the demo's MenuExplore aesthetic.
+// Full menu browse — 2-column image-card grid matching the onboarding
+// "Explore our menu" aesthetic. Category pills live in a fixed header so they
+// never get clipped, and images are cached via expo-image.
 import { useEffect, useState } from 'react'
 import {
   View,
@@ -8,20 +10,25 @@ import {
   StyleSheet,
   Modal,
   ScrollView,
-  ActivityIndicator,
-  Image,
+  Dimensions,
 } from 'react-native'
+import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { X } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
+import Skeleton from '@/components/Skeleton'
+
+const { width } = Dimensions.get('window')
+const CARD_WIDTH = (width - 48) / 2
 
 type Meal = {
   id: string
   name: string
   category: string
   description: string | null
+  price: number | null
   kcal: number | null
   protein: number | null
   carbs: number | null
@@ -31,6 +38,14 @@ type Meal = {
 }
 
 const CATEGORIES = ['All', 'Bowl', 'Wrap', 'Salad', 'Toast', 'Smoothie']
+const CATEGORY_EMOJIS: Record<string, string> = {
+  bowl: '🥗', wrap: '🌯', salad: '🥙', toast: '🍞', smoothie: '🥤',
+}
+
+function formatPrice(paise: number | null) {
+  if (paise == null) return ''
+  return `₹${(paise / 100).toFixed(0)}`
+}
 
 export default function MenuScreen() {
   const insets = useSafeAreaInsets()
@@ -46,10 +61,13 @@ export default function MenuScreen() {
       try {
         const { data } = await supabase
           .from('meal_templates')
-          .select('id, name, category, description, kcal, protein, carbs, fat, tags, image_url')
+          .select('id, name, category, description, price, kcal, protein, carbs, fat, tags, image_url')
           .eq('is_active', true)
           .order('category')
-        setMeals((data ?? []) as Meal[])
+        const list = (data ?? []) as Meal[]
+        setMeals(list)
+        // Warm the image cache so cards render instantly on re-entry.
+        Image.prefetch(list.map((m) => m.image_url).filter(Boolean) as string[])
       } catch {
         // transient/network — leave the list empty rather than spinning forever
       } finally {
@@ -61,22 +79,11 @@ export default function MenuScreen() {
   const filtered =
     activeCategory === 'All' ? meals : meals.filter((m) => m.category === activeCategory.toLowerCase())
 
-  if (loading) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    )
-  }
-
   return (
     <View style={styles.container}>
+      {/* Fixed header + category pills */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <Text style={styles.title}>Our Menu</Text>
-        <Text style={styles.subtitle}>{meals.length} meals · rotates weekly</Text>
-      </View>
-
-      <View>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -97,47 +104,59 @@ export default function MenuScreen() {
         </ScrollView>
       </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => (
-          <Pressable
-            style={({ pressed }) => [styles.mealCard, pressed && styles.mealCardPressed]}
-            onPress={() => setSelected(item)}
-          >
-            <View style={styles.mealCardLeft}>
-              <Text style={styles.mealName}>{item.name}</Text>
-              <Text style={styles.mealMeta}>
-                {item.kcal ? `${item.kcal} kcal` : ''}
-                {item.protein ? ` · ${item.protein}g protein` : ''}
-              </Text>
-              {item.tags.length > 0 && (
-                <View style={styles.tagRow}>
-                  {item.tags.slice(0, 3).map((tag) => (
-                    <View key={tag} style={styles.tag}>
-                      <Text style={styles.tagText}>{tag}</Text>
-                    </View>
-                  ))}
+      {loading ? (
+        <View style={styles.grid}>
+          <View style={styles.row}>
+            {[0, 1].map((i) => <Skeleton key={i} width={CARD_WIDTH} height={170} borderRadius={16} />)}
+          </View>
+          <View style={[styles.row, { marginTop: 12 }]}>
+            {[0, 1].map((i) => <Skeleton key={i} width={CARD_WIDTH} height={170} borderRadius={16} />)}
+          </View>
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item.id}
+          numColumns={2}
+          contentContainerStyle={styles.grid}
+          columnWrapperStyle={styles.row}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <Pressable
+              style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+              onPress={() => setSelected(item)}
+            >
+              {item.image_url ? (
+                <Image
+                  source={{ uri: item.image_url }}
+                  style={styles.cardImage}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={150}
+                />
+              ) : (
+                <View style={styles.cardEmoji}>
+                  <Text style={styles.emojiText}>{CATEGORY_EMOJIS[item.category] ?? '🍽️'}</Text>
                 </View>
               )}
+              <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+              {item.price != null && <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>}
+              {item.tags?.length > 0 && (
+                <View style={styles.tagRow}>
+                  <View style={styles.tag}>
+                    <Text style={styles.tagText}>{item.tags[0]}</Text>
+                  </View>
+                </View>
+              )}
+            </Pressable>
+          )}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyText}>No meals in this category yet.</Text>
             </View>
-            {item.image_url ? (
-              <Image source={{ uri: item.image_url }} style={styles.mealThumb} />
-            ) : (
-              <View style={styles.categoryChip}>
-                <Text style={styles.categoryChipText}>{item.category}</Text>
-              </View>
-            )}
-          </Pressable>
-        )}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No meals in this category yet.</Text>
-          </View>
-        }
-      />
+          }
+        />
+      )}
 
       {/* Detail modal */}
       <Modal visible={!!selected} transparent animationType="slide" onRequestClose={() => setSelected(null)}>
@@ -148,9 +167,14 @@ export default function MenuScreen() {
             </Pressable>
 
             {selected && (
-              <>
+              <ScrollView showsVerticalScrollIndicator={false}>
                 {selected.image_url && (
-                  <Image source={{ uri: selected.image_url }} style={styles.modalImage} />
+                  <Image
+                    source={{ uri: selected.image_url }}
+                    style={styles.modalImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                  />
                 )}
                 <Text style={styles.modalName}>{selected.name}</Text>
                 <Text style={styles.modalCategory}>{selected.category}</Text>
@@ -164,8 +188,8 @@ export default function MenuScreen() {
                   {selected.fat != null && <Macro value={`${selected.fat}g`} label="fat" />}
                 </View>
 
-                {selected.tags.length > 0 && (
-                  <View style={styles.tagRow}>
+                {selected.tags?.length > 0 && (
+                  <View style={styles.tagsWrap}>
                     {selected.tags.map((tag) => (
                       <View key={tag} style={styles.tagYellow}>
                         <Text style={styles.tagYellowText}>{tag}</Text>
@@ -173,7 +197,7 @@ export default function MenuScreen() {
                     ))}
                   </View>
                 )}
-              </>
+              </ScrollView>
             )}
           </Pressable>
         </Pressable>
@@ -193,12 +217,10 @@ function Macro({ value, label }: { value: string; label: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
   header: { paddingHorizontal: 16, paddingBottom: 8 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text },
-  subtitle: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginTop: 2 },
+  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 12 },
 
-  tabs: { paddingHorizontal: 16, gap: 8, paddingVertical: 12 },
+  tabs: { gap: 8, paddingRight: 16, paddingVertical: 2 },
   tab: {
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -211,58 +233,60 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
   tabTextActive: { color: '#fff' },
 
-  list: { paddingHorizontal: 16, paddingBottom: 32, gap: 10 },
-  mealCard: {
+  grid: { padding: 16, paddingBottom: 32 },
+  row: { gap: 12, marginBottom: 12 },
+  card: {
+    width: CARD_WIDTH,
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    padding: 14,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  mealCardPressed: { transform: [{ scale: 0.97 }] },
-  mealCardLeft: { flex: 1, gap: 4 },
-  mealThumb: { width: 60, height: 60, borderRadius: 12, marginLeft: 12 },
-  mealName: { fontFamily: Fonts.headingSemi, fontSize: 15, color: Colors.text },
-  mealMeta: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
-  categoryChip: {
+  cardPressed: { transform: [{ scale: 0.97 }] },
+  cardImage: { width: '100%', height: 110, borderRadius: 10, marginBottom: 8, backgroundColor: Colors.primaryLight },
+  cardEmoji: {
+    width: '100%',
+    height: 110,
+    borderRadius: 10,
     backgroundColor: Colors.primaryLight,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
   },
-  categoryChipText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.primary, textTransform: 'capitalize' },
-
-  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  emojiText: { fontSize: 40 },
+  cardName: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginBottom: 4, lineHeight: 18 },
+  cardPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary, marginBottom: 6 },
+  tagRow: { flexDirection: 'row' },
   tag: { backgroundColor: Colors.primaryLight, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   tagText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.primary },
-  tagYellow: { backgroundColor: Colors.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  tagYellowText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.text },
 
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyText: { fontFamily: Fonts.body, color: Colors.textMuted, fontSize: 14 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalImage: { width: '100%', height: 200, borderRadius: 16, marginBottom: 4 },
   modalCard: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 28,
     paddingBottom: 48,
+    maxHeight: '85%',
     gap: 10,
   },
   modalClose: { alignSelf: 'flex-end', padding: 4 },
+  modalImage: { width: '100%', height: 200, borderRadius: 16, marginBottom: 8, backgroundColor: Colors.primaryLight },
   modalName: { fontFamily: Fonts.heading, fontSize: 22, color: Colors.text },
   modalCategory: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, textTransform: 'capitalize', marginTop: -4 },
-  modalDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20 },
-  macrosRow: { flexDirection: 'row', gap: 10, marginVertical: 4 },
+  modalDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20, marginTop: 6 },
+  macrosRow: { flexDirection: 'row', gap: 10, marginVertical: 8 },
   macroBox: { flex: 1, backgroundColor: Colors.primaryLight, borderRadius: 12, paddingVertical: 10, alignItems: 'center' },
   macroVal: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.primary },
   macroLbl: { fontFamily: Fonts.body, fontSize: 11, color: Colors.primary },
+  tagsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tagYellow: { backgroundColor: Colors.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  tagYellowText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.text },
 })

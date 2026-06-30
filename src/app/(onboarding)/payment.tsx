@@ -7,6 +7,7 @@ import {
   ScrollView,
   Modal,
   ActivityIndicator,
+  Linking,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -95,6 +96,8 @@ export default function PaymentScreen() {
       city: 'Jaipur',
       pincode: store.addressPincode,
       landmark: store.addressLandmark || null,
+      lat: store.addressLat,
+      lng: store.addressLng,
       is_default: true,
     }
     const { data: existingAddr } = await supabase
@@ -412,7 +415,7 @@ export default function PaymentScreen() {
           </View>
           <View style={styles.methodText}>
             <Text style={styles.methodTitle}>Cash on Delivery</Text>
-            <Text style={styles.methodDesc}>Pay when your food arrives</Text>
+            <Text style={styles.methodDesc}>Confirm your order on WhatsApp</Text>
           </View>
           <Text style={styles.methodIcon}>💵</Text>
         </TouchableOpacity>
@@ -429,8 +432,8 @@ export default function PaymentScreen() {
         {method === 'cod' && (
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
-              Your subscription will start once our team confirms receipt of payment. We'll call you to
-              collect on your first delivery day.
+              For Cash on Delivery we confirm your order over WhatsApp. Once your setup is done we'll
+              open WhatsApp for you — no need to come back here.
             </Text>
           </View>
         )}
@@ -473,10 +476,21 @@ export default function PaymentScreen() {
                 : `Payment confirmed.\nYour subscription is active!\nFirst delivery: ${firstDelivery}`}
             </Text>
             <Button
-              onPress={() => router.replace('/(onboarding)/customise')}
+              onPress={() => {
+                // COD orders are confirmed over WhatsApp — open it now, at the
+                // very end of the flow, so the user never has to come back.
+                if (method === 'cod') {
+                  const msg = encodeURIComponent(
+                    `Hi GreenFeast! I just set up my ${store.planName || ''} plan on Cash on Delivery. Please confirm my order.`
+                  )
+                  Linking.openURL(`https://wa.me/918829040566?text=${msg}`).catch(() => {})
+                }
+                store.reset()
+                router.replace('/(app)/(tabs)')
+              }}
               style={{ marginTop: 8 }}
             >
-              Finish setup →
+              {method === 'cod' ? 'Confirm on WhatsApp →' : 'Get started →'}
             </Button>
           </View>
         </View>

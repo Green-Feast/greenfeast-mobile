@@ -17,7 +17,8 @@ interface OnboardingState {
   height: string
   weight: string
   proteinTarget: string         // optional daily protein target (g)
-  healthGoal: HealthGoal | null
+  healthGoal: HealthGoal | null // = goalRanking[0]; drives questionnaire + engine
+  goalRanking: HealthGoal[]     // full priority order (drag-to-rank)
   exerciseType: string[]
   exerciseFrequency: string
   occupation: string
@@ -59,6 +60,8 @@ interface OnboardingState {
   addressPincode: string
   addressLabel: string
   addressType: 'home' | 'office' | 'other'
+  addressLat: number | null
+  addressLng: number | null
 
   // Actions
   setHealthProfile: (fields: {
@@ -66,6 +69,7 @@ interface OnboardingState {
     weight: string
     proteinTarget: string
     healthGoal: HealthGoal
+    goalRanking: HealthGoal[]
     exerciseType: string[]
     exerciseFrequency: string
     occupation: string
@@ -98,6 +102,8 @@ interface OnboardingState {
     addressPincode: string
     addressLabel: string
     addressType: 'home' | 'office' | 'other'
+    addressLat: number | null
+    addressLng: number | null
   }) => void
   reset: () => void
 }
@@ -111,6 +117,7 @@ const defaultState: Omit<OnboardingState, ActionKeys> = {
   weight: '',
   proteinTarget: '',
   healthGoal: null,
+  goalRanking: [],
   exerciseType: [],
   exerciseFrequency: '',
   occupation: '',
@@ -140,6 +147,8 @@ const defaultState: Omit<OnboardingState, ActionKeys> = {
   addressPincode: '',
   addressLabel: 'Home',
   addressType: 'home',
+  addressLat: null,
+  addressLng: null,
 }
 
 export const useOnboardingStore = create<OnboardingState>((set) => ({

@@ -9,8 +9,9 @@ import {
   ScrollView,
   ActivityIndicator,
   Dimensions,
-  Image,
 } from 'react-native'
+import { Image } from 'expo-image'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { Colors } from '@/constants/colors'
@@ -55,6 +56,7 @@ function formatPrice(paise: number) {
 
 export default function MenuScreen() {
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const [meals, setMeals] = useState<Meal[]>([])
   const [loading, setLoading] = useState(true)
   const [activeCategory, setActiveCategory] = useState('all')
@@ -83,7 +85,7 @@ export default function MenuScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <Text style={styles.title}>Explore our menu</Text>
         <Text style={styles.subtitle}>Fresh, nutritious meals made daily</Text>
       </View>
@@ -121,7 +123,13 @@ export default function MenuScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.card} onPress={() => setSelected(item)}>
               {item.image_url ? (
-                <Image source={{ uri: item.image_url }} style={styles.cardImage} />
+                <Image
+                  source={{ uri: item.image_url }}
+                  style={styles.cardImage}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={150}
+                />
               ) : (
                 <View style={styles.cardEmoji}>
                   <Text style={styles.emojiText}>{CATEGORY_EMOJIS[item.category] ?? '🍽️'}</Text>
@@ -154,7 +162,12 @@ export default function MenuScreen() {
             <View style={styles.sheetHandle} />
             <ScrollView showsVerticalScrollIndicator={false}>
               {selected.image_url ? (
-                <Image source={{ uri: selected.image_url }} style={styles.sheetImage} />
+                <Image
+                  source={{ uri: selected.image_url }}
+                  style={styles.sheetImage}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                />
               ) : (
                 <View style={styles.sheetEmoji}>
                   <Text style={styles.sheetEmojiText}>{CATEGORY_EMOJIS[selected.category] ?? '🍽️'}</Text>
@@ -213,11 +226,11 @@ function MacroBox({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12 },
+  header: { paddingHorizontal: 20, paddingBottom: 12 },
   title: { fontSize: 26, fontWeight: '800', color: Colors.text },
   subtitle: { fontSize: 14, color: Colors.textMuted, marginTop: 4 },
-  tabs: { maxHeight: 48 },
-  tabsContent: { paddingHorizontal: 16, gap: 8, alignItems: 'center' },
+  tabs: { maxHeight: 56, flexGrow: 0 },
+  tabsContent: { paddingHorizontal: 16, gap: 8, alignItems: 'center', paddingVertical: 4 },
   tab: {
     paddingHorizontal: 16,
     paddingVertical: 8,

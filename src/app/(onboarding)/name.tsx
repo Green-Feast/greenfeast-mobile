@@ -65,7 +65,6 @@ export default function OnboardingNameScreen() {
       <View style={[styles.inner, { paddingTop: insets.top + 24 }]}>
         <Text style={styles.step}>Welcome</Text>
         <Text style={styles.title}>Confirm your name</Text>
-        <Text style={styles.subtitle}>We'll use this to personalise your experience.</Text>
 
         <View style={styles.form}>
           <Text style={styles.label}>Your name</Text>
@@ -102,8 +101,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   inner: { flex: 1, paddingHorizontal: 24, paddingBottom: 32 },
   step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
-  title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 8 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 15, color: Colors.textMuted, lineHeight: 22, marginBottom: 28 },
+  title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 28 },
   form: {
     backgroundColor: '#fff',
     borderRadius: 16,

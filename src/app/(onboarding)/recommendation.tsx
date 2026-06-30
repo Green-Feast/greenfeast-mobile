@@ -1,21 +1,39 @@
-import { useEffect, useState, useCallback } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  Dimensions,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+} from 'react-native'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Check } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useOnboardingStore, type AddOnSelection } from '@/store/onboarding'
-import { MENU_LABELS, M2_INFO } from '@/lib/recommendation'
+import { MENU_LABELS, M2_INFO, CONSTRAINT_LABELS } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 
 type Plan = { id: string; name: string; meals_total: number; base_price: number }
-type Addon = { id: string; name: string; description: string | null; price_per_meal: number }
+type Addon = {
+  id: string
+  name: string
+  description: string | null
+  price_per_meal: number
+  kcal: number | null
+  protein: number | null
+  carbs: number | null
+  fat: number | null
+}
 
-// Representative protein per meal — makes the "toward your target" line concrete
-// without committing to a specific dish (real value varies 18–28g across the menu).
-const AVG_PROTEIN_PER_MEAL = 25
+const { width } = Dimensions.get('window')
+const PAGE_W = width
 
 function fmt(paise: number) {
   return `₹${(paise / 100).toLocaleString('en-IN')}`
@@ -24,11 +42,13 @@ function fmt(paise: number) {
 export default function RecommendationScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { recommendation, allergens, proteinTarget, setPlan } = useOnboardingStore()
+  const { recommendation, allergens, proteinTarget, dietaryFreeText, setPlan } = useOnboardingStore()
 
   const [plans, setPlans] = useState<Plan[]>([])
   const [addons, setAddons] = useState<Addon[]>([])
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(0)
+  const scrollRef = useRef<ScrollView>(null)
 
   useEffect(() => {
     Promise.all([
@@ -41,7 +61,6 @@ export default function RecommendationScreen() {
     }).catch(() => setLoading(false))
   }, [])
 
-  // Guard: only redirect when this screen is actually focused (not during background re-renders)
   useFocusEffect(
     useCallback(() => {
       if (!recommendation) router.replace('/(onboarding)/health')
@@ -58,114 +77,238 @@ export default function RecommendationScreen() {
     )
   }
 
-  const { planName, tagline, menuType, derivedAddons, recommendedMealCount, recommendedPlanId } = recommendation
+  const { planName, tagline, menuType, derivedAddons, derivedConstraints, recommendedPlanId } = recommendation
 
   const plan = plans.find((p) => p.id === recommendedPlanId)
   const trialPlan = plans.find((p) => p.id === 'trial')
   const addonRows = addons.filter((a) => derivedAddons.includes(a.id))
   const addonPerMeal = addonRows.reduce((s, a) => s + a.price_per_meal, 0)
 
-  const perMealAllIn = plan ? Math.round(plan.base_price / plan.meals_total) + addonPerMeal : 0
-  const total = plan ? plan.base_price + addonPerMeal * plan.meals_total : 0
+  const mealsTotal = plan?.meals_total ?? 0
+  const baseMealRate = plan ? Math.round(plan.base_price / Math.max(plan.meals_total, 1)) : 0
+  const perMealAllIn = baseMealRate + addonPerMeal
+  const total = plan ? plan.base_price + addonPerMeal * mealsTotal : 0
   const trialTotal = trialPlan ? trialPlan.base_price + addonPerMeal * trialPlan.meals_total : 0
 
   const proteinNum = parseInt(proteinTarget)
   const showProtein = !isNaN(proteinNum) && proteinNum > 0
+  const hasExtraProtein = derivedAddons.includes('extra-protein')
+  const proteinPerMeal = hasExtraProtein ? 35 : 25
+
+  // Approx per-meal macros = a balanced base meal + each add-on's contribution.
+  // Base protein (25) + extra-protein add-on (+10) lands at the 35g headline.
+  const BASE_MEAL = { kcal: 450, protein: 25, carbs: 45, fat: 15 }
+  const sumMacro = (k: 'kcal' | 'protein' | 'carbs' | 'fat') =>
+    addonRows.reduce((s, a) => s + (a[k] ?? 0), 0)
+  const mealMacros = {
+    kcal: Math.round(BASE_MEAL.kcal + sumMacro('kcal')),
+    protein: Math.round(BASE_MEAL.protein + sumMacro('protein')),
+    carbs: Math.round(BASE_MEAL.carbs + sumMacro('carbs')),
+    fat: Math.round(BASE_MEAL.fat + sumMacro('fat')),
+  }
+
+  // Free-text dietary notes → individual green pills.
+  const freeTextPills = dietaryFreeText
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  // Green pills: allergen "X Free" + free-text notes + derived constraints.
+  const pills = [
+    ...allergens.map((a) => `${a} Free`),
+    ...freeTextPills,
+    ...derivedConstraints.map((c) => CONSTRAINT_LABELS[c] ?? c),
+  ]
+
+  const menuStyle = menuType === 'M2'
+    ? M2_INFO
+    : {
+        title: 'Global Kitchen',
+        body: 'A rotating world tour of balanced, protein-forward meals — never repetitive, always satisfying. Want something different on a given day? Swap freely, anytime.',
+      }
 
   function buildAddOns(): AddOnSelection[] {
     return addonRows.map((a) => ({ id: a.id, name: a.name, pricePerMeal: a.price_per_meal }))
   }
-
   function handleAccept() {
     setPlan(recommendedPlanId, planName, buildAddOns())
     router.push('/(onboarding)/days')
   }
-
   function handleTrial() {
     setPlan('trial', planName, buildAddOns())
     router.push('/(onboarding)/days')
   }
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    setPage(Math.round(e.nativeEvent.contentOffset.x / PAGE_W))
+  }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}>
-      <SectionProgress current={3} />
-
-      {/* Main plan card */}
-      <View style={styles.planCard}>
-        <View style={styles.planCardTop}>
-          <Text style={styles.eyebrow}>Built for you</Text>
-          <Text style={styles.planName}>{planName}</Text>
-          <Text style={styles.tagline}>{tagline}</Text>
-          <View style={styles.menuBadge}>
-            <Text style={styles.menuBadgeText}>{MENU_LABELS[menuType]}</Text>
-          </View>
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <View style={styles.padded}>
+          <SectionProgress current={3} />
         </View>
 
-        <View style={styles.divider} />
+        {/* 4-card carousel */}
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={onScroll}
+        >
+          {/* Card 1 — Recommendation */}
+          <Page>
+            <View style={styles.card}>
+              <Text style={styles.eyebrow}>Built for you</Text>
+              <Text style={styles.planName}>{planName}</Text>
+              <Text style={styles.tagline}>{tagline}</Text>
+              <View style={styles.menuBadge}>
+                <Text style={styles.menuBadgeText}>{MENU_LABELS[menuType]}</Text>
+              </View>
 
-        <View style={styles.planCardBottom}>
-          {/* Checklist */}
-          <View style={styles.checklist}>
-            {addonRows.map((a) => (
-              <ChecklistItem key={a.id} label={`${a.name} included`} />
-            ))}
-            <ChecklistItem label={`${recommendedMealCount} meals a month`} />
-            <ChecklistItem label="No repeat meals for 12+ days" />
-          </View>
+              <View style={styles.checklist}>
+                {addonRows.map((a) => <ChecklistItem key={a.id} label={`${a.name} included`} />)}
+                <ChecklistItem label="No repeat meals for 12+ days" />
+              </View>
 
-          {/* Allergen trust badges */}
-          {allergens.length > 0 && (
-            <View style={styles.badgeRow}>
-              {allergens.map((a) => (
-                <View key={a} style={styles.badge}>
-                  <Text style={styles.badgeText}>{a} Free</Text>
+              {pills.length > 0 && (
+                <View style={styles.pillRow}>
+                  {pills.map((p) => (
+                    <View key={p} style={styles.pill}><Text style={styles.pillText}>{p}</Text></View>
+                  ))}
                 </View>
-              ))}
+              )}
+
+              {showProtein && (
+                <Text style={styles.proteinLine}>
+                  Each meal contributes ~{proteinPerMeal}g protein toward your {proteinNum}g daily target.
+                </Text>
+              )}
+
+              <Text style={styles.social}>Members on the {planName} plan see the best results.</Text>
             </View>
-          )}
+          </Page>
 
-          {showProtein && (
-            <Text style={styles.proteinLine}>
-              Each meal contributes ~{AVG_PROTEIN_PER_MEAL}g protein toward your {proteinNum}g daily target.
-            </Text>
-          )}
+          {/* Card 2 — Your menu style */}
+          <Page>
+            <View style={styles.card}>
+              <Text style={styles.eyebrow}>Your menu style</Text>
+              <Text style={styles.cardTitle}>{menuStyle.title}</Text>
+              <View style={styles.menuBadge}>
+                <Text style={styles.menuBadgeText}>{MENU_LABELS[menuType]}</Text>
+              </View>
+              <Text style={styles.menuBody}>{menuStyle.body}</Text>
+            </View>
+          </Page>
 
-          {/* Price */}
-          <View style={styles.priceRow}>
-            <Text style={styles.perMeal}>{fmt(perMealAllIn)}<Text style={styles.perMealUnit}>/meal</Text></Text>
-            <Text style={styles.total}>{fmt(total)} total</Text>
-          </View>
+          {/* Card 3 — Macro breakdown */}
+          <Page>
+            <View style={styles.card}>
+              <Text style={styles.eyebrow}>Macro breakdown</Text>
+              <Text style={styles.cardTitle}>What's in each meal</Text>
 
-          <Text style={styles.social}>People on the {planName} plan stick with it longer.</Text>
+              {/* Full approx macros per meal (base meal + your add-ons) */}
+              <View style={styles.macroGrid}>
+                <MacroStat value={`${mealMacros.kcal}`} unit="kcal" label="Calories" />
+                <MacroStat value={`${mealMacros.protein}g`} unit="" label="Protein" highlight />
+                <MacroStat value={`${mealMacros.carbs}g`} unit="" label="Carbs" />
+                <MacroStat value={`${mealMacros.fat}g`} unit="" label="Fat" />
+              </View>
+
+              {addonRows.length > 0 ? (
+                <View style={styles.macroList}>
+                  <Text style={styles.macroListHead}>Add-on contributions (per meal)</Text>
+                  {addonRows.map((a) => (
+                    <View key={a.id} style={styles.macroRow}>
+                      <Text style={styles.macroName}>{a.name}</Text>
+                      <Text style={styles.macroVals}>
+                        {[
+                          a.kcal != null ? `${a.kcal} kcal` : null,
+                          a.protein != null ? `${a.protein}g P` : null,
+                          a.carbs != null ? `${a.carbs}g C` : null,
+                          a.fat != null ? `${a.fat}g F` : null,
+                        ].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.menuBody}>No add-ons — clean macros straight from the kitchen.</Text>
+              )}
+
+              <Text style={styles.macroNote}>Exact macros vary by dish across the rotating menu.</Text>
+            </View>
+          </Page>
+
+          {/* Card 4 — Price breakdown */}
+          <Page>
+            <View style={styles.card}>
+              <Text style={styles.eyebrow}>Price breakdown</Text>
+              <Text style={styles.cardTitle}>{mealsTotal} meals</Text>
+
+              <View style={styles.priceList}>
+                <View style={styles.priceLine}>
+                  <Text style={styles.priceLabel}>Base plan</Text>
+                  <Text style={styles.priceValue}>{fmt(plan?.base_price ?? 0)}</Text>
+                </View>
+                {addonRows.map((a) => (
+                  <View key={a.id} style={styles.priceLine}>
+                    <Text style={styles.priceLabel}>{a.name} × {mealsTotal}</Text>
+                    <Text style={styles.priceValue}>+{fmt(a.price_per_meal * mealsTotal)}</Text>
+                  </View>
+                ))}
+                <View style={styles.priceLine}>
+                  <Text style={styles.priceLabel}>Per meal, all-in</Text>
+                  <Text style={styles.priceValue}>{fmt(perMealAllIn)}</Text>
+                </View>
+              </View>
+
+              {/* Total on its own line */}
+              <View style={styles.totalBlock}>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>{fmt(total)}</Text>
+              </View>
+            </View>
+          </Page>
+        </ScrollView>
+
+        {/* Dots */}
+        <View style={styles.dots}>
+          {[0, 1, 2, 3].map((i) => (
+            <View key={i} style={[styles.dot, page === i && styles.dotActive]} />
+          ))}
         </View>
-      </View>
 
-      {/* M2 informational moment — describes the menu flavour, not the plan name */}
-      {menuType === 'M2' && (
-        <View style={styles.infoCard}>
-          <Text style={styles.infoMenuLabel}>YOUR MENU STYLE</Text>
-          <Text style={styles.infoTitle}>{M2_INFO.title}</Text>
-          <Text style={styles.infoBody}>{M2_INFO.body}</Text>
+        <View style={styles.padded}>
+          <Button onPress={handleAccept} style={{ marginBottom: 12 }}>Get this plan →</Button>
+
+          {/* 5-meal trial — styled like the CTA but not green */}
+          <TouchableOpacity style={styles.trialBtn} onPress={handleTrial} activeOpacity={0.85}>
+            <Text style={styles.trialBtnText}>Try 5 meals first · {fmt(trialTotal)}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.rejectLink} onPress={() => router.push('/(onboarding)/plan')}>
+            <Text style={styles.rejectLinkText}>or choose a different plan</Text>
+          </TouchableOpacity>
         </View>
-      )}
+      </ScrollView>
+    </View>
+  )
+}
 
-      <Button onPress={handleAccept} style={{ marginBottom: 16 }}>Get this plan →</Button>
+function Page({ children }: { children: React.ReactNode }) {
+  return <View style={{ width: PAGE_W, paddingHorizontal: 24 }}>{children}</View>
+}
 
-      {/* Trial sub-card */}
-      <Text style={styles.trialPrompt}>Not ready for full commitment?</Text>
-      <TouchableOpacity style={styles.trialCard} onPress={handleTrial}>
-        <View>
-          <Text style={styles.trialTitle}>Try 5 meals first</Text>
-          <Text style={styles.trialSub}>Same plan, same add-ons · {fmt(trialTotal)}</Text>
-        </View>
-        <Text style={styles.trialArrow}>→</Text>
-      </TouchableOpacity>
-      <Text style={styles.trialFootnote}>Small commitments lead to great results.</Text>
-
-      <TouchableOpacity style={styles.rejectLink} onPress={() => router.push('/(onboarding)/plan')}>
-        <Text style={styles.rejectLinkText}>or choose a different plan</Text>
-      </TouchableOpacity>
-    </ScrollView>
+function MacroStat({ value, unit, label, highlight }: { value: string; unit: string; label: string; highlight?: boolean }) {
+  return (
+    <View style={[styles.macroStat, highlight && styles.macroStatHighlight]}>
+      <Text style={[styles.macroStatValue, highlight && styles.macroStatValueHi]}>
+        {value}{unit ? <Text style={styles.macroStatUnit}> {unit}</Text> : null}
+      </Text>
+      <Text style={[styles.macroStatLabel, highlight && styles.macroStatLabelHi]}>{label}</Text>
+    </View>
   )
 }
 
@@ -183,77 +326,83 @@ function ChecklistItem({ label }: { label: string }) {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
   container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { padding: 24, paddingBottom: 48 },
-  planCard: {
+  padded: { paddingHorizontal: 24 },
+
+  card: {
     backgroundColor: '#fff',
     borderRadius: 20,
-    overflow: 'hidden',
     borderWidth: 2,
     borderColor: Colors.primary,
-    marginBottom: 16,
+    padding: 24,
+    minHeight: 380,
     shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 4,
   },
-  planCardTop: { padding: 24, backgroundColor: Colors.primaryLight },
   eyebrow: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
   planName: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 6 },
+  cardTitle: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.text, marginBottom: 12 },
   tagline: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20, marginBottom: 14 },
-  menuBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.primary,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
+  menuBadge: { alignSelf: 'flex-start', backgroundColor: Colors.primary, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, marginBottom: 18 },
   menuBadgeText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: '#fff' },
-  divider: { height: 1, backgroundColor: Colors.border },
-  planCardBottom: { padding: 24 },
+  menuBody: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 22 },
+
   checklist: { gap: 12, marginBottom: 18 },
   checkItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  checkIcon: {
-    width: 20, height: 20, borderRadius: 10,
-    backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center',
-  },
+  checkIcon: { width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
   checkLabel: { fontFamily: Fonts.bodyMed, fontSize: 15, color: Colors.text },
-  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 },
-  badge: { backgroundColor: Colors.background, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: Colors.border },
-  badgeText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted },
-  proteinLine: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 18, marginBottom: 18 },
-  priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginBottom: 8 },
-  perMeal: { fontFamily: Fonts.heading, fontSize: 34, color: Colors.text },
-  perMealUnit: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.textMuted },
-  total: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
+
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 },
+  pill: { backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
+  pillText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
+
+  proteinLine: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 18, marginBottom: 14 },
   social: { fontFamily: Fonts.body, fontSize: 13, color: Colors.primary },
-  infoCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 16,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.primary,
+
+  macroGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 18 },
+  macroStat: {
+    flexGrow: 1, flexBasis: '47%', backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: 14, paddingVertical: 14, paddingHorizontal: 12, alignItems: 'center',
   },
-  infoMenuLabel: { fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 },
-  infoTitle: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.text, marginBottom: 6 },
-  infoBody: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19 },
-  trialPrompt: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, marginBottom: 10 },
-  trialCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 8,
+  macroStatHighlight: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
+  macroStatValue: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.text },
+  macroStatValueHi: { color: Colors.primary },
+  macroStatUnit: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.textMuted },
+  macroStatLabel: { fontFamily: Fonts.bodyMed, fontSize: 12, color: Colors.textMuted, marginTop: 4 },
+  macroStatLabelHi: { color: Colors.primary },
+  macroList: { gap: 10 },
+  macroListHead: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
+  macroRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  macroName: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+  macroVals: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, textAlign: 'right', flexShrink: 1 },
+  macroNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, marginTop: 16 },
+
+  priceList: { gap: 12, marginBottom: 18 },
+  priceLine: { flexDirection: 'row', justifyContent: 'space-between', gap: 16 },
+  priceLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, flex: 1 },
+  priceValue: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+  totalBlock: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 16 },
+  totalLabel: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
+  totalValue: { fontFamily: Fonts.heading, fontSize: 30, color: Colors.primary },
+
+  dots: { flexDirection: 'row', justifyContent: 'center', gap: 7, marginTop: 16, marginBottom: 24 },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.border },
+  dotActive: { backgroundColor: Colors.primary, width: 20 },
+
+  trialBtn: {
     borderWidth: 1.5,
-    borderColor: Colors.border,
-    flexDirection: 'row',
+    borderColor: Colors.primary,
+    borderRadius: 999,
+    paddingVertical: 15,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    minHeight: 52,
+    marginBottom: 16,
+    backgroundColor: '#fff',
   },
-  trialTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text, marginBottom: 4 },
-  trialSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
-  trialArrow: { fontFamily: Fonts.bodyBold, fontSize: 20, color: Colors.primary },
-  trialFootnote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginBottom: 24 },
+  trialBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.primary },
   rejectLink: { alignItems: 'center' },
   rejectLinkText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, textDecorationLine: 'underline' },
 })

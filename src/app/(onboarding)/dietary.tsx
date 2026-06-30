@@ -1,57 +1,37 @@
 import { useState } from 'react'
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native'
 import { useRouter } from 'expo-router'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import * as Haptics from 'expo-haptics'
 import { useOnboardingStore } from '@/store/onboarding'
 import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
-import Button from '@/components/Button'
-import SectionProgress from '@/components/SectionProgress'
+import Wizard, { type WizardStep } from '@/components/Wizard'
 
-// Allergens are safety-critical and shown as trust badges on the recommendation
-// screen (stack-logic.txt §03). Detailed customisations are collected later, on
-// the post-payment customise screen.
 const ALLERGENS = ['Peanuts', 'Dairy', 'Quinoa', 'Soy', 'Nuts', 'Gluten', 'Lactose']
-const DIETARY_PREFS = [
-  { id: 'none', label: 'No restriction' },
-  { id: 'vegetarian', label: 'Vegetarian' },
-  { id: 'vegan', label: 'Vegan' },
-] as const
 
 export default function DietaryScreen() {
   const router = useRouter()
-  const insets = useSafeAreaInsets()
   const { setDietaryBasics } = useOnboardingStore()
   const { user } = useAuthStore()
 
   const [allergens, setAllergens] = useState<string[]>([])
-  const [dietaryPref, setDietaryPref] = useState<'none' | 'vegetarian' | 'vegan'>('none')
   const [freeText, setFreeText] = useState('')
 
   function toggleAllergen(val: string) {
+    Haptics.selectionAsync().catch(() => {})
     setAllergens((prev) => (prev.includes(val) ? prev.filter((x) => x !== val) : [...prev, val]))
   }
 
-  function handleNext() {
-    setDietaryBasics({ allergens, dietaryPreference: dietaryPref, dietaryFreeText: freeText })
-    // Merge into dietary_profiles — onConflict update only writes these columns,
-    // leaving health fields (height, weight etc.) set by health.tsx intact
+  function handleComplete() {
+    // Dietary preference (veg/vegan) screen removed — default to 'none'.
+    setDietaryBasics({ allergens, dietaryPreference: 'none', dietaryFreeText: freeText })
     if (user) {
       ;(async () => {
         await supabase.from('dietary_profiles').upsert({
           user_id: user.id,
           allergens,
-          dietary_preference: dietaryPref,
+          dietary_preference: 'none',
           free_text: freeText || null,
         }, { onConflict: 'user_id' })
       })().catch(() => {})
@@ -59,126 +39,70 @@ export default function DietaryScreen() {
     router.push('/(onboarding)/loading')
   }
 
-  return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]} showsVerticalScrollIndicator={false}>
-        <SectionProgress current={2} />
-        <View style={styles.header}>
-          <Text style={styles.title}>Allergies & diet</Text>
-          <Text style={styles.subtitle}>We'll never put these in your meals.</Text>
-        </View>
-
-        {/* Allergens */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Allergies</Text>
-          <Text style={styles.sectionSubtitle}>Select all that apply</Text>
-          <View style={styles.pillRow}>
-            {ALLERGENS.map((opt) => (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.pill, allergens.includes(opt) && styles.pillActive]}
-                onPress={() => toggleAllergen(opt)}
-              >
-                <Text style={[styles.pillText, allergens.includes(opt) && styles.pillTextActive]}>
-                  {opt}
-                </Text>
-              </TouchableOpacity>
-            ))}
+  const steps: WizardStep[] = [
+    {
+      key: 'allergens',
+      title: 'Any allergies or things to avoid?',
+      subtitle: "We'll keep these out of every meal.",
+      emoji: '🚫',
+      canNext: true,
+      render: () => (
+        <View>
+          <View style={styles.pillWrap}>
+            {ALLERGENS.map((opt) => {
+              const on = allergens.includes(opt)
+              return (
+                <TouchableOpacity
+                  key={opt}
+                  style={[styles.pill, on && styles.pillActive]}
+                  onPress={() => toggleAllergen(opt)}
+                >
+                  <Text style={[styles.pillText, on && styles.pillTextActive]}>{opt}</Text>
+                </TouchableOpacity>
+              )
+            })}
           </View>
-        </View>
 
-        {/* Dietary preference */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Dietary preference</Text>
-          <View style={styles.radioGroup}>
-            {DIETARY_PREFS.map((opt) => (
-              <TouchableOpacity
-                key={opt.id}
-                style={styles.radioRow}
-                onPress={() => setDietaryPref(opt.id)}
-              >
-                <View style={[styles.radio, dietaryPref === opt.id && styles.radioActive]}>
-                  {dietaryPref === opt.id && <View style={styles.radioDot} />}
-                </View>
-                <Text style={styles.radioLabel}>{opt.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Free text */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Any other allergies?</Text>
-          <Text style={styles.sectionSubtitle}>Optional</Text>
+          <Text style={styles.fieldLabel}>Anything else?</Text>
           <TextInput
             style={styles.textarea}
             placeholder="e.g. Sesame, shellfish, specific intolerances"
             value={freeText}
             onChangeText={setFreeText}
             multiline
-            numberOfLines={3}
             maxLength={250}
             placeholderTextColor={Colors.textLight}
             textAlignVertical="top"
           />
           <Text style={styles.charCount}>{freeText.length}/250</Text>
         </View>
+      ),
+    },
+  ]
 
-        <Button onPress={handleNext} style={{ marginTop: 8 }}>Next →</Button>
-      </ScrollView>
-    </KeyboardAvoidingView>
+  return (
+    <Wizard
+      steps={steps}
+      nextLabel="Build my plan →"
+      onComplete={handleComplete}
+      onExitFirst={() => router.back()}
+    />
   )
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { padding: 24, paddingBottom: 40 },
-  header: { marginBottom: 28 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 6 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
-  section: { marginBottom: 24 },
-  sectionTitle: { fontFamily: Fonts.headingSemi, fontSize: 15, color: Colors.text, marginBottom: 4 },
-  sectionSubtitle: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 10 },
-  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
   pill: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    backgroundColor: '#fff',
+    paddingHorizontal: 16, paddingVertical: 11, borderRadius: 999,
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: '#fff',
   },
   pillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  pillText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
+  pillText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.textMuted },
   pillTextActive: { color: '#fff' },
-  radioGroup: { gap: 10 },
-  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  radio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
-  radioActive: { borderColor: Colors.primary },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.primary },
-  radioLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text },
+  fieldLabel: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, marginTop: 28, marginBottom: 10 },
   textarea: {
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    padding: 14,
-    fontFamily: Fonts.body,
-    fontSize: 14,
-    color: Colors.text,
-    minHeight: 80,
+    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12,
+    padding: 16, fontFamily: Fonts.body, fontSize: 15, color: Colors.text, minHeight: 110,
   },
-  charCount: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, textAlign: 'right', marginTop: 4 },
+  charCount: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, textAlign: 'right', marginTop: 6 },
 })

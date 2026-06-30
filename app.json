@@ -13,6 +13,8 @@
     },
     "android": {
       "package": "com.greenfeast.app",
+      "usesCleartextTraffic": true,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#1B5E20",
         "foregroundImage": "./assets/images/android-icon-foreground.png"
@@ -43,7 +45,14 @@
         }
       ],
       "expo-image",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "GreenFeast needs your location to set your delivery address.",
+          "locationWhenInUsePermission": "GreenFeast needs your location to set your delivery address."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
@@ -53,6 +62,12 @@
       "eas": {
         "projectId": "8f86ffc0-3e40-45c5-91af-e3fd32ea94b8"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8f86ffc0-3e40-45c5-91af-e3fd32ea94b8"
     }
   }
 }

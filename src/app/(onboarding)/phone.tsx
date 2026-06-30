@@ -49,11 +49,11 @@ export default function OnboardingPhoneScreen() {
     >
       <View style={[styles.inner, { paddingTop: insets.top + 24 }]}>
         <Text style={styles.step}>Setup</Text>
-        <Text style={styles.title}>Your mobile number</Text>
-        <Text style={styles.subtitle}>We use this to coordinate your deliveries.</Text>
+        <Text style={styles.title}>Your WhatsApp number</Text>
+        <Text style={styles.subtitle}>We'll send your order updates here on WhatsApp.</Text>
 
         <View style={styles.form}>
-          <Text style={styles.label}>Mobile number</Text>
+          <Text style={styles.label}>WhatsApp number</Text>
           <View style={styles.inputRow}>
             <View style={styles.countryCode}>
               <Text style={styles.countryCodeText}>+91</Text>
@@ -75,7 +75,6 @@ export default function OnboardingPhoneScreen() {
             />
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Text style={styles.hint}>Used for delivery coordination only.</Text>
         </View>
 
         <View style={{ flex: 1 }} />

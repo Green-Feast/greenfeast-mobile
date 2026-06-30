@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   ScrollView,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as WebBrowser from 'expo-web-browser'
 import * as Linking from 'expo-linking'
 import { makeRedirectUri } from 'expo-auth-session'
@@ -23,13 +24,13 @@ WebBrowser.maybeCompleteAuthSession()
 type EmailMode = 'signin' | 'signup'
 
 export default function LoginScreen() {
+  const insets = useSafeAreaInsets()
   const [googleLoading, setGoogleLoading] = useState(false)
   const [appleLoading, setAppleLoading] = useState(false)
   const [error, setError] = useState('')
   const handledUrl = useRef<string | null>(null)
 
   // Email auth state
-  const [showEmail, setShowEmail] = useState(false)
   const [emailMode, setEmailMode] = useState<EmailMode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -159,7 +160,7 @@ export default function LoginScreen() {
   if (signupSuccess) {
     return (
       <View style={styles.container}>
-        <View style={styles.hero}>
+        <View style={[styles.hero, { paddingTop: insets.top + 24 }]}>
           <View style={styles.logoWrap}>
             <Logo size={56} />
           </View>
@@ -191,7 +192,7 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.hero}>
+      <View style={[styles.hero, { paddingTop: insets.top + 24 }]}>
         <View style={styles.logoWrap}>
           <Logo size={56} />
         </View>
@@ -250,75 +251,61 @@ export default function LoginScreen() {
           <View style={styles.dividerLine} />
         </View>
 
-        {/* Email expand / collapse */}
-        {!showEmail ? (
-          <TouchableOpacity
-            style={styles.emailToggle}
-            onPress={() => { setShowEmail(true); setError('') }}
-            disabled={isLoading}
-          >
-            <Text style={styles.emailToggleText}>Continue with Email</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.emailForm}>
-            {/* Mode tabs */}
-            <View style={styles.modeTabs}>
-              <TouchableOpacity
-                style={[styles.modeTab, emailMode === 'signin' && styles.modeTabActive]}
-                onPress={() => { setEmailMode('signin'); setError('') }}
-              >
-                <Text style={[styles.modeTabText, emailMode === 'signin' && styles.modeTabTextActive]}>Sign In</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modeTab, emailMode === 'signup' && styles.modeTabActive]}
-                onPress={() => { setEmailMode('signup'); setError('') }}
-              >
-                <Text style={[styles.modeTabText, emailMode === 'signup' && styles.modeTabTextActive]}>Create Account</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              placeholderTextColor={Colors.textLight}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={email}
-              onChangeText={setEmail}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder={emailMode === 'signup' ? 'Password (min 8 chars)' : 'Password'}
-              placeholderTextColor={Colors.textLight}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={password}
-              onChangeText={setPassword}
-              onSubmitEditing={handleEmailAuth}
-              returnKeyType="go"
-            />
-
+        {/* Email — always expanded so the layout never shifts */}
+        <View style={styles.emailForm}>
+          {/* Mode tabs */}
+          <View style={styles.modeTabs}>
             <TouchableOpacity
-              style={styles.emailButton}
-              onPress={handleEmailAuth}
-              disabled={emailLoading}
+              style={[styles.modeTab, emailMode === 'signin' && styles.modeTabActive]}
+              onPress={() => { setEmailMode('signin'); setError('') }}
             >
-              {emailLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.emailButtonText}>
-                  {emailMode === 'signin' ? 'Sign In →' : 'Create Account →'}
-                </Text>
-              )}
+              <Text style={[styles.modeTabText, emailMode === 'signin' && styles.modeTabTextActive]}>Sign In</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => { setShowEmail(false); setError('') }}>
-              <Text style={styles.cancelText}>Cancel</Text>
+            <TouchableOpacity
+              style={[styles.modeTab, emailMode === 'signup' && styles.modeTabActive]}
+              onPress={() => { setEmailMode('signup'); setError('') }}
+            >
+              <Text style={[styles.modeTabText, emailMode === 'signup' && styles.modeTabTextActive]}>Create Account</Text>
             </TouchableOpacity>
           </View>
-        )}
+
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            placeholderTextColor={Colors.textLight}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={email}
+            onChangeText={setEmail}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder={emailMode === 'signup' ? 'Password (min 8 chars)' : 'Password'}
+            placeholderTextColor={Colors.textLight}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={password}
+            onChangeText={setPassword}
+            onSubmitEditing={handleEmailAuth}
+            returnKeyType="go"
+          />
+
+          <TouchableOpacity
+            style={styles.emailButton}
+            onPress={handleEmailAuth}
+            disabled={emailLoading}
+          >
+            {emailLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.emailButtonText}>
+                {emailMode === 'signin' ? 'Sign In →' : 'Create Account →'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
         <Text style={styles.terms}>
           By continuing you agree to our Terms of Service and Privacy Policy
@@ -341,7 +328,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.primary },
-  hero: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  hero: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 32, paddingHorizontal: 24 },
   logoWrap: {
     width: 88,
     height: 88,
@@ -399,17 +386,6 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
   dividerText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textLight },
 
-  emailToggle: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 999,
-    paddingVertical: 15,
-    alignItems: 'center',
-    minHeight: 52,
-    justifyContent: 'center',
-  },
-  emailToggleText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.text },
-
   emailForm: { gap: 10 },
   modeTabs: {
     flexDirection: 'row',
@@ -447,7 +423,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emailButtonText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
-  cancelText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, textAlign: 'center', paddingVertical: 4 },
 
   successDesc: { fontFamily: Fonts.body, fontSize: 15, color: Colors.textMuted, lineHeight: 22, marginBottom: 8 },
   successEmail: { fontFamily: Fonts.bodyBold, color: Colors.text },

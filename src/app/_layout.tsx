@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Slot, useRouter, useSegments } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Platform, View } from 'react-native'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
 import {
@@ -129,9 +130,9 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="light" />
       <AuthGate />
-    </>
+    </GestureHandlerRootView>
   )
 }

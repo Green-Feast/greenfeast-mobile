@@ -8,12 +8,15 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
-  Image,
   TextInput,
+  Dimensions,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
 } from 'react-native'
+import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Pause, Play, SkipForward, ArrowUpDown, ArrowRight, Wallet, MapPin, X, Check, AlertCircle, TrendingDown, TrendingUp } from 'lucide-react-native'
+import { Pause, Play, SkipForward, ArrowRight, Wallet, MapPin, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
@@ -28,12 +31,15 @@ type SubData = {
   payment_method: string
   plan_name: string | null
   deliveries_remaining: number
+  start_date: string | null
   end_date: string | null
   pause_from: string | null
   pause_until: string | null
   menu_type: string | null
   plans: { name: string; meals_total: number; days_per_week: number; base_price: number } | null
 }
+
+type SubAddon = { addon_id: string; addons: { name: string; price_per_meal: number } | null }
 
 type FirstMeal = { delivery_date: string; meal_templates: { name: string } | null }
 
@@ -54,6 +60,9 @@ type OrderItem = {
   meal_slot: string
   status: string
   address_id: string | null
+  switch_fee_paise: number | null
+  extra_dish: boolean | null
+  slot_seq: number | null
   meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; image_url: string | null } | null
 }
 
@@ -75,8 +84,22 @@ function fmtDate(dateStr: string | null) {
 function fmtDateLong(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
 }
-function fmtDow(d: Date) { return d.toLocaleDateString('en-IN', { weekday: 'short' }) }
 function toISO(d: Date) { return d.toISOString().split('T')[0] }
+
+// All calendar math is done in IST (UTC+5:30) so the week strip and the day a
+// tap opens never disagree around midnight, regardless of the device timezone.
+const IST_MS = 5.5 * 60 * 60 * 1000
+function istToday(): string { return new Date(Date.now() + IST_MS).toISOString().split('T')[0] }
+function istHour(): number { return new Date(Date.now() + IST_MS).getUTCHours() }
+function addDaysISO(iso: string, n: number): string {
+  const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().split('T')[0]
+}
+// Mon=0 … Sun=6
+function dowMon0(iso: string): number { return (new Date(iso + 'T00:00:00Z').getUTCDay() + 6) % 7 }
+function dowShort(iso: string): string {
+  return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'UTC' })
+}
+function dayNum(iso: string): string { return String(new Date(iso + 'T00:00:00Z').getUTCDate()) }
 
 function statusLabel(status: string) {
   if (status === 'preparing') return 'In our kitchen'
@@ -85,15 +108,15 @@ function statusLabel(status: string) {
   return 'Scheduled'
 }
 
-// A delivery is locked if it's today or if it's tomorrow and past 8 PM
+// A delivery is locked if it's today/past, or tomorrow after 8 PM IST.
 function isLocked(dateStr: string): boolean {
-  const now = new Date()
-  const todayStr = toISO(now)
-  if (dateStr <= todayStr) return true
-  const tmr = new Date(now)
-  tmr.setDate(tmr.getDate() + 1)
-  return dateStr === toISO(tmr) && now.getHours() >= 20
+  const today = istToday()
+  if (dateStr <= today) return true
+  return dateStr === addDaysISO(today, 1) && istHour() >= 20
 }
+
+const { width: SCREEN_W } = Dimensions.get('window')
+const TODAY_CARD_W = SCREEN_W - 32
 
 // ── Main screen ────────────────────────────────────────────────────────────
 
@@ -108,6 +131,9 @@ export default function SubscriptionScreen() {
   const [addresses, setAddresses] = useState<AddressData[]>([])
   const [pickingAddressForOrder, setPickingAddressForOrder] = useState<string | null>(null)
   const [allMeals, setAllMeals] = useState<MealTemplate[]>([])
+  const [subAddons, setSubAddons] = useState<SubAddon[]>([])
+  const [addMode, setAddMode] = useState(false)
+  const [todayCard, setTodayCard] = useState(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [skipConfirm, setSkipConfirm] = useState<string | null>(null)
@@ -127,14 +153,15 @@ export default function SubscriptionScreen() {
   const [razorpayAmountPaise, setRazorpayAmountPaise] = useState(0)
   const [creatingTopup, setCreatingTopup] = useState(false)
   const didAutoSync = useRef(false)
+  const stripRef = useRef<ScrollView | null>(null)
 
   const fetchAll = useCallback(async () => {
     if (!user) return
-    const today = new Date().toISOString().split('T')[0]
+    const today = istToday()
 
     const { data: subData } = await supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_name, deliveries_remaining, end_date, pause_from, pause_until, menu_type, plans ( name, meals_total, days_per_week, base_price )')
+      .select('id, status, payment_method, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, menu_type, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
       .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
       .order('created_at', { ascending: false })
@@ -161,18 +188,17 @@ export default function SubscriptionScreen() {
       return
     }
 
-    // Active / paused: parallel fetch
-    const in7 = new Date()
-    in7.setDate(in7.getDate() + 6)
-    const in7Str = in7.toISOString().split('T')[0]
+    // Active / paused: fetch upcoming orders through the end of the current week.
+    const endOffset = ((5 - dowMon0(today)) + 7) % 7 // days until Saturday (Mon=0..Sat=5)
+    const endStr = addDaysISO(today, endOffset)
 
-    const [ordersRes, walletRes, addrRes] = await Promise.all([
+    const [ordersRes, walletRes, addrRes, addonRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, meal_slot, status, address_id, meal_templates ( id, name, kcal, protein, image_url )')
+        .select('id, delivery_date, meal_slot, status, address_id, switch_fee_paise, extra_dish, slot_seq, meal_templates ( id, name, kcal, protein, image_url )')
         .eq('subscription_id', s.id)
         .gte('delivery_date', today)
-        .lte('delivery_date', in7Str)
+        .lte('delivery_date', endStr)
         .in('status', ['scheduled', 'confirmed', 'preparing'])
         .order('delivery_date'),
       supabase
@@ -186,11 +212,16 @@ export default function SubscriptionScreen() {
         .eq('user_id', user.id)
         .order('is_default', { ascending: false })
         .order('created_at'),
+      supabase
+        .from('subscription_addons')
+        .select('addon_id, addons ( name, price_per_meal )')
+        .eq('subscription_id', s.id),
     ])
 
     setWeekOrders((ordersRes.data as unknown as OrderItem[]) ?? [])
     setWalletBalance(walletRes.data?.balance ?? null)
     setAddresses((addrRes.data as AddressData[]) ?? [])
+    setSubAddons((addonRes.data as unknown as SubAddon[]) ?? [])
   }, [user])
 
   // Fetch meal templates once on mount for the swap panel
@@ -225,8 +256,8 @@ export default function SubscriptionScreen() {
     })()
   }, [loading, sub, weekOrders.length, fetchAll])
 
-  // Reset address picker when day changes
-  useEffect(() => { setPickingAddressForOrder(null) }, [selectedDay])
+  // Reset address picker + add-mode when day changes
+  useEffect(() => { setPickingAddressForOrder(null); setAddMode(false); setSwapError('') }, [selectedDay])
 
   // When a day is selected, look up the counterpart menu's meal so we can show "Free" vs "+₹20"
   useEffect(() => {
@@ -287,6 +318,32 @@ export default function SubscriptionScreen() {
       await fetchAll()
     } catch (e: any) {
       setSwapError(e?.message ?? 'Could not swap meal. Try again.')
+    } finally {
+      setSwapping(false)
+    }
+  }
+
+  async function handleAddDish(refOrderId: string, newMealId: string) {
+    setSwapping(true)
+    setSwapError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+      const { data, error } = await supabase.functions.invoke('add-dish', {
+        body: { order_id: refOrderId, meal_template_id: newMealId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (error) throw error
+      if (data?.error === 'insufficient_balance') {
+        setSwapError('Insufficient wallet balance for an extra dish. Add money first.')
+        return
+      }
+      if (data?.error) throw new Error(data.error)
+      setSelectedDay(null)
+      setAddMode(false)
+      await fetchAll()
+    } catch (e: any) {
+      setSwapError(e?.message ?? 'Could not add dish. Try again.')
     } finally {
       setSwapping(false)
     }
@@ -424,18 +481,74 @@ export default function SubscriptionScreen() {
 
   // ── Active / paused home view ─────────────────────────────────────────────
 
-  const todayStr = new Date().toISOString().split('T')[0]
-  const orderMap = new Map(weekOrders.map(o => [o.delivery_date, o]))
-  const todayOrder = orderMap.get(todayStr) ?? null
+  const todayStr = istToday()
+  // Multiple orders can share a (date, slot) now (extra dishes), so key by id.
+  const orderMap = new Map<string, OrderItem[]>()
+  for (const o of weekOrders) {
+    const arr = orderMap.get(o.delivery_date) ?? []
+    arr.push(o)
+    orderMap.set(o.delivery_date, arr)
+  }
   const nextOrder = weekOrders.find(o => o.delivery_date >= todayStr) ?? null
 
-  const weekDates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() + i); return d
-  })
+  // Today's lunch + dinner (primary slot order, slot_seq 0) for the carousel.
+  const todayOrders = orderMap.get(todayStr) ?? []
+  const todayLunch = todayOrders.find(o => o.meal_slot === 'lunch' && !o.extra_dish) ?? null
+  const todayDinner = todayOrders.find(o => o.meal_slot === 'dinner' && !o.extra_dish) ?? null
+  // Default the carousel to the slot relevant to the time of day (IST).
+  const slotsInit: ('lunch' | 'dinner')[] = istHour() < 14 ? ['lunch', 'dinner'] : ['dinner', 'lunch']
+
+  // Week-strip timeline: from the subscription start through end of this week.
+  const startStr = sub.start_date && sub.start_date < todayStr ? sub.start_date : todayStr
+  const endOffset = ((5 - dowMon0(todayStr)) + 7) % 7
+  const endStr = addDaysISO(todayStr, endOffset)
+  const stripDates: string[] = []
+  for (let d = startStr; d <= endStr; d = addDaysISO(d, 1)) stripDates.push(d)
 
   // Day detail panel data
-  const dayOrder = selectedDay ? (orderMap.get(selectedDay.dateStr) ?? null) : null
+  const dayOrder = selectedDay
+    ? ((orderMap.get(selectedDay.dateStr) ?? []).find(o => !o.extra_dish) ?? null)
+    : null
+  const dayExtras = selectedDay
+    ? (orderMap.get(selectedDay.dateStr) ?? []).filter(o => o.extra_dish)
+    : []
   const dayLocked = selectedDay ? isLocked(selectedDay.dateStr) : false
+
+  function TodaySlotCard({ slot, order }: { slot: 'lunch' | 'dinner'; order: OrderItem | null }) {
+    if (order) {
+      return (
+        <View style={[s.todayCard, { width: TODAY_CARD_W }]}>
+          <View style={s.todayCardRow}>
+            <View style={{ flex: 1 }}>
+              <View style={s.statusBadge}>
+                <Text style={s.statusBadgeText}>{slot === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'} · {statusLabel(order.status)}</Text>
+              </View>
+              <Text style={s.todayMealName}>{order.meal_templates?.name ?? 'Your meal'}</Text>
+              {(order.meal_templates?.kcal || order.meal_templates?.protein) && (
+                <Text style={s.todayMeta}>
+                  {order.meal_templates?.kcal ? `${order.meal_templates.kcal} kcal` : ''}
+                  {order.meal_templates?.kcal && order.meal_templates?.protein ? ' · ' : ''}
+                  {order.meal_templates?.protein ? `${order.meal_templates.protein}g protein` : ''}
+                </Text>
+              )}
+            </View>
+            {order.meal_templates?.image_url && (
+              <Image source={{ uri: order.meal_templates.image_url }} style={s.todayThumb} contentFit="cover" cachePolicy="memory-disk" />
+            )}
+          </View>
+        </View>
+      )
+    }
+    return (
+      <Pressable
+        style={[s.todayAddCard, { width: TODAY_CARD_W }]}
+        onPress={() => { setSelectedDay({ dateStr: todayStr, date: new Date(todayStr + 'T00:00:00') }); setAddMode(true) }}
+      >
+        <View style={s.todayAddIcon}><Plus size={22} color={Colors.primary} /></View>
+        <Text style={s.todayAddText}>Add {slot}</Text>
+      </Pressable>
+    )
+  }
 
   return (
     <View style={s.container}>
@@ -446,82 +559,64 @@ export default function SubscriptionScreen() {
       >
         <Text style={s.title}>My Plan</Text>
 
-        {/* TODAY'S DELIVERY */}
+        {/* TODAY'S DELIVERY — lunch / dinner carousel */}
         <Text style={s.sectionLabel}>Today's delivery</Text>
-        {todayOrder ? (
-          <View style={s.todayCard}>
-            <View style={s.todayCardRow}>
-              <View style={{ flex: 1 }}>
-                <View style={s.statusBadge}>
-                  <Text style={s.statusBadgeText}>{statusLabel(todayOrder.status)}</Text>
-                </View>
-                <Text style={s.todayMealName}>{todayOrder.meal_templates?.name ?? 'Your meal'}</Text>
-                {(todayOrder.meal_templates?.kcal || todayOrder.meal_templates?.protein) && (
-                  <Text style={s.todayMeta}>
-                    {todayOrder.meal_templates.kcal ? `${todayOrder.meal_templates.kcal} kcal` : ''}
-                    {todayOrder.meal_templates.kcal && todayOrder.meal_templates.protein ? ' · ' : ''}
-                    {todayOrder.meal_templates.protein ? `${todayOrder.meal_templates.protein}g protein` : ''}
-                  </Text>
-                )}
-              </View>
-              {todayOrder.meal_templates?.image_url && (
-                <Image source={{ uri: todayOrder.meal_templates.image_url }} style={s.todayThumb} />
-              )}
-            </View>
-          </View>
-        ) : (
-          <View style={s.noDeliveryCard}>
-            <Text style={s.noDeliveryText}>No delivery today</Text>
-            {nextOrder && (
-              <Text style={s.noDeliveryMeta}>Next meal on {fmtDate(nextOrder.delivery_date)}</Text>
-            )}
-          </View>
-        )}
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) =>
+            setTodayCard(Math.round(e.nativeEvent.contentOffset.x / TODAY_CARD_W))
+          }
+        >
+          {slotsInit.map((slot) => (
+            <TodaySlotCard key={slot} slot={slot} order={slot === 'lunch' ? todayLunch : todayDinner} />
+          ))}
+        </ScrollView>
+        <View style={s.todayDots}>
+          {slotsInit.map((_, i) => <View key={i} style={[s.todayDot, todayCard === i && s.todayDotActive]} />)}
+        </View>
 
-        {/* THIS WEEK STRIP — tappable, shows meal thumbnail when available */}
-        <Text style={s.sectionLabel}>This week</Text>
+        {/* TIMELINE STRIP — day + date, past greyed, tap opens the cart */}
+        <Text style={s.sectionLabel}>Your schedule</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.weekStripContent}
           style={s.weekStrip}
+          ref={(r) => { stripRef.current = r }}
+          onContentSizeChange={() => stripRef.current?.scrollToEnd({ animated: false })}
         >
-          {weekDates.map((date, i) => {
-            const dateStr = toISO(date)
-            const order = orderMap.get(dateStr)
-            const isToday = i === 0
-            const hasImage = !!order?.meal_templates?.image_url
-            const mealWord = order?.meal_templates?.name?.split(' ')[0] ?? '—'
+          {stripDates.map((d) => {
+            const isToday = d === todayStr
+            const isPast = d < todayStr
+            const cell = (
+              <View style={[s.dayCell, isToday && s.dayCellToday, isPast && s.dayCellPast]}>
+                <Text style={[s.dayDow, isToday && s.dayDowToday]}>{dowShort(d)}</Text>
+                <Text style={[s.dayDate, isToday && s.dayDateToday]}>{dayNum(d)}</Text>
+              </View>
+            )
+            if (isPast) return <View key={d}>{cell}</View>
             return (
               <Pressable
-                key={dateStr}
-                style={({ pressed }) => [s.dayCell, isToday && s.dayCellToday, pressed && { opacity: 0.7 }]}
-                onPress={() => setSelectedDay({ dateStr, date })}
+                key={d}
+                onPress={() => setSelectedDay({ dateStr: d, date: new Date(d + 'T00:00:00') })}
+                style={({ pressed }) => pressed && { opacity: 0.7 }}
               >
-                <Text style={[s.dayDow, isToday && s.dayDowToday]}>{fmtDow(date)}</Text>
-                {hasImage ? (
-                  <Image
-                    source={{ uri: order!.meal_templates!.image_url! }}
-                    style={s.dayThumb}
-                  />
-                ) : (
-                  <Text style={[s.dayMeal, isToday && s.dayMealToday]} numberOfLines={1}>
-                    {mealWord}
-                  </Text>
-                )}
+                {cell}
               </Pressable>
             )
           })}
         </ScrollView>
-        <Text style={s.lockNote}>Tap a day to see or swap your meal · Changes lock at 8 PM the night before</Text>
+        <Text style={s.lockNote}>Tap a day to see, swap or add a meal · Changes lock at 8 PM the night before</Text>
 
-        {/* QUICK ACTIONS */}
+        {/* QUICK ACTIONS — two larger buttons */}
         <View style={s.quickActions}>
           <Pressable
             style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
             onPress={() => nextOrder ? setSkipConfirm(nextOrder.delivery_date) : null}
           >
-            <SkipForward size={20} color={nextOrder ? Colors.primary : Colors.textLight} />
+            <SkipForward size={22} color={nextOrder ? Colors.primary : Colors.textLight} />
             <Text style={[s.actionBoxLabel, !nextOrder && { color: Colors.textLight }]}>Skip next</Text>
           </Pressable>
           <Pressable
@@ -529,18 +624,24 @@ export default function SubscriptionScreen() {
             onPress={() => router.push('/(app)/plan-settings')}
           >
             {sub.status === 'paused'
-              ? <Play size={20} color={Colors.primary} />
-              : <Pause size={20} color={Colors.primary} />}
+              ? <Play size={22} color={Colors.primary} />
+              : <Pause size={22} color={Colors.primary} />}
             <Text style={s.actionBoxLabel}>{sub.status === 'paused' ? 'Resume' : 'Pause'}</Text>
           </Pressable>
-          <Pressable
-            style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
-            onPress={() => router.push('/(app)/plan-settings')}
-          >
-            <ArrowUpDown size={20} color={Colors.primary} />
-            <Text style={s.actionBoxLabel}>Change plan</Text>
-          </Pressable>
         </View>
+
+        {/* ADD-ONS */}
+        {subAddons.length > 0 && (
+          <View style={s.addonsCard}>
+            <Text style={s.addonsTitle}>Your add-ons</Text>
+            {subAddons.map((a) => (
+              <View key={a.addon_id} style={s.addonsRow}>
+                <Text style={s.addonsName}>{a.addons?.name ?? a.addon_id}</Text>
+                <Text style={s.addonsPrice}>₹{fmt(a.addons?.price_per_meal ?? 0)}/meal</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* DELIVERIES REMAINING */}
         <View style={s.progressCard}>
@@ -679,8 +780,9 @@ export default function SubscriptionScreen() {
         animationType="slide"
         onRequestClose={() => { setSelectedDay(null); setPickingAddressForOrder(null) }}
       >
-        <Pressable style={s.dayModalOverlay} onPress={() => { setSelectedDay(null); setPickingAddressForOrder(null) }}>
-          <Pressable style={s.dayModalSheet} onPress={(e) => e.stopPropagation()}>
+        <View style={s.dayModalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setSelectedDay(null); setPickingAddressForOrder(null) }} />
+          <View style={s.dayModalSheet}>
             {/* Handle */}
             <View style={s.dayModalHandle} />
 
@@ -694,7 +796,14 @@ export default function SubscriptionScreen() {
               </Pressable>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 24 }}
+              alwaysBounceVertical
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
               {/* Current meal */}
               {dayOrder ? (
                 <View style={s.dayModalCurrentSection}>
@@ -704,6 +813,8 @@ export default function SubscriptionScreen() {
                       <Image
                         source={{ uri: dayOrder.meal_templates.image_url }}
                         style={s.dayModalCurrentImg}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
                       />
                     )}
                     <Text style={s.dayModalCurrentName}>
@@ -718,8 +829,20 @@ export default function SubscriptionScreen() {
                     )}
                     <View style={s.dayModalStatusRow}>
                       <Text style={s.dayModalStatus}>{statusLabel(dayOrder.status)}</Text>
+                      {(dayOrder.switch_fee_paise ?? 0) > 0 && (
+                        <Text style={s.swapFeeTag}>+₹{fmt(dayOrder.switch_fee_paise!)} swap fee</Text>
+                      )}
                     </View>
                   </View>
+
+                  {/* Extra dishes added to this slot */}
+                  {dayExtras.map((ex) => (
+                    <View key={ex.id} style={s.extraRow}>
+                      <Plus size={14} color={Colors.primary} />
+                      <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
+                      <Text style={s.extraTag}>Added</Text>
+                    </View>
+                  ))}
                 </View>
               ) : (
                 <View style={s.dayModalNoOrder}>
@@ -727,7 +850,7 @@ export default function SubscriptionScreen() {
                 </View>
               )}
 
-              {/* Swap section */}
+              {/* Swap / Add section */}
               {dayOrder && (
                 <View style={s.dayModalSwapSection}>
                   {dayLocked ? (
@@ -741,7 +864,24 @@ export default function SubscriptionScreen() {
                     </View>
                   ) : (
                     <>
-                      <Text style={s.dayModalSectionLabel}>Swap for something else</Text>
+                      {/* Swap / Add toggle */}
+                      <View style={s.modeToggle}>
+                        <Pressable
+                          style={[s.modeBtn, !addMode && s.modeBtnActive]}
+                          onPress={() => { setAddMode(false); setSwapError('') }}
+                        >
+                          <Text style={[s.modeBtnText, !addMode && s.modeBtnTextActive]}>Swap meal</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[s.modeBtn, addMode && s.modeBtnActive]}
+                          onPress={() => { setAddMode(true); setSwapError('') }}
+                        >
+                          <Text style={[s.modeBtnText, addMode && s.modeBtnTextActive]}>Add a dish</Text>
+                        </Pressable>
+                      </View>
+                      <Text style={s.dayModalSectionLabel}>
+                        {addMode ? 'Add another dish to this slot' : 'Swap for something else'}
+                      </Text>
                       {swapError ? (
                         <View style={s.swapErrorRow}>
                           <Text style={s.dayModalSwapError}>{swapError}</Text>
@@ -753,8 +893,8 @@ export default function SubscriptionScreen() {
                         </View>
                       ) : null}
                       {allMeals.map((meal) => {
-                        const isCurrent = meal.id === dayOrder.meal_templates?.id
-                        const isFree = !isCurrent && meal.id === counterpartMealId
+                        const isCurrent = !addMode && meal.id === dayOrder.meal_templates?.id
+                        const isFree = !addMode && !isCurrent && meal.id === counterpartMealId
                         return (
                           <Pressable
                             key={meal.id}
@@ -764,12 +904,14 @@ export default function SubscriptionScreen() {
                               pressed && !isCurrent && { opacity: 0.7 },
                             ]}
                             onPress={() => {
-                              if (!isCurrent && !swapping) handleSwapMeal(dayOrder.id, meal.id)
+                              if (swapping || isCurrent) return
+                              if (addMode) handleAddDish(dayOrder.id, meal.id)
+                              else handleSwapMeal(dayOrder.id, meal.id)
                             }}
                             disabled={swapping || isCurrent}
                           >
                             {meal.image_url ? (
-                              <Image source={{ uri: meal.image_url }} style={s.mealRowThumb} />
+                              <Image source={{ uri: meal.image_url }} style={s.mealRowThumb} contentFit="cover" cachePolicy="memory-disk" />
                             ) : (
                               <View style={s.mealRowPlaceholder}>
                                 <Text style={s.mealRowCategory}>{meal.category[0].toUpperCase()}</Text>
@@ -788,9 +930,9 @@ export default function SubscriptionScreen() {
                               </View>
                             )}
                             {!isCurrent && !swapping && (
-                              <View style={[s.switchBadge, isFree && s.switchBadgeFree]}>
-                                <Text style={[s.switchBadgeText, isFree && s.switchBadgeTextFree]}>
-                                  {isFree ? 'Free' : '+₹20'}
+                              <View style={[s.switchBadge, (isFree || addMode) && s.switchBadgeFree]}>
+                                <Text style={[s.switchBadgeText, (isFree || addMode) && s.switchBadgeTextFree]}>
+                                  {addMode ? 'Add' : isFree ? 'Free' : '+₹20'}
                                 </Text>
                               </View>
                             )}
@@ -852,8 +994,8 @@ export default function SubscriptionScreen() {
                 </View>
               )}
             </ScrollView>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {/* Transactions modal */}
@@ -1059,36 +1201,75 @@ const s = StyleSheet.create({
   noDeliveryText: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.text, marginBottom: 4 },
   noDeliveryMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
 
-  // Week strip
+  // Today carousel extras
+  todayAddCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 20, marginBottom: 16,
+    borderWidth: 1.5, borderColor: Colors.border, borderStyle: 'dashed',
+    alignItems: 'center', justifyContent: 'center', gap: 10, minHeight: 112, flexDirection: 'row',
+  },
+  todayAddIcon: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  todayAddText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
+  todayDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: -6, marginBottom: 16 },
+  todayDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.border },
+  todayDotActive: { backgroundColor: Colors.primary, width: 16 },
+
+  // Timeline strip — day + date
   weekStrip: { marginBottom: 0 },
   weekStripContent: { gap: 8, paddingBottom: 4, paddingTop: 2 },
   dayCell: {
     alignItems: 'center',
-    width: 60,
-    paddingVertical: 10,
+    width: 56,
+    paddingVertical: 12,
     paddingHorizontal: 4,
     borderRadius: 14,
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: Colors.border,
-    gap: 6,
+    gap: 4,
   },
   dayCellToday: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dayCellPast: { backgroundColor: Colors.borderFaint, borderColor: Colors.borderFaint, opacity: 0.55 },
   dayDow: { fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 },
   dayDowToday: { color: Colors.primaryMid },
-  dayThumb: { width: 40, height: 40, borderRadius: 8 },
-  dayMeal: { fontFamily: Fonts.bodyBold, fontSize: 10, color: Colors.text, maxWidth: 52, textAlign: 'center' },
-  dayMealToday: { color: '#fff' },
+  dayDate: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
+  dayDateToday: { color: '#fff' },
   lockNote: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, marginTop: 8, marginBottom: 16 },
 
   // Quick actions
-  quickActions: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  quickActions: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   actionBox: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 14, paddingVertical: 16, alignItems: 'center',
-    gap: 6, borderWidth: 1, borderColor: Colors.border,
+    flex: 1, backgroundColor: '#fff', borderRadius: 16, paddingVertical: 22, alignItems: 'center',
+    gap: 8, borderWidth: 1, borderColor: Colors.border,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1,
   },
-  actionBoxLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.text, textAlign: 'center' },
+  actionBoxLabel: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, textAlign: 'center' },
+
+  // Add-ons card
+  addonsCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  addonsTitle: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
+  addonsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+  addonsName: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.text },
+  addonsPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
+
+  // Day modal extras
+  swapFeeTag: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.accentText, marginLeft: 10 },
+  extraRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8,
+    backgroundColor: Colors.primaryLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+  },
+  extraName: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, flex: 1 },
+  extraTag: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.primary },
+  modeToggle: { flexDirection: 'row', backgroundColor: Colors.background, borderRadius: 12, padding: 4, marginBottom: 14 },
+  modeBtn: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: 'center' },
+  modeBtnActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
+  modeBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
+  modeBtnTextActive: { color: Colors.text },
 
   // Deliveries remaining
   progressCard: {
@@ -1265,7 +1446,7 @@ const s = StyleSheet.create({
   dayModalCurrentImg: { width: '100%', height: 160, borderRadius: 12, marginBottom: 12 },
   dayModalCurrentName: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text, marginBottom: 4 },
   dayModalCurrentMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 8 },
-  dayModalStatusRow: { flexDirection: 'row' },
+  dayModalStatusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   dayModalStatus: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
 
   dayModalNoOrder: { padding: 24, alignItems: 'center' },

@@ -17,6 +17,7 @@ import { ChevronLeft, Plus, Trash2, Edit3, Check } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
+import LocationPicker, { type LatLng } from '@/components/LocationPicker'
 
 type Address = {
   id: string
@@ -26,6 +27,8 @@ type Address = {
   label: string
   type: 'home' | 'office' | 'other'
   is_default: boolean
+  lat: number | null
+  lng: number | null
 }
 
 const ADDR_TYPES = [
@@ -61,12 +64,13 @@ export default function AddressesScreen() {
   const [pincode, setPincode] = useState('')
   const [label, setLabel] = useState('Home')
   const [addrType, setAddrType] = useState<'home' | 'office' | 'other'>('home')
+  const [pin, setPin] = useState<LatLng | null>(null)
 
   const fetchAddresses = useCallback(async () => {
     if (!user) return
     const { data } = await supabase
       .from('addresses')
-      .select('id, line1, landmark, pincode, label, type, is_default')
+      .select('id, line1, landmark, pincode, label, type, is_default, lat, lng')
       .eq('user_id', user.id)
       .order('is_default', { ascending: false })
       .order('created_at')
@@ -80,7 +84,7 @@ export default function AddressesScreen() {
 
   function openAdd() {
     setEditingId(null)
-    setLine1(''); setLandmark(''); setPincode(''); setLabel('Home'); setAddrType('home')
+    setLine1(''); setLandmark(''); setPincode(''); setLabel('Home'); setAddrType('home'); setPin(null)
     setError(''); setFieldErrors({})
     setFormOpen(true)
   }
@@ -89,6 +93,7 @@ export default function AddressesScreen() {
     setEditingId(addr.id)
     setLine1(addr.line1); setLandmark(addr.landmark ?? ''); setPincode(addr.pincode)
     setLabel(addr.label); setAddrType(addr.type)
+    setPin(addr.lat != null && addr.lng != null ? { lat: addr.lat, lng: addr.lng } : null)
     setError(''); setFieldErrors({})
     setFormOpen(true)
   }
@@ -100,7 +105,7 @@ export default function AddressesScreen() {
     try {
       if (editingId) {
         const { error: err } = await supabase.from('addresses')
-          .update({ line1: line1.trim(), landmark: landmark.trim() || null, pincode, label, type: addrType })
+          .update({ line1: line1.trim(), landmark: landmark.trim() || null, pincode, label, type: addrType, lat: pin?.lat ?? null, lng: pin?.lng ?? null })
           .eq('id', editingId)
         if (err) throw err
       } else {
@@ -112,6 +117,8 @@ export default function AddressesScreen() {
           pincode,
           label,
           type: addrType,
+          lat: pin?.lat ?? null,
+          lng: pin?.lng ?? null,
           is_default: isFirst,
         })
         if (err) throw err
@@ -217,11 +224,9 @@ export default function AddressesScreen() {
       {/* Add / Edit sheet */}
       <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
         <View style={f.overlay}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={{ flex: 1, justifyContent: 'flex-end' }}
-          >
-            <View style={[f.sheet, { maxHeight: '88%', flex: 1 }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setFormOpen(false)} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={f.sheet}>
               <View style={f.handle} />
               <View style={f.header}>
                 <Text style={f.title}>{editingId ? 'Edit address' : 'Add address'}</Text>
@@ -232,7 +237,7 @@ export default function AddressesScreen() {
 
               <ScrollView
                 showsVerticalScrollIndicator={false}
-                style={{ flex: 1 }}
+                style={f.formScroll}
                 contentContainerStyle={{ padding: 16 }}
                 keyboardShouldPersistTaps="handled"
               >
@@ -265,6 +270,18 @@ export default function AddressesScreen() {
                     value={pincode}
                     onChangeText={(t) => { setPincode(t.replace(/\D/g, '')); setFieldErrors(e => ({ ...e, pincode: '' })) }}
                     placeholderTextColor={Colors.textLight}
+                  />
+                </FormField>
+
+                <FormField label="Pin your location (optional)">
+                  <LocationPicker
+                    value={pin}
+                    onChange={setPin}
+                    height={180}
+                    onResolveAddress={({ line1: l1, pincode: pc }) => {
+                      if (l1) { setLine1(l1); setFieldErrors(e => ({ ...e, line1: '' })) }
+                      if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setFieldErrors(e => ({ ...e, pincode: '' })) }
+                    }}
                   />
                 </FormField>
 
@@ -369,9 +386,10 @@ const s = StyleSheet.create({
 
 const f = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingBottom: 32 },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 12, paddingBottom: 24, maxHeight: '90%' },
+  formScroll: { flexShrink: 1 },
   handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 999, alignSelf: 'center', marginBottom: 12 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 16 },
   title: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
   closeText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.textMuted },
   input: {

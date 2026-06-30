@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
@@ -19,6 +18,10 @@ type Plan = { id: string; name: string; meals_total: number; base_price: number 
 
 function fmt(paise: number) {
   return `₹${(paise / 100).toFixed(0)}`
+}
+
+const DAY_LETTER: Record<string, string> = {
+  Mon: 'M', Tue: 'T', Wed: 'W', Thu: 'T', Fri: 'F', Sat: 'S', Sun: 'S',
 }
 
 export default function SummaryScreen() {
@@ -47,6 +50,12 @@ export default function SummaryScreen() {
   const addonTotal = totalAddons * mealsTotal
   const grandTotal = basePrice + addonTotal
 
+  const daysShort = store.selectedDays.map((d) => DAY_LETTER[d] ?? d[0]).join('  ')
+  const freeTextConstraints = (store.dietaryFreeText ?? '')
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -67,7 +76,7 @@ export default function SummaryScreen() {
         <Section title="Plan Details">
           <Row label="Plan" value={store.planName || plan?.name || '—'} />
           <Row label="Meals" value={`${mealsTotal} meals`} />
-          <Row label="Delivery days" value={store.selectedDays.join(', ') || '—'} />
+          <Row label="Delivery days" value={daysShort || '—'} />
           <Row label="Delivery mode" value={store.deliveryMode === 'opt-out' ? 'All days (skip as you go)' : 'Only selected days'} />
           <Row label="Lunch per day" value={String(store.mealsLunch)} />
           <Row label="Dinner per day" value={String(store.mealsDinner)} />
@@ -86,25 +95,32 @@ export default function SummaryScreen() {
           </Section>
         )}
 
-        {/* Dietary */}
+        {/* Dietary — every tag rendered as a green pill */}
         <Section title="Dietary Profile">
-          {store.allergens.length > 0 && (
-            <View style={styles.badgeRow}>
-              {store.allergens.map((a) => (
-                <View key={a} style={styles.badge}>
-                  <Text style={styles.badgeText}>{a} Free</Text>
-                </View>
-              ))}
-            </View>
-          )}
-          {store.dietaryPreference !== 'none' && (
-            <Row label="Preference" value={store.dietaryPreference.charAt(0).toUpperCase() + store.dietaryPreference.slice(1)} />
-          )}
-          {store.dietaryFreeText ? (
-            <View style={styles.noteBox}>
-              <Text style={styles.noteText}>{store.dietaryFreeText}</Text>
-            </View>
-          ) : null}
+          <View style={styles.badgeRow}>
+            {store.dietaryPreference !== 'none' && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {store.dietaryPreference.charAt(0).toUpperCase() + store.dietaryPreference.slice(1)}
+                </Text>
+              </View>
+            )}
+            {store.allergens.map((a) => (
+              <View key={a} style={styles.badge}>
+                <Text style={styles.badgeText}>{a} Free</Text>
+              </View>
+            ))}
+            {freeTextConstraints.map((c, i) => (
+              <View key={`c-${i}`} style={styles.badge}>
+                <Text style={styles.badgeText}>{c}</Text>
+              </View>
+            ))}
+            {store.dietaryPreference === 'none' &&
+              store.allergens.length === 0 &&
+              freeTextConstraints.length === 0 && (
+                <Text style={styles.noteText}>No restrictions</Text>
+              )}
+          </View>
         </Section>
 
         {/* Address */}
@@ -136,9 +152,6 @@ export default function SummaryScreen() {
       {/* Sticky CTA */}
       <View style={[styles.cta, { paddingBottom: insets.bottom + 16 }]}>
         <Button onPress={() => router.push('/(onboarding)/payment')}>Proceed to Payment →</Button>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.editLink}>Edit subscription</Text>
-        </TouchableOpacity>
       </View>
     </View>
   )
@@ -183,7 +196,6 @@ const styles = StyleSheet.create({
   badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   badge: { backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   badgeText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
-  noteBox: { backgroundColor: Colors.background, borderRadius: 8, padding: 10 },
   noteText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 18 },
   totalRow: {
     flexDirection: 'row',
@@ -206,5 +218,4 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
     gap: 10,
   },
-  editLink: { fontFamily: Fonts.body, textAlign: 'center', fontSize: 14, color: Colors.textMuted, textDecorationLine: 'underline' },
 })

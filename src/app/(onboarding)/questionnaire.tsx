@@ -1,22 +1,18 @@
 import { useState, useCallback } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { useRouter, useFocusEffect } from 'expo-router'
+import * as Haptics from 'expo-haptics'
 import { useOnboardingStore } from '@/store/onboarding'
 import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 import { computeRecommendation } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
-import Button from '@/components/Button'
-import SectionProgress from '@/components/SectionProgress'
-
-// ── Questions by goal ─────────────────────────────────────────────────────────
+import Wizard, { type WizardStep } from '@/components/Wizard'
 
 type Option = { id: string; label: string; desc?: string }
-
 type QuestionSet = {
   q1: { question: string; options: Option[] }
-  q2?: { question: string; options: Option[] } // only for lose-weight
+  q2?: { question: string; options: Option[] }
 }
 
 const QUESTIONS: Record<string, QuestionSet> = {
@@ -68,7 +64,6 @@ const QUESTIONS: Record<string, QuestionSet> = {
 
 export default function QuestionnaireScreen() {
   const router = useRouter()
-  const insets = useSafeAreaInsets()
   const { healthGoal, exerciseFrequency, setQuestionnaire } = useOnboardingStore()
   const { user } = useAuthStore()
   const [q1Answer, setQ1Answer] = useState('')
@@ -84,10 +79,8 @@ export default function QuestionnaireScreen() {
 
   const qs = QUESTIONS[healthGoal]
   const needsQ2 = !!qs.q2
-  const canProceed = q1Answer !== '' && (!needsQ2 || q2Answer !== '')
 
-  function handleNext() {
-    if (!canProceed) return
+  function handleComplete() {
     const recommendation = computeRecommendation({
       goal: healthGoal!,
       q1: q1Answer,
@@ -111,103 +104,78 @@ export default function QuestionnaireScreen() {
     router.push('/(onboarding)/dietary')
   }
 
+  const renderOptions = (options: Option[], value: string, onChange: (v: string) => void) => (
+    <View style={styles.options}>
+      {options.map((opt) => {
+        const on = value === opt.id
+        return (
+          <TouchableOpacity
+            key={opt.id}
+            style={[styles.option, on && styles.optionActive]}
+            onPress={() => { Haptics.selectionAsync().catch(() => {}); onChange(opt.id) }}
+          >
+            <View style={[styles.radio, on && styles.radioActive]}>
+              {on && <View style={styles.radioDot} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, on && styles.optionLabelActive]}>{opt.label}</Text>
+              {opt.desc && <Text style={styles.optionDesc}>{opt.desc}</Text>}
+            </View>
+          </TouchableOpacity>
+        )
+      })}
+    </View>
+  )
+
+  const steps: WizardStep[] = [
+    {
+      key: 'q1',
+      title: qs.q1.question,
+      emoji: '🤔',
+      canNext: q1Answer !== '',
+      render: () => renderOptions(qs.q1.options, q1Answer, setQ1Answer),
+    },
+  ]
+  if (needsQ2 && qs.q2) {
+    steps.push({
+      key: 'q2',
+      title: qs.q2.question,
+      emoji: '🍽️',
+      canNext: q2Answer !== '',
+      render: () => renderOptions(qs.q2!.options, q2Answer, setQ2Answer),
+    })
+  }
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}>
-      <SectionProgress current={2} />
-      <View style={styles.header}>
-        <Text style={styles.title}>A few quick questions</Text>
-        <Text style={styles.subtitle}>Help us get your plan right.</Text>
-      </View>
-
-      {/* Q1 */}
-      <View style={styles.questionBlock}>
-        <Text style={styles.question}>{qs.q1.question}</Text>
-        <View style={styles.options}>
-          {qs.q1.options.map((opt) => (
-            <TouchableOpacity
-              key={opt.id}
-              style={[styles.option, q1Answer === opt.id && styles.optionActive]}
-              onPress={() => setQ1Answer(opt.id)}
-            >
-              <View style={[styles.radio, q1Answer === opt.id && styles.radioActive]}>
-                {q1Answer === opt.id && <View style={styles.radioDot} />}
-              </View>
-              <View style={styles.optionText}>
-                <Text style={[styles.optionLabel, q1Answer === opt.id && styles.optionLabelActive]}>
-                  {opt.label}
-                </Text>
-                {opt.desc && <Text style={styles.optionDesc}>{opt.desc}</Text>}
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      {/* Q2 (only for lose-weight) */}
-      {needsQ2 && qs.q2 && (
-        <View style={styles.questionBlock}>
-          <Text style={styles.question}>{qs.q2.question}</Text>
-          <View style={styles.options}>
-            {qs.q2.options.map((opt) => (
-              <TouchableOpacity
-                key={opt.id}
-                style={[styles.option, q2Answer === opt.id && styles.optionActive]}
-                onPress={() => setQ2Answer(opt.id)}
-              >
-                <View style={[styles.radio, q2Answer === opt.id && styles.radioActive]}>
-                  {q2Answer === opt.id && <View style={styles.radioDot} />}
-                </View>
-                <View style={styles.optionText}>
-                  <Text style={[styles.optionLabel, q2Answer === opt.id && styles.optionLabelActive]}>
-                    {opt.label}
-                  </Text>
-                  {opt.desc && <Text style={styles.optionDesc}>{opt.desc}</Text>}
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
-
-      <Button onPress={handleNext} disabled={!canProceed}>Next →</Button>
-    </ScrollView>
+    <Wizard
+      steps={steps}
+      nextLabel="See my plan →"
+      onComplete={handleComplete}
+      onExitFirst={() => router.back()}
+    />
   )
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { padding: 24, paddingBottom: 40 },
-  header: { marginBottom: 32 },
-  step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 6 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
-  questionBlock: { marginBottom: 32 },
-  question: { fontFamily: Fonts.headingSemi, fontSize: 17, color: Colors.text, marginBottom: 16, lineHeight: 24 },
-  options: { gap: 10 },
+  options: { gap: 12 },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
+    padding: 18,
     borderWidth: 2,
     borderColor: Colors.border,
   },
   optionActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   radio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center',
   },
   radioActive: { borderColor: Colors.primary },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.primary },
-  optionText: { flex: 1 },
-  optionLabel: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text },
+  radioDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: Colors.primary },
+  optionLabel: { fontFamily: Fonts.bodyBold, fontSize: 16, color: Colors.text },
   optionLabelActive: { color: Colors.primary },
-  optionDesc: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  optionDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginTop: 2 },
 })

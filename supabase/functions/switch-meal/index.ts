@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
     // Load the order and verify ownership
     const { data: order } = await supabase
       .from('orders')
-      .select('id, user_id, subscription_id, delivery_date, meal_slot, meal_template_id, status')
+      .select('id, user_id, subscription_id, delivery_date, meal_slot, meal_template_id, status, switch_fee_paise')
       .eq('id', order_id)
       .single()
 
@@ -97,10 +97,19 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Update the order
+    // Update the order. Record the swap fee on the order so the app can show it
+    // in the cart/total. The wallet debit is idempotent per order, so this flat
+    // ₹20 customization fee is only ever charged once even across re-swaps; a
+    // free switch (back to the included meal) keeps any fee already incurred.
+    const newFee = isFreeSwitch ? (order.switch_fee_paise ?? 0) : SWITCH_FEE_PAISE
     await supabase
       .from('orders')
-      .update({ meal_template_id, is_customized: true, updated_at: new Date().toISOString() })
+      .update({
+        meal_template_id,
+        is_customized: true,
+        switch_fee_paise: newFee,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', order_id)
 
     return json({ ok: true, charged: !isFreeSwitch, fee_paise: isFreeSwitch ? 0 : SWITCH_FEE_PAISE })

@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
+import LocationPicker, { type LatLng } from '@/components/LocationPicker'
 
 const ADDRESS_TYPES = [
   { id: 'home', label: '🏠 Home' },
@@ -35,6 +36,7 @@ export default function AddressScreen() {
   const [landmark, setLandmark] = useState('')
   const [type, setType] = useState<'home' | 'office' | 'other'>('home')
   const [label, setLabel] = useState('Home')
+  const [pin, setPin] = useState<LatLng | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   function validate() {
@@ -57,6 +59,8 @@ export default function AddressScreen() {
       addressPincode: pincode,
       addressLabel: resolvedLabel,
       addressType: type,
+      addressLat: pin?.lat ?? null,
+      addressLng: pin?.lng ?? null,
     })
     // Incremental save: update existing default address if one exists, otherwise insert.
     // payment.tsx will do the same check so no duplicate is created.
@@ -69,6 +73,8 @@ export default function AddressScreen() {
         city: 'Jaipur',
         pincode,
         landmark: landmark.trim() || null,
+        lat: pin?.lat ?? null,
+        lng: pin?.lng ?? null,
         is_default: true,
       }
       ;(async () => {
@@ -125,6 +131,18 @@ export default function AddressScreen() {
             placeholderTextColor={Colors.textLight}
           />
           {errors.pincode ? <Text style={styles.error}>{errors.pincode}</Text> : null}
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Pin your location <Text style={styles.optional}>(optional)</Text></Text>
+          <LocationPicker
+            value={pin}
+            onChange={setPin}
+            onResolveAddress={({ line1: l1, pincode: pc }) => {
+              if (l1) { setLine1(l1); setErrors((e) => ({ ...e, line1: '' })) }
+              if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setErrors((e) => ({ ...e, pincode: '' })) }
+            }}
+          />
         </View>
 
         <View style={styles.field}>
