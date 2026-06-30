@@ -10,13 +10,11 @@ import {
   Modal,
   TextInput,
   Dimensions,
-  type NativeSyntheticEvent,
-  type NativeScrollEvent,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Pause, Play, SkipForward, ArrowRight, Wallet, MapPin, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp } from 'lucide-react-native'
+import { Pause, Play, SkipForward, ArrowRight, Wallet, MapPin, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
@@ -54,17 +52,31 @@ type MealTemplate = {
 
 type AddressData = { id: string; line1: string; landmark: string | null; label: string; is_default: boolean }
 
+type CartLine = {
+  id: string
+  addon_id: string | null
+  kind: 'addon' | 'fee'
+  label: string | null
+  quantity: number
+  unit_price: number | null
+}
+
 type OrderItem = {
   id: string
   delivery_date: string
   meal_slot: string
   status: string
   address_id: string | null
+  quantity: number | null
+  unit_price: number | null
   switch_fee_paise: number | null
   extra_dish: boolean | null
   slot_seq: number | null
-  meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; image_url: string | null } | null
+  meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; carbs: number | null; fat: number | null; image_url: string | null } | null
+  order_addons: CartLine[]
 }
+
+type AddonCatalog = { id: string; name: string; price_per_meal: number }
 
 type WalletTransaction = {
   id: string
@@ -131,14 +143,17 @@ export default function SubscriptionScreen() {
   const [addresses, setAddresses] = useState<AddressData[]>([])
   const [pickingAddressForOrder, setPickingAddressForOrder] = useState<string | null>(null)
   const [allMeals, setAllMeals] = useState<MealTemplate[]>([])
+  const [allAddons, setAllAddons] = useState<AddonCatalog[]>([])
   const [subAddons, setSubAddons] = useState<SubAddon[]>([])
   const [addMode, setAddMode] = useState(false)
-  const [todayCard, setTodayCard] = useState(0)
+  const [cartBusy, setCartBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [skipConfirm, setSkipConfirm] = useState<string | null>(null)
   const [skipping, setSkipping] = useState(false)
-  const [selectedDay, setSelectedDay] = useState<{ dateStr: string; date: Date } | null>(null)
+  const [selectedDay, setSelectedDay] = useState<string>(istToday())
+  const [selectedSlot, setSelectedSlot] = useState<'lunch' | 'dinner'>(istHour() < 14 ? 'lunch' : 'dinner')
+  const [showDayModal, setShowDayModal] = useState(false)
   const [swapping, setSwapping] = useState(false)
   const [swapError, setSwapError] = useState('')
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
@@ -146,7 +161,7 @@ export default function SubscriptionScreen() {
   const [showAddMoney, setShowAddMoney] = useState(false)
   const [showRazorpay, setShowRazorpay] = useState(false)
   const [funding, setFunding] = useState(false)
-  const [counterpartMealId, setCounterpartMealId] = useState<string | null>(null)
+  const [freeMealIds, setFreeMealIds] = useState<Set<string>>(new Set())
   const [topupAmountPaise, setTopupAmountPaise] = useState(50000) // ₹500 default
   const [topupCustom, setTopupCustom] = useState('')
   const [razorpayOrderId, setRazorpayOrderId] = useState<string | null>(null)
@@ -195,7 +210,7 @@ export default function SubscriptionScreen() {
     const [ordersRes, walletRes, addrRes, addonRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, meal_slot, status, address_id, switch_fee_paise, extra_dish, slot_seq, meal_templates ( id, name, kcal, protein, image_url )')
+        .select('id, delivery_date, meal_slot, status, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
         .eq('subscription_id', s.id)
         .gte('delivery_date', today)
         .lte('delivery_date', endStr)
@@ -224,7 +239,7 @@ export default function SubscriptionScreen() {
     setSubAddons((addonRes.data as unknown as SubAddon[]) ?? [])
   }, [user])
 
-  // Fetch meal templates once on mount for the swap panel
+  // Fetch meal + add-on catalogues once on mount for the cart editor.
   useEffect(() => {
     supabase
       .from('meal_templates')
@@ -232,6 +247,11 @@ export default function SubscriptionScreen() {
       .eq('is_active', true)
       .order('category')
       .then(({ data }) => setAllMeals((data as MealTemplate[]) ?? []))
+    supabase
+      .from('addons')
+      .select('id, name, price_per_meal')
+      .eq('is_active', true)
+      .then(({ data }) => setAllAddons((data as AddonCatalog[]) ?? []))
   }, [])
 
   useEffect(() => {
@@ -256,28 +276,28 @@ export default function SubscriptionScreen() {
     })()
   }, [loading, sub, weekOrders.length, fetchAll])
 
-  // Reset address picker + add-mode when day changes
-  useEffect(() => { setPickingAddressForOrder(null); setAddMode(false); setSwapError('') }, [selectedDay])
+  // Reset address picker + add-mode when modal closes or day changes
+  useEffect(() => { setPickingAddressForOrder(null); setAddMode(false); setSwapError('') }, [selectedDay, showDayModal])
 
-  // When a day is selected, look up the counterpart menu's meal so we can show "Free" vs "+₹20"
+  // When selected day/slot changes, look up the free dishes (own + counterpart menu)
+  // so the swap list shows "Free" vs "+₹20" correctly.
   useEffect(() => {
-    if (!selectedDay || !sub) { setCounterpartMealId(null); return }
-    const dayOrder = weekOrders.find(o => o.delivery_date === selectedDay.dateStr)
-    if (!dayOrder) { setCounterpartMealId(null); return }
+    if (!sub) { setFreeMealIds(new Set()); return }
+    const slotOrder = weekOrders.find(o => o.delivery_date === selectedDay && !o.extra_dish && o.meal_slot === selectedSlot)
+    if (!slotOrder) { setFreeMealIds(new Set()); return }
     const myMenuType = sub.menu_type ?? 'M1'
     const counterpart = myMenuType === 'M1' ? 'M2' : 'M1'
-    const dowNum = (selectedDay.date.getDay() + 6) % 7
+    const dowNum = dowMon0(selectedDay)
     ;(async () => {
       const { data } = await supabase
         .from('weekly_menu')
         .select('meal_template_id')
-        .eq('menu_type', counterpart)
+        .in('menu_type', [myMenuType, counterpart])
         .eq('day_of_week', dowNum)
-        .eq('meal_slot', dayOrder.meal_slot)
-        .maybeSingle()
-      setCounterpartMealId(data?.meal_template_id ?? null)
+        .eq('meal_slot', selectedSlot)
+      setFreeMealIds(new Set((data ?? []).map((m: any) => m.meal_template_id).filter(Boolean)))
     })()
-  }, [selectedDay, sub, weekOrders])
+  }, [selectedDay, selectedSlot, sub, weekOrders])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -314,7 +334,7 @@ export default function SubscriptionScreen() {
         return
       }
       if (data?.error) throw new Error(data.error)
-      setSelectedDay(null)
+      setShowDayModal(false)
       await fetchAll()
     } catch (e: any) {
       setSwapError(e?.message ?? 'Could not swap meal. Try again.')
@@ -339,13 +359,47 @@ export default function SubscriptionScreen() {
         return
       }
       if (data?.error) throw new Error(data.error)
-      setSelectedDay(null)
+      setShowDayModal(false)
       setAddMode(false)
       await fetchAll()
     } catch (e: any) {
       setSwapError(e?.message ?? 'Could not add dish. Try again.')
     } finally {
       setSwapping(false)
+    }
+  }
+
+  // Add-on add/remove + base meal quantity, charged to the wallet immediately.
+  async function handleCartOp(orderId: string, op: 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty', addonId?: string) {
+    if (cartBusy) return
+    setCartBusy(true)
+    setSwapError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+      const { data, error } = await supabase.functions.invoke('update-day-cart', {
+        body: { order_id: orderId, op, addon_id: addonId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (error) throw error
+      if (data?.error === 'insufficient_balance') {
+        setSwapError('Insufficient wallet balance. Add money first.')
+        return
+      }
+      if (data?.error === 'cannot_remove_default_addon') {
+        setSwapError("This add-on is part of your plan and can't be removed here.")
+        return
+      }
+      if (data?.error === 'below_minimum') {
+        setSwapError('You already have the minimum number of meals for this slot.')
+        return
+      }
+      if (data?.error) throw new Error(data.error)
+      await fetchAll()
+    } catch (e: any) {
+      setSwapError(e?.message ?? 'Could not update the cart. Try again.')
+    } finally {
+      setCartBusy(false)
     }
   }
 
@@ -482,7 +536,6 @@ export default function SubscriptionScreen() {
   // ── Active / paused home view ─────────────────────────────────────────────
 
   const todayStr = istToday()
-  // Multiple orders can share a (date, slot) now (extra dishes), so key by id.
   const orderMap = new Map<string, OrderItem[]>()
   for (const o of weekOrders) {
     const arr = orderMap.get(o.delivery_date) ?? []
@@ -491,64 +544,48 @@ export default function SubscriptionScreen() {
   }
   const nextOrder = weekOrders.find(o => o.delivery_date >= todayStr) ?? null
 
-  // Today's lunch + dinner (primary slot order, slot_seq 0) for the carousel.
-  const todayOrders = orderMap.get(todayStr) ?? []
-  const todayLunch = todayOrders.find(o => o.meal_slot === 'lunch' && !o.extra_dish) ?? null
-  const todayDinner = todayOrders.find(o => o.meal_slot === 'dinner' && !o.extra_dish) ?? null
-  // Default the carousel to the slot relevant to the time of day (IST).
-  const slotsInit: ('lunch' | 'dinner')[] = istHour() < 14 ? ['lunch', 'dinner'] : ['dinner', 'lunch']
-
-  // Week-strip timeline: from the subscription start through end of this week.
+  // Week-strip timeline: from subscription start through end of this week.
   const startStr = sub.start_date && sub.start_date < todayStr ? sub.start_date : todayStr
   const endOffset = ((5 - dowMon0(todayStr)) + 7) % 7
   const endStr = addDaysISO(todayStr, endOffset)
   const stripDates: string[] = []
   for (let d = startStr; d <= endStr; d = addDaysISO(d, 1)) stripDates.push(d)
 
-  // Day detail panel data
-  const dayOrder = selectedDay
-    ? ((orderMap.get(selectedDay.dateStr) ?? []).find(o => !o.extra_dish) ?? null)
-    : null
-  const dayExtras = selectedDay
-    ? (orderMap.get(selectedDay.dateStr) ?? []).filter(o => o.extra_dish)
-    : []
-  const dayLocked = selectedDay ? isLocked(selectedDay.dateStr) : false
+  // Hero card: all orders for the selected day + slot.
+  const heroOrders = (orderMap.get(selectedDay) ?? []).filter(o => o.meal_slot === selectedSlot)
+  const heroBase = heroOrders.find(o => !o.extra_dish) ?? null
+  const heroTotalQty = heroOrders.reduce((sum, o) => sum + (o.quantity ?? 1), 0)
+  const heroKcal = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.kcal ?? 0) * (o.quantity ?? 1)), 0)
+  const heroProtein = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.protein ?? 0) * (o.quantity ?? 1)), 0)
+  const heroCarbs = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.carbs ?? 0) * (o.quantity ?? 1)), 0)
+  const heroFat = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.fat ?? 0) * (o.quantity ?? 1)), 0)
+  const heroLocked = isLocked(selectedDay)
+  const heroIsToday = selectedDay === todayStr
 
-  function TodaySlotCard({ slot, order }: { slot: 'lunch' | 'dinner'; order: OrderItem | null }) {
-    if (order) {
-      return (
-        <View style={[s.todayCard, { width: TODAY_CARD_W }]}>
-          <View style={s.todayCardRow}>
-            <View style={{ flex: 1 }}>
-              <View style={s.statusBadge}>
-                <Text style={s.statusBadgeText}>{slot === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'} · {statusLabel(order.status)}</Text>
-              </View>
-              <Text style={s.todayMealName}>{order.meal_templates?.name ?? 'Your meal'}</Text>
-              {(order.meal_templates?.kcal || order.meal_templates?.protein) && (
-                <Text style={s.todayMeta}>
-                  {order.meal_templates?.kcal ? `${order.meal_templates.kcal} kcal` : ''}
-                  {order.meal_templates?.kcal && order.meal_templates?.protein ? ' · ' : ''}
-                  {order.meal_templates?.protein ? `${order.meal_templates.protein}g protein` : ''}
-                </Text>
-              )}
-            </View>
-            {order.meal_templates?.image_url && (
-              <Image source={{ uri: order.meal_templates.image_url }} style={s.todayThumb} contentFit="cover" cachePolicy="memory-disk" />
-            )}
-          </View>
-        </View>
-      )
-    }
-    return (
-      <Pressable
-        style={[s.todayAddCard, { width: TODAY_CARD_W }]}
-        onPress={() => { setSelectedDay({ dateStr: todayStr, date: new Date(todayStr + 'T00:00:00') }); setAddMode(true) }}
-      >
-        <View style={s.todayAddIcon}><Plus size={22} color={Colors.primary} /></View>
-        <Text style={s.todayAddText}>Add {slot}</Text>
-      </Pressable>
-    )
-  }
+  // Day modal data (same slot).
+  const daySlotOrders = (orderMap.get(selectedDay) ?? []).filter(o => o.meal_slot === selectedSlot)
+  const dayOrder = daySlotOrders.find(o => !o.extra_dish) ?? null
+  const dayExtras = daySlotOrders.filter(o => o.extra_dish)
+  const dayLocked = heroLocked
+
+  const baseRate = sub.plans ? Math.round(sub.plans.base_price / Math.max(sub.plans.meals_total, 1)) : 0
+  const dayAllOrders = daySlotOrders
+  const orderBase = (o: OrderItem) => (o.unit_price ?? baseRate) * (o.quantity ?? 1)
+  const addonLinesCost = (o: OrderItem) =>
+    (o.order_addons ?? []).filter(l => l.kind === 'addon').reduce((sum, l) => sum + (l.unit_price ?? 0) * (l.quantity ?? 1), 0)
+  const feeCost = (o: OrderItem) =>
+    (o.switch_fee_paise ?? 0) + (o.order_addons ?? []).filter(l => l.kind === 'fee').reduce((sum, l) => sum + (l.unit_price ?? 0) * (l.quantity ?? 1), 0)
+  const dayMealsAddons = dayAllOrders.reduce((sum, o) => sum + orderBase(o) + addonLinesCost(o), 0)
+  const daySwapFees = dayAllOrders.reduce((sum, o) => sum + feeCost(o), 0)
+  const dayTotal = dayMealsAddons + daySwapFees
+  const lowBalance = walletBalance !== null && dayTotal > walletBalance
+  const dayOrderAddonIds = new Set((dayOrder?.order_addons ?? []).filter(l => l.kind === 'addon' && l.addon_id).map(l => l.addon_id))
+  const defaultAddonIds = new Set(subAddons.map(a => a.addon_id))
+
+  // Day label for hero card eyebrow: "TODAY'S LUNCH" / "FRI 3'S DINNER"
+  const heroEyebrow = heroIsToday
+    ? `Today's ${selectedSlot}`
+    : `${dowShort(selectedDay)} ${dayNum(selectedDay)}'s ${selectedSlot}`
 
   return (
     <View style={s.container}>
@@ -559,26 +596,10 @@ export default function SubscriptionScreen() {
       >
         <Text style={s.title}>My Plan</Text>
 
-        {/* TODAY'S DELIVERY — lunch / dinner carousel */}
-        <Text style={s.sectionLabel}>Today's delivery</Text>
-        <ScrollView
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) =>
-            setTodayCard(Math.round(e.nativeEvent.contentOffset.x / TODAY_CARD_W))
-          }
-        >
-          {slotsInit.map((slot) => (
-            <TodaySlotCard key={slot} slot={slot} order={slot === 'lunch' ? todayLunch : todayDinner} />
-          ))}
-        </ScrollView>
-        <View style={s.todayDots}>
-          {slotsInit.map((_, i) => <View key={i} style={[s.todayDot, todayCard === i && s.todayDotActive]} />)}
-        </View>
+        {/* WEEK HEADER */}
+        <Text style={s.weekLabel}>{heroIsToday ? 'Today' : 'This week'}</Text>
 
-        {/* TIMELINE STRIP — day + date, past greyed, tap opens the cart */}
-        <Text style={s.sectionLabel}>Your schedule</Text>
+        {/* DATE STRIP */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -589,18 +610,24 @@ export default function SubscriptionScreen() {
         >
           {stripDates.map((d) => {
             const isToday = d === todayStr
+            const isSelected = d === selectedDay
             const isPast = d < todayStr
             const cell = (
-              <View style={[s.dayCell, isToday && s.dayCellToday, isPast && s.dayCellPast]}>
-                <Text style={[s.dayDow, isToday && s.dayDowToday]}>{dowShort(d)}</Text>
-                <Text style={[s.dayDate, isToday && s.dayDateToday]}>{dayNum(d)}</Text>
+              <View style={[
+                s.dayCell,
+                isSelected && s.dayCellSelected,
+                isToday && !isSelected && s.dayCellTodayUnselected,
+                isPast && s.dayCellPast,
+              ]}>
+                <Text style={[s.dayDate, isSelected && s.dayDateSelected]}>{dayNum(d)}</Text>
+                <Text style={[s.dayDow, isSelected && s.dayDowSelected]}>{dowShort(d)}</Text>
               </View>
             )
             if (isPast) return <View key={d}>{cell}</View>
             return (
               <Pressable
                 key={d}
-                onPress={() => setSelectedDay({ dateStr: d, date: new Date(d + 'T00:00:00') })}
+                onPress={() => setSelectedDay(d)}
                 style={({ pressed }) => pressed && { opacity: 0.7 }}
               >
                 {cell}
@@ -608,9 +635,161 @@ export default function SubscriptionScreen() {
             )
           })}
         </ScrollView>
-        <Text style={s.lockNote}>Tap a day to see, swap or add a meal · Changes lock at 8 PM the night before</Text>
 
-        {/* QUICK ACTIONS — two larger buttons */}
+        {/* HERO DAY CARD */}
+        {heroBase ? (
+          <View style={s.heroCard}>
+            <View style={s.heroHeader}>
+              <View style={s.heroTopRow}>
+                <View>
+                  <Text style={s.heroEyebrow}>{heroEyebrow}</Text>
+                  <Text style={s.heroTitle}>{selectedSlot === 'lunch' ? 'Lunch' : 'Dinner'}</Text>
+                  <Text style={s.heroSubtitle}>
+                    {heroTotalQty} {heroTotalQty === 1 ? 'item' : 'items'}
+                    {heroKcal > 0 ? ` · ${heroKcal.toLocaleString('en-IN')} kcal total` : ''}
+                  </Text>
+                </View>
+                <View style={[s.heroStatusBadge, heroBase.status === 'preparing' && s.heroStatusPrep]}>
+                  <CheckCircle2 size={13} color={Colors.primary} strokeWidth={2.5} />
+                  <Text style={[s.heroStatusText, heroBase.status === 'preparing' && s.heroStatusPrepText]}>
+                    {statusLabel(heroBase.status)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Meal list */}
+              <View style={s.heroCartList}>
+                {heroOrders.map(o => (
+                  <View key={o.id} style={s.heroCartRow}>
+                    {o.meal_templates?.image_url ? (
+                      <Image source={{ uri: o.meal_templates.image_url }} style={s.heroFoodThumb} contentFit="cover" cachePolicy="memory-disk" />
+                    ) : (
+                      <View style={[s.heroFoodThumb, { backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center' }]}>
+                        <Text style={{ fontSize: 18 }}>🍽️</Text>
+                      </View>
+                    )}
+                    <View style={s.heroCartRowInfo}>
+                      <Text style={s.heroCartName} numberOfLines={1}>{o.meal_templates?.name ?? 'Your meal'}</Text>
+                      {(o.meal_templates?.kcal ?? 0) > 0 && (
+                        <Text style={s.heroCartKcal}>
+                          {o.meal_templates!.kcal} kcal{(o.quantity ?? 1) > 1 ? ' each' : ''}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={s.heroQtyPill}>
+                      <Text style={s.heroQtyPillText}>{o.quantity ?? 1}×</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              {/* Macro chips */}
+              {(heroProtein > 0 || heroCarbs > 0 || heroFat > 0) && (
+                <View style={s.heroMacroStrip}>
+                  {heroProtein > 0 && (
+                    <View style={s.heroMacroBox}>
+                      <Text style={s.heroMacroVal}>{Math.round(heroProtein)}g</Text>
+                      <Text style={s.heroMacroLabel}>Protein</Text>
+                    </View>
+                  )}
+                  {heroCarbs > 0 && (
+                    <View style={s.heroMacroBox}>
+                      <Text style={s.heroMacroVal}>{Math.round(heroCarbs)}g</Text>
+                      <Text style={s.heroMacroLabel}>Carbs</Text>
+                    </View>
+                  )}
+                  {heroFat > 0 && (
+                    <View style={s.heroMacroBox}>
+                      <Text style={s.heroMacroVal}>{Math.round(heroFat)}g</Text>
+                      <Text style={s.heroMacroLabel}>Fat</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+
+            {/* Action buttons */}
+            <View style={s.heroCardBtns}>
+              {!heroLocked && (
+                <Pressable
+                  style={({ pressed }) => [s.heroSkipBtn, pressed && { opacity: 0.7 }]}
+                  onPress={() => setSkipConfirm(selectedDay)}
+                >
+                  <SkipForward size={15} color={Colors.text} strokeWidth={2} />
+                  <Text style={s.heroSkipText}>Skip</Text>
+                </Pressable>
+              )}
+              <Pressable
+                style={({ pressed }) => [s.heroCustomizeBtn, !heroLocked && { flex: 1.4 }, pressed && { opacity: 0.85 }]}
+                onPress={() => { setAddMode(false); setShowDayModal(true) }}
+              >
+                <SlidersHorizontal size={15} color="#fff" strokeWidth={2} />
+                <Text style={s.heroCustomizeText}>{heroLocked ? 'View details →' : 'Customize →'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <View style={s.heroEmpty}>
+            <Text style={s.heroEmptyText}>No {selectedSlot} on {dowShort(selectedDay)} {dayNum(selectedDay)}</Text>
+            {!heroLocked && (
+              <Pressable
+                style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }]}
+                onPress={() => { setAddMode(true); setShowDayModal(true) }}
+              >
+                <Plus size={14} color={Colors.primary} />
+                <Text style={s.heroAddBtnText}>Add {selectedSlot}</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
+        {/* SLOT TOGGLE */}
+        <View style={s.slotToggleWrap}>
+          <View style={s.slotToggle}>
+            <Pressable
+              style={[s.slotBtn, selectedSlot === 'lunch' && s.slotBtnActive]}
+              onPress={() => setSelectedSlot('lunch')}
+            >
+              <Utensils size={15} color={selectedSlot === 'lunch' ? '#fff' : Colors.textMuted} strokeWidth={2} />
+              <Text style={[s.slotBtnText, selectedSlot === 'lunch' && s.slotBtnTextActive]}>Lunch</Text>
+            </Pressable>
+            <Pressable
+              style={[s.slotBtn, selectedSlot === 'dinner' && s.slotBtnActive]}
+              onPress={() => setSelectedSlot('dinner')}
+            >
+              <Moon size={15} color={selectedSlot === 'dinner' ? '#fff' : Colors.textMuted} strokeWidth={2} />
+              <Text style={[s.slotBtnText, selectedSlot === 'dinner' && s.slotBtnTextActive]}>Dinner</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* INFO TILES — Balance + Plan Settings */}
+        <View style={s.infoTilesRow}>
+          <Pressable
+            style={({ pressed }) => [s.infoTile, pressed && { opacity: 0.75 }]}
+            onPress={() => setShowAddMoney(true)}
+          >
+            <View style={s.infoTileIcon}><Wallet size={19} color={Colors.primary} strokeWidth={1.75} /></View>
+            <View>
+              <Text style={s.infoTileCaption}>Balance</Text>
+              <Text style={s.infoTileValue}>
+                {walletBalance !== null ? `₹${(walletBalance / 100).toLocaleString('en-IN')}` : '—'}
+              </Text>
+            </View>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.infoTile, pressed && { opacity: 0.75 }]}
+            onPress={() => router.push('/(app)/plan-settings')}
+          >
+            <View style={s.infoTileIcon}><Settings2 size={19} color={Colors.primary} strokeWidth={1.75} /></View>
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={s.infoTileLabel}>Plan Settings</Text>
+              <ChevronRight size={15} color={Colors.textMuted} strokeWidth={2} />
+            </View>
+          </Pressable>
+        </View>
+
+        {/* PAUSE / RESUME ACTION */}
         <View style={s.quickActions}>
           <Pressable
             style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
@@ -773,25 +952,23 @@ export default function SubscriptionScreen() {
         </View>
       </Modal>
 
-      {/* Day detail / meal swap panel */}
+      {/* Day detail / customize modal */}
       <Modal
-        visible={!!selectedDay}
+        visible={showDayModal}
         transparent
         animationType="slide"
-        onRequestClose={() => { setSelectedDay(null); setPickingAddressForOrder(null) }}
+        onRequestClose={() => { setShowDayModal(false); setPickingAddressForOrder(null) }}
       >
         <View style={s.dayModalOverlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setSelectedDay(null); setPickingAddressForOrder(null) }} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowDayModal(false); setPickingAddressForOrder(null) }} />
           <View style={s.dayModalSheet}>
             {/* Handle */}
             <View style={s.dayModalHandle} />
 
             {/* Header */}
             <View style={s.dayModalHeader}>
-              <Text style={s.dayModalDate}>
-                {selectedDay ? fmtDateLong(selectedDay.dateStr) : ''}
-              </Text>
-              <Pressable onPress={() => setSelectedDay(null)} hitSlop={10}>
+              <Text style={s.dayModalDate}>{fmtDateLong(selectedDay)}</Text>
+              <Pressable onPress={() => setShowDayModal(false)} hitSlop={10}>
                 <X size={20} color={Colors.textMuted} />
               </Pressable>
             </View>
@@ -829,20 +1006,118 @@ export default function SubscriptionScreen() {
                     )}
                     <View style={s.dayModalStatusRow}>
                       <Text style={s.dayModalStatus}>{statusLabel(dayOrder.status)}</Text>
-                      {(dayOrder.switch_fee_paise ?? 0) > 0 && (
-                        <Text style={s.swapFeeTag}>+₹{fmt(dayOrder.switch_fee_paise!)} swap fee</Text>
+                      {feeCost(dayOrder) > 0 && (
+                        <Text style={s.swapFeeTag}>+₹{fmt(feeCost(dayOrder))} swap fee</Text>
                       )}
                     </View>
                   </View>
+
+                  {/* Portions stepper for the base meal */}
+                  {!dayLocked && (
+                    <View style={s.qtyRow}>
+                      <View>
+                        <Text style={s.qtyLabel}>Portions</Text>
+                        <Text style={s.qtySub}>Billed from your wallet on delivery</Text>
+                      </View>
+                      <View style={s.qtyStepper}>
+                        <Pressable
+                          style={[s.qtyBtn, (cartBusy || (dayOrder.quantity ?? 1) <= 1) && { opacity: 0.4 }]}
+                          onPress={() => handleCartOp(dayOrder.id, 'dec_qty')}
+                          disabled={cartBusy || (dayOrder.quantity ?? 1) <= 1}
+                        >
+                          <Text style={s.qtyBtnText}>−</Text>
+                        </Pressable>
+                        <Text style={s.qtyValue}>{dayOrder.quantity ?? 1}</Text>
+                        <Pressable
+                          style={[s.qtyBtn, cartBusy && { opacity: 0.4 }]}
+                          onPress={() => handleCartOp(dayOrder.id, 'inc_qty')}
+                          disabled={cartBusy}
+                        >
+                          <Text style={s.qtyBtnText}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
 
                   {/* Extra dishes added to this slot */}
                   {dayExtras.map((ex) => (
                     <View key={ex.id} style={s.extraRow}>
                       <Plus size={14} color={Colors.primary} />
                       <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
-                      <Text style={s.extraTag}>Added</Text>
+                      <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
                     </View>
                   ))}
+
+                  {/* Add-ons for this day */}
+                  {!dayLocked && allAddons.length > 0 && (
+                    <View style={s.addonEditWrap}>
+                      <Text style={s.addonEditHead}>Add-ons for this day</Text>
+                      {allAddons.map((a) => {
+                        const on = dayOrderAddonIds.has(a.id)
+                        const isDefault = defaultAddonIds.has(a.id)
+                        return (
+                          <View key={a.id} style={s.addonEditRow}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.addonEditName}>{a.name}</Text>
+                              <Text style={s.addonEditPrice}>
+                                ₹{fmt(a.price_per_meal)}{isDefault ? ' · in your plan' : ''}
+                              </Text>
+                            </View>
+                            {on ? (
+                              isDefault ? (
+                                <View style={s.addonIncluded}><Text style={s.addonIncludedText}>Included</Text></View>
+                              ) : (
+                                <Pressable
+                                  style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
+                                  onPress={() => handleCartOp(dayOrder.id, 'remove_addon', a.id)}
+                                  disabled={cartBusy}
+                                >
+                                  <Text style={s.addonRemoveText}>Remove</Text>
+                                </Pressable>
+                              )
+                            ) : (
+                              <Pressable
+                                style={[s.addonAddBtn, cartBusy && { opacity: 0.4 }]}
+                                onPress={() => handleCartOp(dayOrder.id, 'add_addon', a.id)}
+                                disabled={cartBusy}
+                              >
+                                <Plus size={13} color={Colors.primary} />
+                                <Text style={s.addonAddText}>Add</Text>
+                              </Pressable>
+                            )}
+                          </View>
+                        )
+                      })}
+                    </View>
+                  )}
+
+                  {/* Cart total for the day — everything is billed on delivery */}
+                  <View style={s.cartSummary}>
+                    <View style={s.cartSummaryRow}>
+                      <Text style={s.cartSummaryLabel}>Meals & add-ons</Text>
+                      <Text style={s.cartSummaryVal}>₹{fmt(dayMealsAddons)}</Text>
+                    </View>
+                    {daySwapFees > 0 && (
+                      <View style={s.cartSummaryRow}>
+                        <Text style={s.cartSummaryLabel}>Swap fees</Text>
+                        <Text style={s.cartSummaryVal}>₹{fmt(daySwapFees)}</Text>
+                      </View>
+                    )}
+                    <View style={s.cartSummaryTotalRow}>
+                      <Text style={s.cartSummaryTotalLabel}>Day total</Text>
+                      <Text style={s.cartSummaryTotalVal}>₹{fmt(dayTotal)}</Text>
+                    </View>
+                    <Text style={s.cartBilledNote}>Billed from your wallet on delivery</Text>
+                    {lowBalance && (
+                      <Pressable
+                        style={s.lowBalRow}
+                        onPress={() => { setShowDayModal(false); setShowAddMoney(true) }}
+                      >
+                        <AlertCircle size={14} color={Colors.accentText} />
+                        <Text style={s.lowBalText}>Low wallet balance for delivery — top up →</Text>
+                      </Pressable>
+                    )}
+                  </View>
                 </View>
               ) : (
                 <View style={s.dayModalNoOrder}>
@@ -886,7 +1161,7 @@ export default function SubscriptionScreen() {
                         <View style={s.swapErrorRow}>
                           <Text style={s.dayModalSwapError}>{swapError}</Text>
                           {swapError.includes('balance') && (
-                            <Pressable onPress={() => { setSelectedDay(null); setSwapError(''); setShowAddMoney(true) }}>
+                            <Pressable onPress={() => { setShowDayModal(false); setSwapError(''); setShowAddMoney(true) }}>
                               <Text style={s.swapErrorLink}>Add money →</Text>
                             </Pressable>
                           )}
@@ -894,7 +1169,7 @@ export default function SubscriptionScreen() {
                       ) : null}
                       {allMeals.map((meal) => {
                         const isCurrent = !addMode && meal.id === dayOrder.meal_templates?.id
-                        const isFree = !addMode && !isCurrent && meal.id === counterpartMealId
+                        const isFree = !addMode && !isCurrent && freeMealIds.has(meal.id)
                         return (
                           <Pressable
                             key={meal.id}
@@ -1194,6 +1469,7 @@ const s = StyleSheet.create({
   statusBadgeText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.text },
   todayMealName: { fontFamily: Fonts.heading, fontSize: 20, color: '#fff', marginBottom: 6 },
   todayMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.primaryMid },
+  todayTapHint: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primaryMid, marginTop: 10 },
   noDeliveryCard: {
     backgroundColor: '#fff', borderRadius: 16, padding: 20, marginBottom: 16,
     alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
@@ -1265,6 +1541,65 @@ const s = StyleSheet.create({
   },
   extraName: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, flex: 1 },
   extraTag: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.primary },
+  // Portions stepper
+  qtyRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 14, paddingVertical: 12, paddingHorizontal: 14,
+    backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: Colors.border,
+  },
+  qtyLabel: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
+  qtySub: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  qtyStepper: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  qtyBtn: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  qtyBtnText: { fontFamily: Fonts.heading, fontSize: 20, color: Colors.primary },
+  qtyValue: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text, minWidth: 22, textAlign: 'center' },
+
+  // Add-on editor
+  addonEditWrap: { marginTop: 18 },
+  addonEditHead: {
+    fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textLight,
+    textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10,
+  },
+  addonEditRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint,
+  },
+  addonEditName: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
+  addonEditPrice: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  addonAddBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7,
+  },
+  addonAddText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
+  addonRemoveBtn: {
+    backgroundColor: Colors.background, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  addonRemoveText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
+  addonIncluded: { backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  addonIncludedText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
+
+  // Cart summary
+  cartSummary: {
+    marginTop: 18, padding: 16, borderRadius: 14,
+    backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primary,
+  },
+  cartSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  cartSummaryLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
+  cartSummaryVal: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text },
+  cartSummaryTotalRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderTopWidth: 1, borderTopColor: Colors.primary, paddingTop: 10, marginTop: 2,
+  },
+  cartSummaryTotalLabel: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text },
+  cartSummaryTotalVal: { fontFamily: Fonts.heading, fontSize: 22, color: Colors.primary },
+  cartBilledNote: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textMuted, marginTop: 8 },
+  lowBalRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  lowBalText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.accentText },
+
   modeToggle: { flexDirection: 'row', backgroundColor: Colors.background, borderRadius: 12, padding: 4, marginBottom: 14 },
   modeBtn: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: 'center' },
   modeBtnActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
@@ -1389,6 +1724,114 @@ const s = StyleSheet.create({
   addrPickLabel: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text },
   addrPickLine1: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
   addrPickChange: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
+
+  // Week header label
+  weekLabel: { fontFamily: Fonts.bodyBold, fontSize: 16, color: Colors.text, marginBottom: 12 },
+
+  // Date strip — new 3-state tiles (selected=fill, today-unselected=border, rest=grey border)
+  // dayCellSelected replaces dayCellToday for the active day
+  dayCellSelected: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dayCellTodayUnselected: { borderColor: Colors.primary, borderWidth: 2, backgroundColor: '#fff' },
+  dayDateSelected: { color: '#fff' },
+  dayDowSelected: { color: Colors.primaryMid },
+
+  // Hero card
+  heroCard: {
+    marginHorizontal: 0, marginBottom: 16,
+    backgroundColor: '#fff', borderRadius: 20,
+    borderWidth: 2, borderColor: Colors.primary,
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.10, shadowRadius: 16, elevation: 4,
+    overflow: 'hidden',
+  },
+  heroHeader: { padding: 18, paddingBottom: 14 },
+  heroTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 },
+  heroEyebrow: {
+    fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.primary,
+    textTransform: 'capitalize', letterSpacing: 0.8, marginBottom: 5,
+  },
+  heroTitle: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 3, lineHeight: 30 },
+  heroSubtitle: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
+  heroStatusBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5, marginTop: 2,
+  },
+  heroStatusPrep: { backgroundColor: '#FFF9C4' },
+  heroStatusText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.primary },
+  heroStatusPrepText: { color: '#795700' },
+
+  // Meal rows inside hero card
+  heroCartList: { backgroundColor: '#FAFAFA', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 2, marginBottom: 12 },
+  heroCartRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  heroFoodThumb: { width: 46, height: 46, borderRadius: 12, flexShrink: 0 },
+  heroCartRowInfo: { flex: 1 },
+  heroCartName: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text, lineHeight: 17 },
+  heroCartKcal: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  heroQtyPill: {
+    minWidth: 26, height: 26, backgroundColor: Colors.primaryLight, borderRadius: 7,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0, paddingHorizontal: 5,
+  },
+  heroQtyPillText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.primary },
+
+  // Macro strip
+  heroMacroStrip: { flexDirection: 'row', gap: 8 },
+  heroMacroBox: { flex: 1, backgroundColor: Colors.primaryLight, borderRadius: 10, padding: 8, alignItems: 'center' },
+  heroMacroVal: { fontFamily: Fonts.heading, fontSize: 13, color: Colors.primary },
+  heroMacroLabel: { fontFamily: Fonts.body, fontSize: 10, color: Colors.textMuted, marginTop: 3 },
+
+  // Hero action buttons
+  heroCardBtns: { flexDirection: 'row', gap: 10, paddingHorizontal: 18, paddingBottom: 18 },
+  heroSkipBtn: {
+    flex: 1, height: 48, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: 'transparent',
+    borderRadius: 999, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+  },
+  heroSkipText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+  heroCustomizeBtn: {
+    height: 48, backgroundColor: Colors.primary, borderRadius: 999,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+  },
+  heroCustomizeText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
+
+  // Hero empty state
+  heroEmpty: {
+    marginBottom: 16, backgroundColor: '#fff', borderRadius: 20,
+    borderWidth: 1.5, borderColor: Colors.border, borderStyle: 'dashed',
+    padding: 28, alignItems: 'center', gap: 12,
+  },
+  heroEmptyText: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.textMuted },
+  heroAddBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9,
+  },
+  heroAddBtnText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.primary },
+
+  // Slot toggle (Lunch / Dinner pill)
+  slotToggleWrap: { marginBottom: 16 },
+  slotToggle: {
+    flexDirection: 'row', backgroundColor: '#fff', borderRadius: 999,
+    padding: 4, borderWidth: 1, borderColor: Colors.border, gap: 4,
+  },
+  slotBtn: {
+    flex: 1, height: 44, borderRadius: 999, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  slotBtnActive: { backgroundColor: Colors.primary },
+  slotBtnText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.textMuted },
+  slotBtnTextActive: { color: '#fff' },
+
+  // Info tiles (Balance + Plan Settings)
+  infoTilesRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  infoTile: {
+    flex: 1, backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: Colors.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
+    padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10,
+  },
+  infoTileIcon: {
+    width: 42, height: 42, backgroundColor: Colors.primaryLight, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  infoTileCaption: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textMuted, marginBottom: 4 },
+  infoTileValue: { fontFamily: Fonts.heading, fontSize: 17, color: Colors.text },
+  infoTileLabel: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text, lineHeight: 17 },
 
   // Settings link
   settingsRow: {

@@ -1,10 +1,10 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 // Add an extra dish to an existing delivery slot (e.g. a 2nd lunch with a
-// different meal). The dish is PREPAID at add time: the base per-meal rate is
-// debited from the wallet and the subscription's remaining-meals counter is
-// decremented by one. The new order row is flagged extra_dish=true so delivery
-// settlement never bills it again.
+// different meal). The dish is NOT charged here — it's billed ON DELIVERY like
+// every other meal: advance_batch_delivered debits its cart_total and burns one
+// delivery from the counter. The row is flagged extra_dish=true only so the UI
+// can group it under the slot; it is billed the same as a base meal.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     // Base per-meal rate (paise) from the plan — add-ons are not included.
     const { data: sub } = await supabase
       .from('subscriptions')
-      .select('deliveries_remaining, plan_id')
+      .select('plan_id')
       .eq('id', ref.subscription_id)
       .single()
     const { data: plan } = await supabase
@@ -67,16 +67,6 @@ Deno.serve(async (req) => {
 
     if (!plan) return json({ error: 'Plan not found' }, 404)
     const rate = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
-
-    // Funds check before creating anything.
-    const { data: wallet } = await supabase
-      .from('wallets')
-      .select('balance')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    if ((wallet?.balance ?? 0) < rate) {
-      return json({ error: 'insufficient_balance', required: rate }, 402)
-    }
 
     // Next slot_seq for this (subscription, date, slot).
     const { data: existing } = await supabase
@@ -133,22 +123,11 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Prepay: debit wallet (idempotent on the new order id) and burn one meal.
-    await supabase.rpc('wallet_debit', {
-      p_user: user.id,
-      p_amount: rate,
-      p_reason: 'Extra dish added',
-      p_reference_id: `adddish-${created.id}`,
-    })
-    await supabase
-      .from('subscriptions')
-      .update({
-        deliveries_remaining: Math.max((sub?.deliveries_remaining ?? 0) - 1, 0),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', ref.subscription_id)
+    // Snapshot the cart total so the extra dish shows its price right away.
+    // The wallet is debited and the counter burned ON DELIVERY (not here).
+    await supabase.rpc('recompute_order_cart', { p_order: created.id })
 
-    return json({ ok: true, order_id: created.id, charged: rate })
+    return json({ ok: true, order_id: created.id, billed: 'on_delivery', amount: rate })
   } catch (err) {
     console.error('add-dish error:', err)
     return json({ error: 'Internal server error' }, 500)

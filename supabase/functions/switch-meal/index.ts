@@ -2,6 +2,13 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 const SWITCH_FEE_PAISE = 2000 // ₹20
 
+// Swap a day's meal. Switching to your own menu's dish or the counterpart menu's
+// dish for that day/slot is FREE; anything else adds a ₹20 "Meal switch" fee.
+//
+// No money moves here — the fee is recorded as a cart line (order_addons,
+// kind='fee') so it lands in orders.cart_total and is billed ON DELIVERY along
+// with the meal. Reverting to a free dish removes the fee line.
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -36,7 +43,7 @@ Deno.serve(async (req) => {
     // Load the order and verify ownership
     const { data: order } = await supabase
       .from('orders')
-      .select('id, user_id, subscription_id, delivery_date, meal_slot, meal_template_id, status, switch_fee_paise')
+      .select('id, user_id, subscription_id, delivery_date, meal_slot, meal_template_id, status')
       .eq('id', order_id)
       .single()
 
@@ -65,54 +72,42 @@ Deno.serve(async (req) => {
     const deliveryDate = new Date(order.delivery_date + 'T00:00:00Z')
     const dowNum = (deliveryDate.getUTCDay() + 6) % 7
 
-    // Look up the counterpart menu's meal for this (day, slot)
-    const { data: counterpartRow } = await supabase
+    // Both the user's own menu dish and the counterpart's dish are free swaps.
+    const { data: menuRows } = await supabase
       .from('weekly_menu')
       .select('meal_template_id')
-      .eq('menu_type', counterpart)
+      .in('menu_type', [myMenuType, counterpart])
       .eq('day_of_week', dowNum)
       .eq('meal_slot', order.meal_slot)
-      .maybeSingle()
+    const freeSet = new Set((menuRows ?? []).map((m: any) => m.meal_template_id).filter(Boolean))
+    const isFreeSwitch = freeSet.has(meal_template_id)
 
-    const isFreeSwitch = counterpartRow?.meal_template_id === meal_template_id
-
-    if (!isFreeSwitch) {
-      // Check wallet balance before debiting
-      const { data: wallet } = await supabase
-        .from('wallets')
-        .select('balance')
-        .eq('user_id', user.id)
-        .maybeSingle()
-
-      if ((wallet?.balance ?? 0) < SWITCH_FEE_PAISE) {
-        return json({ error: 'insufficient_balance', required: SWITCH_FEE_PAISE }, 402)
-      }
-
-      // Debit ₹20
-      await supabase.rpc('wallet_debit', {
-        p_user: user.id,
-        p_amount: SWITCH_FEE_PAISE,
-        p_reason: 'Meal switch',
-        p_reference_id: `switch-${order_id}`,
-      })
-    }
-
-    // Update the order. Record the swap fee on the order so the app can show it
-    // in the cart/total. The wallet debit is idempotent per order, so this flat
-    // ₹20 customization fee is only ever charged once even across re-swaps; a
-    // free switch (back to the included meal) keeps any fee already incurred.
-    const newFee = isFreeSwitch ? (order.switch_fee_paise ?? 0) : SWITCH_FEE_PAISE
+    // Apply the swap.
     await supabase
       .from('orders')
       .update({
         meal_template_id,
         is_customized: true,
-        switch_fee_paise: newFee,
+        switch_fee_paise: 0, // fee now lives on a cart line, not this column
         updated_at: new Date().toISOString(),
       })
       .eq('id', order_id)
 
-    return json({ ok: true, charged: !isFreeSwitch, fee_paise: isFreeSwitch ? 0 : SWITCH_FEE_PAISE })
+    // Reconcile the "Meal switch" fee line: remove any existing one, then add a
+    // single line back only if the new dish is off-menu.
+    await supabase.from('order_addons')
+      .delete().eq('order_id', order_id).eq('kind', 'fee').eq('label', 'Meal switch')
+    if (!isFreeSwitch) {
+      await supabase.from('order_addons').insert({
+        order_id, addon_id: null, kind: 'fee', label: 'Meal switch',
+        quantity: 1, unit_price: SWITCH_FEE_PAISE,
+      })
+    }
+
+    // Re-snapshot the cart total so the fee shows up immediately in the app.
+    await supabase.rpc('recompute_order_cart', { p_order: order_id })
+
+    return json({ ok: true, charged: false, fee_paise: isFreeSwitch ? 0 : SWITCH_FEE_PAISE, billed: 'on_delivery' })
   } catch (err) {
     console.error('switch-meal error:', err)
     return json({ error: 'Internal server error' }, 500)
