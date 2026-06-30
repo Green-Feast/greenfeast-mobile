@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  InteractionManager,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -20,6 +21,7 @@ export default function OnboardingNameScreen() {
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const inputRef = useRef<TextInput>(null)
 
   const isValid = name.trim().length >= 2
 
@@ -30,6 +32,17 @@ export default function OnboardingNameScreen() {
       if (meta?.full_name) setName(meta.full_name)
       else if (meta?.name) setName(meta.name)
     })
+  }, [])
+
+  // Focus AFTER the screen transition + first layout settle. Using `autoFocus`
+  // opens the keyboard mid-mount, before KeyboardAvoidingView has measured its
+  // full-height frame — which leaves the CTA stuck behind the keyboard until a
+  // second focus. Deferring lets it measure at full height first.
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => inputRef.current?.focus(), 50)
+    })
+    return () => task.cancel()
   }, [])
 
   async function handleContinue() {
@@ -69,6 +82,7 @@ export default function OnboardingNameScreen() {
         <View style={styles.form}>
           <Text style={styles.label}>Your name</Text>
           <TextInput
+            ref={inputRef}
             style={[styles.input, focused && styles.inputFocused, !!error && styles.inputError]}
             placeholder="Enter your full name"
             value={name}
@@ -79,7 +93,6 @@ export default function OnboardingNameScreen() {
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholderTextColor={Colors.textLight}
-            autoFocus
             autoCapitalize="words"
             returnKeyType="done"
             onSubmitEditing={handleContinue}

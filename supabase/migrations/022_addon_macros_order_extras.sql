@@ -34,9 +34,16 @@ ALTER TABLE public.orders
 -- dish in the same slot. Replace it with one that includes slot_seq.
 ALTER TABLE public.orders
   DROP CONSTRAINT IF EXISTS orders_subscription_delivery_slot_unique;
-ALTER TABLE public.orders
-  ADD CONSTRAINT orders_subscription_delivery_slot_seq_unique
-    UNIQUE (subscription_id, delivery_date, meal_slot, slot_seq);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'orders_subscription_delivery_slot_seq_unique'
+  ) THEN
+    ALTER TABLE public.orders
+      ADD CONSTRAINT orders_subscription_delivery_slot_seq_unique
+        UNIQUE (subscription_id, delivery_date, meal_slot, slot_seq);
+  END IF;
+END $$;
 
 -- ── 3. Redefine advance_batch_delivered ──────────────────────────────────────
 -- Builds on migration 018's cart_total model:
