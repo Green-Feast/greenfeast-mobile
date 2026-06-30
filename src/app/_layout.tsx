@@ -76,17 +76,17 @@ function AuthGate() {
       return
     }
 
-    // Phone verified but onboarding not complete — stay in onboarding
+    // Phone verified but onboarding not complete — send to 3C (What Would You Like?)
     if (!onboarded) {
-      if (!inOnboardingGroup) router.replace('/(onboarding)/menu')
+      if (!inOnboardingGroup) router.replace('/(onboarding)/gate')
       return
     }
 
     // Fully onboarded. The subscribe / build-plan flow reuses the onboarding
     // screens, so onboarded-but-unsubscribed users must be allowed into them.
-    // Only the identity screens (name/phone/otp) are pre-onboarding only —
+    // Only the identity screens (name/phone) are pre-onboarding only —
     // bounce back to the app if a fully onboarded user lands on those.
-    const IDENTITY_SCREENS = ['name', 'phone', 'otp']
+    const IDENTITY_SCREENS = ['name', 'phone']
     if (inAuthGroup || (inOnboardingGroup && IDENTITY_SCREENS.includes(segments[1] ?? ''))) {
       router.replace('/(app)/(tabs)')
     }

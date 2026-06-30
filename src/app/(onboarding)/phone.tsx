@@ -34,7 +34,7 @@ export default function OnboardingPhoneScreen() {
       const { data: { user } } = await supabase.auth.getUser()
       await supabase.from('users').update({ phone: cleanPhone }).eq('id', user!.id)
       setPhone(cleanPhone)
-      router.replace('/(onboarding)/menu')
+      router.replace('/(onboarding)/gate')
     } catch (e: any) {
       setError(e?.message ?? 'Something went wrong. Please try again.')
     } finally {
