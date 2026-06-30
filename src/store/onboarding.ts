@@ -39,15 +39,6 @@ interface OnboardingState {
   dietaryPreference: 'none' | 'vegetarian' | 'vegan'
   dietaryFreeText: string
 
-  // Customisations (collected POST-payment, backend only)
-  proteinPreference: string[]
-  baseAvoidance: string[]
-  veggieAvoidance: string[]
-  formatPreference: 'bowls' | 'wraps' | 'both' | ''
-  spicePreference: 'mild' | 'medium' | 'spicy' | ''
-  dressingPreference: 'mixed-in' | 'on-the-side' | ''
-  customisationNote: string
-
   // S12 — delivery days + meal timing
   selectedDays: string[]
   deliveryMode: DeliveryMode
@@ -86,15 +77,6 @@ interface OnboardingState {
     dietaryPreference: 'none' | 'vegetarian' | 'vegan'
     dietaryFreeText: string
   }) => void
-  setCustomisations: (fields: {
-    proteinPreference: string[]
-    baseAvoidance: string[]
-    veggieAvoidance: string[]
-    formatPreference: 'bowls' | 'wraps' | 'both' | ''
-    spicePreference: 'mild' | 'medium' | 'spicy' | ''
-    dressingPreference: 'mixed-in' | 'on-the-side' | ''
-    customisationNote: string
-  }) => void
   setDays: (selectedDays: string[], deliveryMode: DeliveryMode, mealsLunch: number, mealsDinner: number) => void
   setAddress: (fields: {
     addressLine1: string
@@ -110,7 +92,7 @@ interface OnboardingState {
 
 type ActionKeys =
   | 'setHealthProfile' | 'setQuestionnaire' | 'setPlan' | 'setUpsellShown'
-  | 'setDietaryBasics' | 'setCustomisations' | 'setDays' | 'setAddress' | 'reset'
+  | 'setDietaryBasics' | 'setDays' | 'setAddress' | 'reset'
 
 const defaultState: Omit<OnboardingState, ActionKeys> = {
   height: '',
@@ -131,13 +113,6 @@ const defaultState: Omit<OnboardingState, ActionKeys> = {
   allergens: [],
   dietaryPreference: 'none',
   dietaryFreeText: '',
-  proteinPreference: [],
-  baseAvoidance: [],
-  veggieAvoidance: [],
-  formatPreference: '',
-  spicePreference: '',
-  dressingPreference: '',
-  customisationNote: '',
   selectedDays: [],
   deliveryMode: 'opt-out',
   mealsLunch: 1,
@@ -164,8 +139,6 @@ export const useOnboardingStore = create<OnboardingState>((set) => ({
   setUpsellShown: () => set({ upsellShown: true }),
 
   setDietaryBasics: (fields) => set(fields),
-
-  setCustomisations: (fields) => set(fields),
 
   setDays: (selectedDays, deliveryMode, mealsLunch, mealsDinner) =>
     set({ selectedDays, deliveryMode, mealsLunch, mealsDinner }),

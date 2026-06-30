@@ -180,7 +180,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scroll: { padding: 24, paddingBottom: 20 },
   header: { marginBottom: 24 },
-  step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
   title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text },
   section: { marginBottom: 20 },
   sectionTitle: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },

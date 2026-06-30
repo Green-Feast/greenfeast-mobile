@@ -9,7 +9,6 @@ import {
   RefreshControl,
   Modal,
   TextInput,
-  Dimensions,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -126,9 +125,6 @@ function isLocked(dateStr: string): boolean {
   if (dateStr <= today) return true
   return dateStr === addDaysISO(today, 1) && istHour() >= 20
 }
-
-const { width: SCREEN_W } = Dimensions.get('window')
-const TODAY_CARD_W = SCREEN_W - 32
 
 // ── Main screen ────────────────────────────────────────────────────────────
 
@@ -1456,42 +1452,6 @@ const s = StyleSheet.create({
   codPayTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text, marginBottom: 4 },
   codPayDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19 },
 
-  // Today's delivery card
-  todayCard: {
-    backgroundColor: Colors.primary, borderRadius: 16, padding: 20, marginBottom: 16,
-  },
-  todayCardRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  todayThumb: { width: 72, height: 72, borderRadius: 12 },
-  statusBadge: {
-    backgroundColor: Colors.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4,
-    alignSelf: 'flex-start', marginBottom: 12,
-  },
-  statusBadgeText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.text },
-  todayMealName: { fontFamily: Fonts.heading, fontSize: 20, color: '#fff', marginBottom: 6 },
-  todayMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.primaryMid },
-  todayTapHint: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primaryMid, marginTop: 10 },
-  noDeliveryCard: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 20, marginBottom: 16,
-    alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
-  },
-  noDeliveryText: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.text, marginBottom: 4 },
-  noDeliveryMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
-
-  // Today carousel extras
-  todayAddCard: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 20, marginBottom: 16,
-    borderWidth: 1.5, borderColor: Colors.border, borderStyle: 'dashed',
-    alignItems: 'center', justifyContent: 'center', gap: 10, minHeight: 112, flexDirection: 'row',
-  },
-  todayAddIcon: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primaryLight,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  todayAddText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
-  todayDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: -6, marginBottom: 16 },
-  todayDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.border },
-  todayDotActive: { backgroundColor: Colors.primary, width: 16 },
-
   // Timeline strip — day + date
   weekStrip: { marginBottom: 0 },
   weekStripContent: { gap: 8, paddingBottom: 4, paddingTop: 2 },
@@ -1506,13 +1466,9 @@ const s = StyleSheet.create({
     borderColor: Colors.border,
     gap: 4,
   },
-  dayCellToday: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   dayCellPast: { backgroundColor: Colors.borderFaint, borderColor: Colors.borderFaint, opacity: 0.55 },
   dayDow: { fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 },
-  dayDowToday: { color: Colors.primaryMid },
   dayDate: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
-  dayDateToday: { color: '#fff' },
-  lockNote: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, marginTop: 8, marginBottom: 16 },
 
   // Quick actions
   quickActions: { flexDirection: 'row', gap: 12, marginBottom: 16 },

@@ -215,7 +215,7 @@ export default function PlanSettingsScreen() {
           {actions.map(({ label, Icon, onPress }, i) => (
             <Pressable
               key={label}
-              style={({ pressed }) => [s.actionRow, i < actions.length && s.actionRowBorder, pressed && s.rowPressed]}
+              style={({ pressed }) => [s.actionRow, i < actions.length - 1 && s.actionRowBorder, pressed && s.rowPressed]}
               onPress={onPress}
             >
               <Icon size={18} color={Colors.text} />
