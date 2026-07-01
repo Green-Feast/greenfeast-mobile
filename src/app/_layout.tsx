@@ -7,10 +7,13 @@ import { KeyboardProvider } from 'react-native-keyboard-controller'
 import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
 import {
-  Poppins_500Medium,
-  Poppins_600SemiBold,
-  Poppins_700Bold,
-} from '@expo-google-fonts/poppins'
+  Fraunces_300Light,
+  Fraunces_400Regular,
+} from '@expo-google-fonts/fraunces'
+import {
+  Caveat_400Regular,
+  Caveat_500Medium,
+} from '@expo-google-fonts/caveat'
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -113,9 +116,10 @@ export default function RootLayout() {
   }, [])
 
   const [fontsLoaded] = useFonts({
-    Poppins_500Medium,
-    Poppins_600SemiBold,
-    Poppins_700Bold,
+    Fraunces_300Light,
+    Fraunces_400Regular,
+    Caveat_400Regular,
+    Caveat_500Medium,
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,

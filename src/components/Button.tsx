@@ -7,9 +7,10 @@ import {
   ViewStyle,
   StyleProp,
 } from 'react-native'
+import * as Haptics from 'expo-haptics'
 import { Colors, Fonts } from '@/constants/colors'
 
-type Variant = 'primary' | 'secondary' | 'danger' | 'ghost'
+type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'destructive'
 
 interface ButtonProps {
   children: ReactNode
@@ -21,7 +22,6 @@ interface ButtonProps {
   style?: StyleProp<ViewStyle>
 }
 
-// Pill-shaped button matching the demo's Button component (rounded-full, 44px min).
 export default function Button({
   children,
   onPress,
@@ -33,8 +33,14 @@ export default function Button({
 }: ButtonProps) {
   const isDisabled = disabled || loading
 
+  function handlePressIn() {
+    if (isDisabled) return
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+  }
+
   return (
     <Pressable
+      onPressIn={handlePressIn}
       onPress={onPress}
       disabled={isDisabled}
       style={({ pressed }) => [
@@ -47,7 +53,9 @@ export default function Button({
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'primary' || variant === 'danger' ? '#fff' : Colors.primary} />
+        <ActivityIndicator
+          color={variant === 'primary' || variant === 'danger' || variant === 'destructive' ? '#fff' : Colors.primary}
+        />
       ) : typeof children === 'string' ? (
         <Text style={[styles.label, variantStyles[variant].label]}>{children}</Text>
       ) : (
@@ -66,31 +74,37 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     minHeight: 52,
     paddingHorizontal: 24,
+    paddingVertical: 14,
   },
   fullWidth: { width: '100%' },
-  disabled: { opacity: 0.4 },
+  disabled: { opacity: 0.45 },
   label: { fontFamily: Fonts.bodySemi, fontSize: 16 },
 })
 
 const variantStyles: Record<Variant, { container: ViewStyle; pressed: ViewStyle; label: any }> = {
   primary: {
-    container: { backgroundColor: Colors.primary },
-    pressed: { backgroundColor: Colors.primaryDark },
+    container: { backgroundColor: Colors.green900 },
+    pressed: { backgroundColor: Colors.green800 },
     label: { color: '#fff' },
   },
   secondary: {
-    container: { backgroundColor: 'transparent', borderWidth: 2, borderColor: Colors.primary },
-    pressed: { backgroundColor: Colors.primaryLight },
-    label: { color: Colors.primary },
+    container: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: Colors.green700 },
+    pressed: { backgroundColor: Colors.green50 },
+    label: { color: Colors.green700 },
+  },
+  ghost: {
+    container: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: Colors.border },
+    pressed: { backgroundColor: Colors.cream200 },
+    label: { color: Colors.ink900 },
   },
   danger: {
-    container: { backgroundColor: 'transparent', borderWidth: 2, borderColor: Colors.danger },
+    container: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: Colors.danger },
     pressed: { backgroundColor: Colors.dangerLight },
     label: { color: Colors.danger },
   },
-  ghost: {
-    container: { backgroundColor: Colors.primaryLight },
-    pressed: { backgroundColor: '#d0ebd0' },
-    label: { color: Colors.primary },
+  destructive: {
+    container: { backgroundColor: Colors.danger },
+    pressed: { backgroundColor: '#A03826' },
+    label: { color: '#fff' },
   },
 }

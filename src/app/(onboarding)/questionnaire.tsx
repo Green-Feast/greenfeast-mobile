@@ -112,7 +112,7 @@ export default function QuestionnaireScreen() {
           <TouchableOpacity
             key={opt.id}
             style={[styles.option, on && styles.optionActive]}
-            onPress={() => { Haptics.selectionAsync().catch(() => {}); onChange(opt.id) }}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); onChange(opt.id) }}
           >
             <View style={[styles.radio, on && styles.radioActive]}>
               {on && <View style={styles.radioDot} />}
@@ -130,6 +130,7 @@ export default function QuestionnaireScreen() {
   const steps: WizardStep[] = [
     {
       key: 'q1',
+      eyebrow: 'YOUR GOAL',
       title: qs.q1.question,
       emoji: '🤔',
       canNext: q1Answer !== '',
@@ -157,25 +158,25 @@ export default function QuestionnaireScreen() {
 }
 
 const styles = StyleSheet.create({
-  options: { gap: 12 },
+  options: { gap: 10 },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream200,
     borderRadius: 16,
     padding: 18,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: Colors.border,
   },
-  optionActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  optionActive: { borderColor: Colors.green700, backgroundColor: Colors.green50 },
   radio: {
-    width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: Colors.border,
+    width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: Colors.border,
     alignItems: 'center', justifyContent: 'center',
   },
-  radioActive: { borderColor: Colors.primary },
-  radioDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: Colors.primary },
-  optionLabel: { fontFamily: Fonts.bodyBold, fontSize: 16, color: Colors.text },
-  optionLabelActive: { color: Colors.primary },
-  optionDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginTop: 2 },
+  radioActive: { borderColor: Colors.green700 },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.green700 },
+  optionLabel: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.ink900 },
+  optionLabelActive: { color: Colors.green700 },
+  optionDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, marginTop: 2 },
 })

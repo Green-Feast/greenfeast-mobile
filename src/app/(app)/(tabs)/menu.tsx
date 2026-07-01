@@ -19,6 +19,8 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import Skeleton from '@/components/Skeleton'
+import MacroRow from '@/components/MacroRow'
+import * as Haptics from 'expo-haptics'
 
 const { width } = Dimensions.get('window')
 const CARD_WIDTH = (width - 48) / 2
@@ -124,7 +126,10 @@ export default function MenuScreen() {
           renderItem={({ item }) => (
             <Pressable
               style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-              onPress={() => setSelected(item)}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                setSelected(item)
+              }}
             >
               {item.image_url ? (
                 <Image
@@ -141,12 +146,8 @@ export default function MenuScreen() {
               )}
               <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
               {item.price != null && <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>}
-              {item.tags?.length > 0 && (
-                <View style={styles.tagRow}>
-                  <View style={styles.tag}>
-                    <Text style={styles.tagText}>{item.tags[0]}</Text>
-                  </View>
-                </View>
+              {(item.protein != null || item.kcal != null) && (
+                <MacroRow protein={item.protein} kcal={item.kcal} size="sm" />
               )}
             </Pressable>
           )}
@@ -181,12 +182,13 @@ export default function MenuScreen() {
 
                 {selected.description ? <Text style={styles.modalDesc}>{selected.description}</Text> : null}
 
-                <View style={styles.macrosRow}>
-                  {selected.kcal != null && <Macro value={`${selected.kcal}`} label="kcal" />}
-                  {selected.protein != null && <Macro value={`${selected.protein}g`} label="protein" />}
-                  {selected.carbs != null && <Macro value={`${selected.carbs}g`} label="carbs" />}
-                  {selected.fat != null && <Macro value={`${selected.fat}g`} label="fat" />}
-                </View>
+                <MacroRow
+                  protein={selected.protein}
+                  carbs={selected.carbs}
+                  fat={selected.fat}
+                  kcal={selected.kcal}
+                  size="md"
+                />
 
                 {selected.tags?.length > 0 && (
                   <View style={styles.tagsWrap}>
@@ -206,87 +208,68 @@ export default function MenuScreen() {
   )
 }
 
-function Macro({ value, label }: { value: string; label: string }) {
-  return (
-    <View style={styles.macroBox}>
-      <Text style={styles.macroVal}>{value}</Text>
-      <Text style={styles.macroLbl}>{label}</Text>
-    </View>
-  )
-}
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.cream50 },
   header: { paddingHorizontal: 16, paddingBottom: 8 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 12 },
+  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.ink900, marginBottom: 12 },
 
   tabs: { gap: 8, paddingRight: 16, paddingVertical: 2 },
   tab: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     borderWidth: 1.5,
     borderColor: Colors.border,
   },
-  tabActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  tabText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
+  tabActive: { backgroundColor: Colors.green700, borderColor: Colors.green700 },
+  tabText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.ink500 },
   tabTextActive: { color: '#fff' },
 
   grid: { padding: 16, paddingBottom: 32 },
   row: { gap: 12, marginBottom: 12 },
   card: {
     width: CARD_WIDTH,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    backgroundColor: Colors.cream200,
+    borderRadius: 20,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 6,
   },
   cardPressed: { transform: [{ scale: 0.97 }] },
-  cardImage: { width: '100%', height: 110, borderRadius: 10, marginBottom: 8, backgroundColor: Colors.primaryLight },
+  cardImage: { width: '100%', height: 110, borderRadius: 12, backgroundColor: Colors.cream300 },
   cardEmoji: {
     width: '100%',
     height: 110,
-    borderRadius: 10,
-    backgroundColor: Colors.primaryLight,
+    borderRadius: 12,
+    backgroundColor: Colors.cream300,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
   },
   emojiText: { fontSize: 40 },
-  cardName: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginBottom: 4, lineHeight: 18 },
-  cardPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary, marginBottom: 6 },
-  tagRow: { flexDirection: 'row' },
-  tag: { backgroundColor: Colors.primaryLight, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  tagText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.primary },
+  cardName: { fontFamily: Fonts.heading, fontSize: 15, color: Colors.ink900, lineHeight: 19 },
+  cardPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.green700 },
 
   empty: { alignItems: 'center', paddingTop: 60 },
-  emptyText: { fontFamily: Fonts.body, color: Colors.textMuted, fontSize: 14 },
+  emptyText: { fontFamily: Fonts.body, color: Colors.ink500, fontSize: 14 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: {
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 28,
     paddingBottom: 48,
     maxHeight: '85%',
-    gap: 10,
+    gap: 12,
   },
   modalClose: { alignSelf: 'flex-end', padding: 4 },
-  modalImage: { width: '100%', height: 200, borderRadius: 16, marginBottom: 8, backgroundColor: Colors.primaryLight },
-  modalName: { fontFamily: Fonts.heading, fontSize: 22, color: Colors.text },
-  modalCategory: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, textTransform: 'capitalize', marginTop: -4 },
-  modalDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20, marginTop: 6 },
-  macrosRow: { flexDirection: 'row', gap: 10, marginVertical: 8 },
-  macroBox: { flex: 1, backgroundColor: Colors.primaryLight, borderRadius: 12, paddingVertical: 10, alignItems: 'center' },
-  macroVal: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.primary },
-  macroLbl: { fontFamily: Fonts.body, fontSize: 11, color: Colors.primary },
+  modalImage: { width: '100%', height: 200, borderRadius: 16, marginBottom: 4, backgroundColor: Colors.cream300 },
+  modalName: { fontFamily: Fonts.heading, fontSize: 22, color: Colors.ink900 },
+  modalCategory: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, textTransform: 'capitalize', marginTop: -4 },
+  modalDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, lineHeight: 20 },
   tagsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tagYellow: { backgroundColor: Colors.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  tagYellowText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.text },
+  tagYellow: { backgroundColor: Colors.badgeBg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  tagYellowText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.badgeText },
 })

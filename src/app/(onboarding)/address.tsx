@@ -8,12 +8,13 @@ import {
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import * as Haptics from 'expo-haptics'
 import { useOnboardingStore } from '@/store/onboarding'
 import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import SectionProgress from '@/components/SectionProgress'
+import OnboardingProgress from '@/components/OnboardingProgress'
 import LocationPicker, { type LatLng } from '@/components/LocationPicker'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
@@ -36,6 +37,7 @@ export default function AddressScreen() {
   const [label, setLabel] = useState('Home')
   const [pin, setPin] = useState<LatLng | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [focused, setFocused] = useState<string | null>(null)
   const line1Ref = useAutoFocus()
 
   function validate() {
@@ -51,6 +53,7 @@ export default function AddressScreen() {
       setErrors(e)
       return
     }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     const resolvedLabel = label || type.charAt(0).toUpperCase() + type.slice(1)
     setAddress({
       addressLine1: line1.trim(),
@@ -90,6 +93,7 @@ export default function AddressScreen() {
   }
 
   function changeType(t: typeof type) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setType(t)
     setLabel(t.charAt(0).toUpperCase() + t.slice(1))
   }
@@ -99,120 +103,151 @@ export default function AddressScreen() {
       style={styles.container}
       contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}
     >
-      <SectionProgress current={4} />
+      <OnboardingProgress steps={4} current={3} />
       <View style={styles.header}>
+        <Text style={styles.eyebrow}>DELIVERY</Text>
         <Text style={styles.title}>Where do we deliver?</Text>
         <Text style={styles.subtitle}>We currently deliver across Jaipur.</Text>
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Street address</Text>
+        <Text style={styles.label}>STREET ADDRESS</Text>
         <TextInput
           ref={line1Ref}
-          style={[styles.input, errors.line1 && styles.inputError]}
+          style={[
+            styles.input,
+            focused === 'line1' && styles.inputFocused,
+            !!errors.line1 && styles.inputError,
+          ]}
           placeholder="Enter your street address"
           value={line1}
           onChangeText={(t) => { setLine1(t); setErrors((e) => ({ ...e, line1: '' })) }}
-          placeholderTextColor={Colors.textLight}
+          onFocus={() => setFocused('line1')}
+          onBlur={() => setFocused(null)}
+          placeholderTextColor={Colors.ink300}
         />
         {errors.line1 ? <Text style={styles.error}>{errors.line1}</Text> : null}
       </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Pincode</Text>
-          <TextInput
-            style={[styles.input, errors.pincode && styles.inputError]}
-            placeholder="6-digit pincode"
-            keyboardType="number-pad"
-            maxLength={6}
-            value={pincode}
-            onChangeText={(t) => { setPincode(t.replace(/\D/g, '')); setErrors((e) => ({ ...e, pincode: '' })) }}
-            placeholderTextColor={Colors.textLight}
-          />
-          {errors.pincode ? <Text style={styles.error}>{errors.pincode}</Text> : null}
-        </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>PINCODE</Text>
+        <TextInput
+          style={[
+            styles.input,
+            focused === 'pincode' && styles.inputFocused,
+            !!errors.pincode && styles.inputError,
+          ]}
+          placeholder="6-digit pincode"
+          keyboardType="number-pad"
+          maxLength={6}
+          value={pincode}
+          onChangeText={(t) => { setPincode(t.replace(/\D/g, '')); setErrors((e) => ({ ...e, pincode: '' })) }}
+          onFocus={() => setFocused('pincode')}
+          onBlur={() => setFocused(null)}
+          placeholderTextColor={Colors.ink300}
+        />
+        {errors.pincode ? <Text style={styles.error}>{errors.pincode}</Text> : null}
+      </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Pin your location <Text style={styles.optional}>(optional)</Text></Text>
-          <LocationPicker
-            value={pin}
-            onChange={setPin}
-            onResolveAddress={({ line1: l1, pincode: pc }) => {
-              if (l1) { setLine1(l1); setErrors((e) => ({ ...e, line1: '' })) }
-              if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setErrors((e) => ({ ...e, pincode: '' })) }
-            }}
-          />
-        </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>PIN YOUR LOCATION <Text style={styles.optional}>(optional)</Text></Text>
+        <LocationPicker
+          value={pin}
+          onChange={setPin}
+          onResolveAddress={({ line1: l1, pincode: pc }) => {
+            if (l1) { setLine1(l1); setErrors((e) => ({ ...e, line1: '' })) }
+            if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setErrors((e) => ({ ...e, pincode: '' })) }
+          }}
+        />
+      </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Landmark <Text style={styles.optional}>(optional)</Text></Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. Near the blue gate"
-            value={landmark}
-            onChangeText={setLandmark}
-            placeholderTextColor={Colors.textLight}
-            maxLength={100}
-          />
-        </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>LANDMARK <Text style={styles.optional}>(optional)</Text></Text>
+        <TextInput
+          style={[styles.input, focused === 'landmark' && styles.inputFocused]}
+          placeholder="e.g. Near the blue gate"
+          value={landmark}
+          onChangeText={setLandmark}
+          onFocus={() => setFocused('landmark')}
+          onBlur={() => setFocused(null)}
+          placeholderTextColor={Colors.ink300}
+          maxLength={100}
+        />
+      </View>
 
-        {/* Address type */}
-        <View style={styles.field}>
-          <Text style={styles.label}>Address type</Text>
-          <View style={styles.typeRow}>
-            {ADDRESS_TYPES.map((t) => (
-              <TouchableOpacity
-                key={t.id}
-                style={[styles.typeBtn, type === t.id && styles.typeBtnActive]}
-                onPress={() => changeType(t.id)}
-              >
-                <Text style={[styles.typeBtnText, type === t.id && styles.typeBtnTextActive]}>
-                  {t.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+      {/* Address type */}
+      <View style={styles.field}>
+        <Text style={styles.label}>ADDRESS TYPE</Text>
+        <View style={styles.typeRow}>
+          {ADDRESS_TYPES.map((t) => (
+            <TouchableOpacity
+              key={t.id}
+              style={[styles.typeBtn, type === t.id && styles.typeBtnActive]}
+              onPress={() => changeType(t.id)}
+            >
+              <Text style={[styles.typeBtnText, type === t.id && styles.typeBtnTextActive]}>
+                {t.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
+      </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Label <Text style={styles.optional}>(optional)</Text></Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. Home, Mom's Place"
-            value={label}
-            onChangeText={setLabel}
-            placeholderTextColor={Colors.textLight}
-            maxLength={40}
-          />
-        </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>LABEL <Text style={styles.optional}>(optional)</Text></Text>
+        <TextInput
+          style={[styles.input, focused === 'label' && styles.inputFocused]}
+          placeholder="e.g. Home, Mom's Place"
+          value={label}
+          onChangeText={setLabel}
+          onFocus={() => setFocused('label')}
+          onBlur={() => setFocused(null)}
+          placeholderTextColor={Colors.ink300}
+          maxLength={40}
+        />
+      </View>
 
-        <Button onPress={handleNext} style={{ marginTop: 8 }}>Review order →</Button>
+      <Button onPress={handleNext} style={{ marginTop: 8 }}>Review order →</Button>
     </KeyboardAwareScreen>
   )
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.cream50 },
   scroll: { padding: 24, paddingBottom: 40 },
-  header: { marginBottom: 24 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 6 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
-  field: { marginBottom: 16 },
-  label: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text, marginBottom: 8 },
-  optional: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
-  input: {
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontFamily: Fonts.body,
-    fontSize: 15,
-    color: Colors.text,
+  header: { marginBottom: 28 },
+  eyebrow: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: 10,
   },
-  inputError: { borderColor: Colors.danger },
-  error: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 4 },
+  title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.ink900, marginBottom: 6 },
+  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500 },
+  field: { marginBottom: 20 },
+  label: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 8,
+  },
+  optional: { fontFamily: Fonts.body, fontSize: 11, color: Colors.ink400, textTransform: 'none', letterSpacing: 0 },
+  input: {
+    fontFamily: Fonts.body,
+    fontSize: 16,
+    color: Colors.ink900,
+    borderBottomWidth: 1.5,
+    borderBottomColor: Colors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 0,
+  },
+  inputFocused: { borderBottomColor: Colors.green700 },
+  inputError: { borderBottomColor: Colors.danger },
+  error: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 6 },
   typeRow: { flexDirection: 'row', gap: 8 },
   typeBtn: {
     flex: 1,
@@ -220,10 +255,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     alignItems: 'center',
   },
-  typeBtnActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  typeBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
-  typeBtnTextActive: { color: Colors.primary },
+  typeBtnActive: { backgroundColor: Colors.green50, borderColor: Colors.green700 },
+  typeBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.ink500 },
+  typeBtnTextActive: { color: Colors.green700 },
 })

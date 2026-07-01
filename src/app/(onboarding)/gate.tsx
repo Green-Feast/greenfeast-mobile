@@ -1,11 +1,15 @@
 import { useState } from 'react'
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native'
+import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ArrowRight } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
+import Button from '@/components/Button'
+import Logo from '@/components/Logo'
+
+const FOOD_PHOTO = require('@/assets/food/avo-protein.jpg')
 
 export default function GateScreen() {
   const router = useRouter()
@@ -26,79 +30,103 @@ export default function GateScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
-      <Text style={styles.step}>Getting started</Text>
-      <Text style={styles.title}>What would you{'\n'}like to do?</Text>
-      <Text style={styles.subtitle}>You can always subscribe later from the app.</Text>
+    <View style={styles.container}>
+      {/* Food photo — top half */}
+      <Image
+        source={FOOD_PHOTO}
+        style={styles.photo}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
 
-      <View style={styles.cards}>
-        {/* Subscribe (primary) */}
-        <Pressable
-          style={({ pressed }) => [styles.card, styles.cardPrimary, pressed && styles.pressed]}
-          onPress={() => router.push('/(onboarding)/health')}
-        >
-          <Text style={styles.cardIcon}>🌿</Text>
-          <Text style={[styles.cardTitle, styles.textWhite]}>Build my subscription</Text>
-          <Text style={[styles.cardDesc, styles.textWhiteMuted]}>
-            Answer a few questions and get a plan tailored to your goals.
-          </Text>
-          <View style={styles.cardCtaPrimary}>
-            <Text style={styles.cardCtaPrimaryText}>Build my plan</Text>
-            <ArrowRight size={15} color={Colors.text} strokeWidth={2.5} />
-          </View>
-        </Pressable>
+      {/* Bottom content */}
+      <View style={[styles.bottom, { paddingBottom: insets.bottom + 32 }]}>
+        {/* Wordmark */}
+        <View style={styles.wordmark}>
+          <Logo size={28} />
+          <Text style={styles.wordmarkText}>greenfeast</Text>
+        </View>
 
-        {/* Explore (secondary) */}
-        <Pressable
-          style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+        {/* Headline */}
+        <Text style={styles.headline}>
+          Salads that actually{'\n'}fill you up.
+        </Text>
+
+        <Text style={styles.subtitle}>
+          Farm-fresh bowls built around your goals,{'\n'}delivered to you daily.
+        </Text>
+
+        {/* CTAs */}
+        <Button onPress={() => router.push('/(onboarding)/health')} style={styles.primaryBtn}>
+          Get started
+        </Button>
+
+        <Button
+          variant="ghost"
           onPress={handleExplore}
           disabled={loading}
+          style={styles.ghostBtn}
         >
-          <Text style={styles.cardIcon}>🏠</Text>
-          <Text style={styles.cardTitle}>Explore home</Text>
-          <Text style={styles.cardDesc}>Browse the menu anytime, no commitment.</Text>
-          <View style={styles.cardCtaOutline}>
-            {loading ? (
-              <ActivityIndicator color={Colors.primary} />
-            ) : (
-              <Text style={styles.cardCtaOutlineText}>Just looking around</Text>
-            )}
-          </View>
-        </Pressable>
+          {loading ? (
+            <ActivityIndicator color={Colors.ink500} />
+          ) : (
+            'Just browse the menu'
+          )}
+        </Button>
       </View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background, paddingHorizontal: 24 },
-  step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
-  title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, lineHeight: 34, marginBottom: 8 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 15, color: Colors.textMuted, marginBottom: 28 },
-  cards: { gap: 16 },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 22,
-    borderWidth: 1,
-    borderColor: Colors.border,
+  container: {
+    flex: 1,
+    backgroundColor: Colors.cream50,
   },
-  cardPrimary: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  pressed: { transform: [{ scale: 0.98 }] },
-  cardIcon: { fontSize: 34, marginBottom: 12 },
-  cardTitle: { fontFamily: Fonts.heading, fontSize: 19, color: Colors.text, marginBottom: 6 },
-  cardDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20, marginBottom: 18 },
-  textWhite: { color: '#fff' },
-  textWhiteMuted: { color: Colors.primaryMid },
-  cardCtaPrimary: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: Colors.accent, borderRadius: 999, paddingVertical: 13, minHeight: 46,
+
+  photo: {
+    width: '100%',
+    height: '45%',
   },
-  cardCtaPrimaryText: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
-  cardCtaOutline: {
-    alignItems: 'center', justifyContent: 'center',
-    borderRadius: 999, paddingVertical: 13, minHeight: 46,
-    borderWidth: 2, borderColor: Colors.primary,
+
+  bottom: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    gap: 0,
   },
-  cardCtaOutlineText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.primary },
+
+  wordmark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 20,
+  },
+  wordmarkText: {
+    fontFamily: Fonts.headingSemi,
+    fontSize: 17,
+    color: Colors.green700,
+    letterSpacing: -0.3,
+  },
+
+  headline: {
+    fontFamily: Fonts.heading,
+    fontSize: 38,
+    color: Colors.ink900,
+    lineHeight: 44,
+    marginBottom: 12,
+  },
+
+  subtitle: {
+    fontFamily: Fonts.body,
+    fontSize: 15,
+    color: Colors.ink500,
+    lineHeight: 22,
+    marginBottom: 28,
+  },
+
+  primaryBtn: {
+    marginBottom: 10,
+  },
+  ghostBtn: {},
 })

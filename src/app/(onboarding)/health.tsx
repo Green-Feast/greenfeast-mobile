@@ -9,7 +9,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ChevronDown, GripVertical } from 'lucide-react-native'
+import { GripVertical } from 'lucide-react-native'
 import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
@@ -20,16 +20,15 @@ import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Wizard, { type WizardStep } from '@/components/Wizard'
+import RulerPicker from '@/components/RulerPicker'
 
-type GoalItem = { id: HealthGoal; label: string; icon: string }
+type GoalItem = { id: HealthGoal; label: string }
 
-// Drag-to-rank goals (mockup: "Rank your goals"). Labels map to the existing
-// goal IDs so the questionnaire + recommendation engine are unchanged.
 const RANK_GOALS: GoalItem[] = [
-  { id: 'lose-weight', label: 'Weight loss', icon: '⚖️' },
-  { id: 'boost-energy', label: 'More energy', icon: '⚡' },
-  { id: 'build-muscle', label: 'Muscle building', icon: '💪' },
-  { id: 'improve-wellness', label: 'Eat cleaner', icon: '🌿' },
+  { id: 'lose-weight',      label: 'Weight loss'     },
+  { id: 'boost-energy',     label: 'More energy'     },
+  { id: 'build-muscle',     label: 'Muscle building' },
+  { id: 'improve-wellness', label: 'Eat cleaner'     },
 ]
 
 const EXERCISE_TYPES = [
@@ -37,10 +36,10 @@ const EXERCISE_TYPES = [
   'Running / Cardio',
   'Yoga / Pilates',
   'Sports',
-  'Walk',
+  'Walking',
   'No regular exercise',
 ]
-const FREQUENCIES = ['Daily', '4-5 times a week', '2-3 times a week', 'Rarely']
+const FREQUENCIES = ['Daily', '4–5 times a week', '2–3 times a week', 'Rarely']
 const OCCUPATIONS = [
   'Doctor', 'Student', 'Working Professional', 'Business Owner',
   'Freelancer', 'Content Creator', 'Other',
@@ -53,22 +52,18 @@ export default function HealthScreen() {
   const { setHealthProfile } = useOnboardingStore()
   const { user } = useAuthStore()
 
-  const [height, setHeight] = useState('')
-  const [weight, setWeight] = useState('')
+  // RulerPicker uses numbers; default to sensible midpoints
+  const [heightCm, setHeightCm] = useState(170)
+  const [weightKg, setWeightKg] = useState(70)
+
   const [proteinTarget, setProteinTarget] = useState('')
   const [ranked, setRanked] = useState<GoalItem[]>(RANK_GOALS)
   const [exerciseType, setExerciseType] = useState<string[]>([])
   const [frequency, setFrequency] = useState('')
   const [occupation, setOccupation] = useState('')
-  const [occupationOpen, setOccupationOpen] = useState(false)
-
-  const h = parseInt(height)
-  const w = parseInt(weight)
-  const heightValid = !isNaN(h) && h >= 120 && h <= 250
-  const weightValid = !isNaN(w) && w >= 30 && w <= 200
 
   function toggleExercise(type: string) {
-    Haptics.selectionAsync().catch(() => {})
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
     if (type === NO_EXERCISE) { setExerciseType([NO_EXERCISE]); return }
     setExerciseType((prev) => {
       const without = prev.filter((t) => t !== NO_EXERCISE)
@@ -76,21 +71,36 @@ export default function HealthScreen() {
     })
   }
 
+  function toggleOccupation(opt: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+    setOccupation((prev) => (prev === opt ? '' : opt))
+  }
+
+  function toggleFrequency(f: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+    setFrequency((prev) => (prev === f ? '' : f))
+  }
+
   function handleComplete() {
     const order = ranked.map((g) => g.id)
     const goal = order[0]
     setHealthProfile({
-      height, weight, proteinTarget,
-      healthGoal: goal, goalRanking: order,
-      exerciseType, exerciseFrequency: frequency, occupation,
+      height: String(heightCm),
+      weight: String(weightKg),
+      proteinTarget,
+      healthGoal: goal,
+      goalRanking: order,
+      exerciseType,
+      exerciseFrequency: frequency,
+      occupation,
     })
     if (user) {
       ;(async () => {
         await supabase.from('dietary_profiles').upsert({
           user_id: user.id,
           health_goal: goal,
-          weight: weight || null,
-          height: height || null,
+          weight: weightKg,
+          height: heightCm,
           exercise_type: exerciseType,
           exercise_frequency: frequency || null,
           occupation: occupation || null,
@@ -106,13 +116,17 @@ export default function HealthScreen() {
       <ScaleDecorator>
         <TouchableOpacity
           activeOpacity={1}
-          onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); drag() }}
+          onLongPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+            drag()
+          }}
           delayLongPress={120}
           style={[styles.rankRow, isActive && styles.rankRowActive]}
         >
-          <GripVertical size={18} color={Colors.textLight} />
-          <View style={styles.rankNum}><Text style={styles.rankNumText}>{rank}</Text></View>
-          <Text style={styles.rankIcon}>{item.icon}</Text>
+          <GripVertical size={18} color={Colors.ink300} />
+          <View style={styles.rankNum}>
+            <Text style={styles.rankNumText}>{rank}</Text>
+          </View>
           <Text style={styles.rankLabel}>{item.label}</Text>
         </TouchableOpacity>
       </ScaleDecorator>
@@ -120,48 +134,33 @@ export default function HealthScreen() {
   }
 
   const steps: WizardStep[] = [
+    // SF1 — Height & Weight
     {
       key: 'body',
-      title: 'Your height & weight',
-      subtitle: "We use this to size your plan's macros.",
-      emoji: '📏',
-      canNext: heightValid && weightValid,
+      eyebrow: 'YOUR BODY',
+      title: 'Height & weight',
+      subtitle: 'Used to calibrate your meal portions and macros.',
+      canNext: true,
       render: () => (
-        <View style={styles.bodyRow}>
-          <View style={styles.bodyField}>
-            <Text style={styles.label}>Height (cm)</Text>
-            <TextInput
-              style={styles.bigInput}
-              placeholder="175"
-              keyboardType="number-pad"
-              value={height}
-              onChangeText={(t) => setHeight(t.replace(/\D/g, ''))}
-              placeholderTextColor={Colors.textLight}
-              maxLength={3}
-              textAlign="center"
-            />
+        <View style={styles.rulersWrap}>
+          <View style={styles.rulerGroup}>
+            <Text style={styles.rulerLabel}>HEIGHT</Text>
+            <RulerPicker min={120} max={250} value={heightCm} onChange={setHeightCm} unit="cm" />
           </View>
-          <View style={styles.bodyField}>
-            <Text style={styles.label}>Weight (kg)</Text>
-            <TextInput
-              style={styles.bigInput}
-              placeholder="70"
-              keyboardType="number-pad"
-              value={weight}
-              onChangeText={(t) => setWeight(t.replace(/\D/g, ''))}
-              placeholderTextColor={Colors.textLight}
-              maxLength={3}
-              textAlign="center"
-            />
+          <View style={styles.rulerGroup}>
+            <Text style={styles.rulerLabel}>WEIGHT</Text>
+            <RulerPicker min={30} max={200} value={weightKg} onChange={setWeightKg} unit="kg" />
           </View>
         </View>
       ),
     },
+
+    // SF2 — Rank Goals
     {
       key: 'goals',
+      eyebrow: 'YOUR GOAL',
       title: 'Rank your goals',
-      subtitle: 'Drag to order them by priority — your top goal shapes your plan.',
-      emoji: '🎯',
+      subtitle: 'Drag to order by priority — your top goal shapes your plan.',
       canNext: true,
       scroll: false,
       render: () => (
@@ -176,11 +175,13 @@ export default function HealthScreen() {
         />
       ),
     },
+
+    // SF3 — Exercise Type
     {
       key: 'exercise',
+      eyebrow: 'YOUR LIFESTYLE',
       title: 'How do you stay active?',
       subtitle: 'Pick all that apply.',
-      emoji: '🏃',
       canNext: exerciseType.length > 0,
       render: () => (
         <View style={styles.pillWrap}>
@@ -199,171 +200,166 @@ export default function HealthScreen() {
         </View>
       ),
     },
+
+    // SF4 — Frequency
     {
       key: 'frequency',
+      eyebrow: 'YOUR LIFESTYLE',
       title: 'How often do you train?',
-      emoji: '📅',
       canNext: !!frequency,
       render: () => (
-        <View style={styles.radioGroup}>
-          {FREQUENCIES.map((f) => (
-            <TouchableOpacity
-              key={f}
-              style={[styles.radioRow, frequency === f && styles.radioRowActive]}
-              onPress={() => { Haptics.selectionAsync().catch(() => {}); setFrequency(f) }}
-            >
-              <View style={[styles.radio, frequency === f && styles.radioActive]}>
-                {frequency === f && <View style={styles.radioDot} />}
-              </View>
-              <Text style={[styles.radioLabel, frequency === f && styles.radioLabelActive]}>{f}</Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.pillWrap}>
+          {FREQUENCIES.map((f) => {
+            const on = frequency === f
+            return (
+              <TouchableOpacity
+                key={f}
+                style={[styles.pill, styles.pillWide, on && styles.pillActive]}
+                onPress={() => toggleFrequency(f)}
+              >
+                <Text style={[styles.pillText, on && styles.pillTextActive]}>{f}</Text>
+              </TouchableOpacity>
+            )
+          })}
         </View>
       ),
     },
+
+    // SF5 — Protein Target
     {
-      key: 'details',
-      title: 'A few optional details',
-      subtitle: 'Helps us fine-tune — skip if you like.',
-      emoji: '✨',
+      key: 'protein',
+      eyebrow: 'YOUR GOALS',
+      title: 'Daily protein target',
+      subtitle: 'Optional — leave blank and we\'ll calculate it for you.',
       canNext: true,
       render: () => (
-        <View style={{ gap: 24 }}>
-          <View>
-            <Text style={styles.label}>Daily protein target (g)</Text>
-            <TextInput
-              style={styles.bigInput}
-              placeholder="e.g. 120"
-              keyboardType="number-pad"
-              value={proteinTarget}
-              onChangeText={(t) => setProteinTarget(t.replace(/\D/g, ''))}
-              placeholderTextColor={Colors.textLight}
-              maxLength={3}
-              textAlign="center"
-            />
-          </View>
-          <View>
-            <Text style={styles.label}>Occupation</Text>
-            <TouchableOpacity style={styles.dropdown} onPress={() => setOccupationOpen(true)}>
-              <Text style={[styles.dropdownText, !occupation && styles.dropdownPlaceholder]}>
-                {occupation || 'Select your occupation'}
-              </Text>
-              <ChevronDown size={18} color={Colors.textMuted} />
-            </TouchableOpacity>
-          </View>
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>DAILY PROTEIN TARGET (G)</Text>
+          <TextInput
+            style={styles.fieldInput}
+            placeholder="e.g. 120"
+            keyboardType="number-pad"
+            value={proteinTarget}
+            onChangeText={(t) => setProteinTarget(t.replace(/\D/g, ''))}
+            placeholderTextColor={Colors.ink300}
+            maxLength={3}
+          />
+        </View>
+      ),
+    },
+
+    // SF6 — Occupation
+    {
+      key: 'occupation',
+      eyebrow: 'YOUR LIFESTYLE',
+      title: 'What do you do?',
+      subtitle: 'Helps us understand your daily energy needs.',
+      canNext: true,
+      render: () => (
+        <View style={styles.pillWrap}>
+          {OCCUPATIONS.map((opt) => {
+            const on = occupation === opt
+            return (
+              <TouchableOpacity
+                key={opt}
+                style={[styles.pill, on && styles.pillActive]}
+                onPress={() => toggleOccupation(opt)}
+              >
+                <Text style={[styles.pillText, on && styles.pillTextActive]}>{opt}</Text>
+              </TouchableOpacity>
+            )
+          })}
         </View>
       ),
     },
   ]
 
   return (
-    <>
-      <Wizard
-        steps={steps}
-        nextLabel="Next →"
-        onComplete={handleComplete}
-        onExitFirst={() => router.back()}
-      />
-
-      <Modal
-        visible={occupationOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setOccupationOpen(false)}
-      >
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setOccupationOpen(false)} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + 24 }]}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Occupation</Text>
-          {OCCUPATIONS.map((opt) => (
-            <TouchableOpacity
-              key={opt}
-              style={styles.sheetOption}
-              onPress={() => { setOccupation(opt); setOccupationOpen(false) }}
-            >
-              <Text style={[styles.sheetOptionText, occupation === opt && styles.textPrimary]}>{opt}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </Modal>
-    </>
+    <Wizard
+      steps={steps}
+      nextLabel="Next →"
+      onComplete={handleComplete}
+      onExitFirst={() => router.back()}
+    />
   )
 }
 
 const styles = StyleSheet.create({
-  label: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, marginBottom: 10, textAlign: 'center' },
-
-  bodyRow: { flexDirection: 'row', gap: 14, justifyContent: 'center' },
-  bodyField: { flex: 1, maxWidth: 160 },
-  bigInput: {
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 16,
-    paddingVertical: 20,
-    fontFamily: Fonts.heading,
-    fontSize: 28,
-    color: Colors.text,
+  // Height / weight ruler layout
+  rulersWrap: { gap: 32 },
+  rulerGroup: { gap: 10 },
+  rulerLabel: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    textAlign: 'center',
   },
 
+  // Goal rank rows
   rankRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream200,
     borderRadius: 16,
     padding: 16,
-    marginBottom: 12,
+    marginBottom: 10,
     borderWidth: 1.5,
     borderColor: Colors.border,
   },
-  rankRowActive: { borderColor: Colors.primary, shadowColor: Colors.primary, shadowOpacity: 0.18, shadowRadius: 10, elevation: 4 },
+  rankRowActive: {
+    borderColor: Colors.green700,
+    shadowColor: Colors.green700,
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
+  },
   rankNum: {
     width: 26, height: 26, borderRadius: 13,
-    backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.green50,
+    alignItems: 'center', justifyContent: 'center',
   },
-  rankNumText: { fontFamily: Fonts.headingSemi, fontSize: 13, color: Colors.primary },
-  rankIcon: { fontSize: 20 },
-  rankLabel: { fontFamily: Fonts.bodyBold, fontSize: 16, color: Colors.text, flex: 1 },
+  rankNumText: {
+    fontFamily: Fonts.headingSemi,
+    fontSize: 13,
+    color: Colors.green700,
+  },
+  rankLabel: { fontFamily: Fonts.bodyBold, fontSize: 16, color: Colors.ink900, flex: 1 },
 
-  pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
+  // Pill chips (multi-select + single-select)
+  pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   pill: {
-    paddingHorizontal: 18, paddingVertical: 12, borderRadius: 999,
-    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: '#fff',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.cream50,
   },
-  pillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  pillText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.textMuted },
+  pillWide: { flex: 1, minWidth: 140, alignItems: 'center' },
+  pillActive: { backgroundColor: Colors.green700, borderColor: Colors.green700 },
+  pillText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.ink500 },
   pillTextActive: { color: '#fff' },
 
-  radioGroup: { gap: 12 },
-  radioRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: '#fff', borderRadius: 16, padding: 18,
-    borderWidth: 1.5, borderColor: Colors.border,
+  // Underline text inputs
+  field: { gap: 8 },
+  fieldLabel: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
   },
-  radioRowActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  radio: {
-    width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff',
+  fieldInput: {
+    fontFamily: Fonts.heading,
+    fontSize: 28,
+    color: Colors.ink900,
+    borderBottomWidth: 1.5,
+    borderBottomColor: Colors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 0,
+    textAlign: 'center',
   },
-  radioActive: { borderColor: Colors.primary },
-  radioDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: Colors.primary },
-  radioLabel: { fontFamily: Fonts.bodyMed, fontSize: 16, color: Colors.text },
-  radioLabelActive: { color: Colors.primary, fontFamily: Fonts.bodyBold },
-
-  dropdown: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12,
-    paddingHorizontal: 16, paddingVertical: 16,
-  },
-  dropdownText: { fontFamily: Fonts.body, fontSize: 16, color: Colors.text },
-  dropdownPlaceholder: { color: Colors.textLight },
-
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
-  sheetHandle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
-  sheetTitle: { fontFamily: Fonts.headingSemi, fontSize: 17, color: Colors.text, marginBottom: 8 },
-  sheetOption: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  sheetOptionText: { fontFamily: Fonts.body, fontSize: 15, color: Colors.text },
-  textPrimary: { color: Colors.primary, fontFamily: Fonts.bodySemi },
 })

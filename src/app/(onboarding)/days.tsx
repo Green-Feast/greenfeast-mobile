@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import * as Haptics from 'expo-haptics'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import SectionProgress from '@/components/SectionProgress'
+import OnboardingProgress from '@/components/OnboardingProgress'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -22,6 +23,7 @@ export default function DaysScreen() {
   const totalSlots = mealsLunch + mealsDinner
 
   function toggleDay(day: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setSelectedDays((prev) =>
       prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
     )
@@ -29,6 +31,7 @@ export default function DaysScreen() {
 
   function handleNext() {
     if (totalSlots === 0 || days.length === 0) return
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     // Days can be skipped or added later from the subscriber tab, so we start in
     // opt-out mode with the chosen days active (in canonical Mon–Sat order).
     const ordered = DAYS.filter((d) => days.includes(d))
@@ -38,26 +41,25 @@ export default function DaysScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}>
-      <SectionProgress current={3} />
+      <OnboardingProgress steps={4} current={3} />
       <View style={styles.header}>
         <Text style={styles.title}>When do you want your meals?</Text>
         <Text style={styles.subtitle}>We deliver Monday to Saturday</Text>
       </View>
 
-      {/* Day grid — all on by default, but tap any day to toggle it off/on */}
+      {/* Day circles — all on by default, but tap any day to toggle it off/on */}
       <View style={styles.dayGrid}>
         {DAYS.map((day) => {
           const on = days.includes(day)
           return (
             <TouchableOpacity
               key={day}
-              style={[styles.dayCell, on && styles.dayCellActive]}
+              style={styles.dayCol}
               onPress={() => toggleDay(day)}
               activeOpacity={0.8}
             >
-              <Text style={[styles.dayLabel, on && styles.dayLabelActive]}>{day}</Text>
-              <View style={[styles.dayCheck, on && styles.dayCheckActive]}>
-                {on && <Text style={styles.checkmark}>✓</Text>}
+              <View style={[styles.dayCircle, on && styles.dayCircleActive]}>
+                <Text style={[styles.dayLabel, on && styles.dayLabelActive]}>{day}</Text>
               </View>
             </TouchableOpacity>
           )
@@ -115,16 +117,24 @@ function SlotCounter({
   onDecrement: () => void
   onIncrement: () => void
 }) {
+  function dec() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    onDecrement()
+  }
+  function inc() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    onIncrement()
+  }
   return (
     <View style={styles.slotCard}>
       <Text style={styles.slotIcon}>{icon}</Text>
       <Text style={styles.slotLabel}>{label}</Text>
       <View style={styles.counter}>
-        <TouchableOpacity style={styles.counterBtn} onPress={onDecrement}>
+        <TouchableOpacity style={styles.counterBtn} onPress={dec}>
           <Text style={styles.counterBtnText}>−</Text>
         </TouchableOpacity>
         <Text style={styles.counterValue}>{value}</Text>
-        <TouchableOpacity style={styles.counterBtn} onPress={onIncrement}>
+        <TouchableOpacity style={styles.counterBtn} onPress={inc}>
           <Text style={styles.counterBtnText}>+</Text>
         </TouchableOpacity>
       </View>
@@ -133,49 +143,38 @@ function SlotCounter({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.cream50 },
   scroll: { padding: 24, paddingBottom: 40 },
-  header: { marginBottom: 28 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 6 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
+  header: { marginTop: 24, marginBottom: 28 },
+  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.ink900, marginBottom: 6 },
+  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500 },
   dayGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    justifyContent: 'space-between',
     marginBottom: 16,
   },
-  dayCell: {
-    width: '30%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
+  dayCol: { alignItems: 'center' },
+  dayCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     borderWidth: 2,
     borderColor: Colors.border,
-    alignItems: 'center',
-    gap: 8,
-  },
-  dayCellActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  dayLabel: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.textMuted },
-  dayLabelActive: { color: Colors.primary },
-  dayCheck: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: Colors.border,
+    backgroundColor: Colors.cream50,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dayCheckActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  checkmark: { fontFamily: Fonts.bodyBold, color: '#fff', fontSize: 12 },
+  dayCircleActive: { backgroundColor: Colors.green700, borderColor: Colors.green700 },
+  dayLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.ink500 },
+  dayLabelActive: { color: '#fff' },
   warn: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger, textAlign: 'center', marginBottom: 8 },
-  selectedCount: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, textAlign: 'center', marginBottom: 24 },
-  sectionTitle: { fontFamily: Fonts.headingSemi, fontSize: 15, color: Colors.text, marginBottom: 6 },
-  slotHint: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 16, lineHeight: 18 },
+  selectedCount: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, textAlign: 'center', marginBottom: 24 },
+  sectionTitle: { fontFamily: Fonts.headingSemi, fontSize: 15, color: Colors.ink900, marginBottom: 6 },
+  slotHint: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, marginBottom: 16, lineHeight: 18 },
   slotRow: { flexDirection: 'row', gap: 12, marginBottom: 14 },
   slotCard: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     borderRadius: 16,
     padding: 18,
     alignItems: 'center',
@@ -184,17 +183,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   slotIcon: { fontSize: 28 },
-  slotLabel: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
+  slotLabel: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.ink900 },
   counter: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
   counterBtn: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: Colors.primaryLight,
+    borderWidth: 1.5,
+    borderColor: Colors.green700,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  counterBtnText: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.primary },
-  counterValue: { fontFamily: Fonts.heading, fontSize: 22, color: Colors.text, minWidth: 30, textAlign: 'center' },
-  timingLine: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, lineHeight: 18, marginBottom: 24 },
+  counterBtnText: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.green700 },
+  counterValue: { fontFamily: Fonts.heading, fontSize: 22, color: Colors.ink900, minWidth: 30, textAlign: 'center' },
+  timingLine: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, lineHeight: 18, marginBottom: 24 },
 })

@@ -30,24 +30,19 @@ export default function LoginScreen() {
   const [error, setError] = useState('')
   const handledUrl = useRef<string | null>(null)
 
-  // Email auth state
   const [emailMode, setEmailMode] = useState<EmailMode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [emailLoading, setEmailLoading] = useState(false)
   const [signupSuccess, setSignupSuccess] = useState(false)
 
-  // Fallback: on Android the OAuth redirect often re-opens the app via deep
-  // link instead of resolving openAuthSessionAsync (which returns 'dismiss').
   const incomingUrl = Linking.useURL()
   useEffect(() => {
     if (!incomingUrl || Platform.OS === 'web') return
     if (handledUrl.current === incomingUrl) return
-
     const { queryParams } = Linking.parse(incomingUrl)
     const code = queryParams?.code as string | undefined
     if (!code) return
-
     handledUrl.current = incomingUrl
     supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
       if (error) setError('Google sign-in failed. Please try again.')
@@ -66,14 +61,12 @@ export default function LoginScreen() {
         if (error) throw error
         return
       }
-
       const redirectTo = makeRedirectUri({ scheme: 'greenfeast', path: '/' })
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo, skipBrowserRedirect: true },
       })
       if (error || !data?.url) throw error ?? new Error('No OAuth URL')
-
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo)
       if (result.type === 'success') {
         const { queryParams } = Linking.parse(result.url)
@@ -133,20 +126,16 @@ export default function LoginScreen() {
         })
         if (error) throw error
       } else {
-        if (trimmedPassword.length < 8) {
-          throw new Error('Password must be at least 8 characters.')
-        }
+        if (trimmedPassword.length < 8) throw new Error('Password must be at least 8 characters.')
         const { data, error } = await supabase.auth.signUp({
           email: trimmedEmail,
           password: trimmedPassword,
         })
         if (error) throw error
-        // If session is null, Supabase requires email confirmation
         if (!data.session) {
           setSignupSuccess(true)
           return
         }
-        // Otherwise session was created immediately (email confirmation off in Supabase settings)
       }
     } catch (err: any) {
       setError(err.message ?? 'Something went wrong. Please try again.')
@@ -157,71 +146,69 @@ export default function LoginScreen() {
 
   const isLoading = googleLoading || appleLoading || emailLoading
 
+  // ── Email-confirmed success state ────────────────────────────────
+
   if (signupSuccess) {
     return (
-      <View style={styles.container}>
-        <View style={[styles.hero, { paddingTop: insets.top + 24 }]}>
-          <View style={styles.logoWrap}>
-            <Logo size={56} />
-          </View>
-          <Text style={styles.title}>GreenFeast</Text>
+      <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
+        <View style={styles.wordmarkRow}>
+          <Logo size={24} />
+          <Text style={styles.wordmarkText}>greenfeast</Text>
         </View>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Check your email ✉️</Text>
+        <View style={styles.successCard}>
+          <Text style={styles.headline}>Check your email</Text>
           <Text style={styles.successDesc}>
             We sent a confirmation link to{'\n'}
             <Text style={styles.successEmail}>{email}</Text>
             {'\n\n'}Open it to activate your account, then come back and sign in.
           </Text>
           <TouchableOpacity
-            style={styles.emailButton}
-            onPress={() => {
-              setSignupSuccess(false)
-              setEmailMode('signin')
-            }}
+            style={styles.emailBtn}
+            onPress={() => { setSignupSuccess(false); setEmailMode('signin') }}
           >
-            <Text style={styles.emailButtonText}>Back to Sign In</Text>
+            <Text style={styles.emailBtnText}>Back to Sign In</Text>
           </TouchableOpacity>
         </View>
       </View>
     )
   }
 
+  // ── Main login screen ─────────────────────────────────────────────
+
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { paddingTop: insets.top + 24 }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={[styles.hero, { paddingTop: insets.top + 24 }]}>
-        <View style={styles.logoWrap}>
-          <Logo size={56} />
-        </View>
-        <Text style={styles.title}>GreenFeast</Text>
-        <Text style={styles.subtitle}>Healthy meals, delivered daily</Text>
+      {/* Wordmark */}
+      <View style={styles.wordmarkRow}>
+        <Logo size={24} />
+        <Text style={styles.wordmarkText}>greenfeast</Text>
       </View>
 
       <ScrollView
-        style={styles.cardScroll}
-        contentContainerStyle={styles.card}
-        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scroll}
       >
-        <Text style={styles.cardTitle}>Sign in to continue</Text>
+        {/* Headline */}
+        <Text style={styles.headline}>Sign in to continue</Text>
+        <Text style={styles.subheadline}>Good food, goals met.</Text>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         {/* Google */}
         <TouchableOpacity
-          style={styles.googleButton}
+          style={styles.oauthBtn}
           onPress={signInWithGoogle}
           disabled={isLoading}
         >
           {googleLoading ? (
-            <ActivityIndicator color={Colors.text} />
+            <ActivityIndicator color={Colors.ink900} />
           ) : (
             <>
-              <Text style={styles.googleIcon}>G</Text>
-              <Text style={styles.googleButtonText}>Continue with Google</Text>
+              <Text style={styles.googleG}>G</Text>
+              <Text style={styles.oauthBtnText}>Continue with Google</Text>
             </>
           )}
         </TouchableOpacity>
@@ -229,7 +216,7 @@ export default function LoginScreen() {
         {/* Apple — iOS only */}
         {Platform.OS === 'ios' && (
           <TouchableOpacity
-            style={styles.appleButton}
+            style={styles.appleBtn}
             onPress={signInWithApple}
             disabled={isLoading}
           >
@@ -238,7 +225,7 @@ export default function LoginScreen() {
             ) : (
               <>
                 <Text style={styles.appleIcon}></Text>
-                <Text style={styles.appleButtonText}>Continue with Apple</Text>
+                <Text style={styles.appleBtnText}>Continue with Apple</Text>
               </>
             )}
           </TouchableOpacity>
@@ -251,56 +238,71 @@ export default function LoginScreen() {
           <View style={styles.dividerLine} />
         </View>
 
-        {/* Email — always expanded so the layout never shifts */}
-        <View style={styles.emailForm}>
-          {/* Mode tabs */}
+        {/* Email auth */}
+        <View style={styles.emailSection}>
+          {/* Mode toggles */}
           <View style={styles.modeTabs}>
             <TouchableOpacity
-              style={[styles.modeTab, emailMode === 'signin' && styles.modeTabActive]}
               onPress={() => { setEmailMode('signin'); setError('') }}
+              style={styles.modeTabBtn}
             >
-              <Text style={[styles.modeTabText, emailMode === 'signin' && styles.modeTabTextActive]}>Sign In</Text>
+              <Text style={[styles.modeTabText, emailMode === 'signin' && styles.modeTabActive]}>
+                Sign In
+              </Text>
+              {emailMode === 'signin' && <View style={styles.modeTabUnderline} />}
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.modeTab, emailMode === 'signup' && styles.modeTabActive]}
               onPress={() => { setEmailMode('signup'); setError('') }}
+              style={styles.modeTabBtn}
             >
-              <Text style={[styles.modeTabText, emailMode === 'signup' && styles.modeTabTextActive]}>Create Account</Text>
+              <Text style={[styles.modeTabText, emailMode === 'signup' && styles.modeTabActive]}>
+                Create Account
+              </Text>
+              {emailMode === 'signup' && <View style={styles.modeTabUnderline} />}
             </TouchableOpacity>
           </View>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor={Colors.textLight}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={email}
-            onChangeText={setEmail}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder={emailMode === 'signup' ? 'Password (min 8 chars)' : 'Password'}
-            placeholderTextColor={Colors.textLight}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={password}
-            onChangeText={setPassword}
-            onSubmitEditing={handleEmailAuth}
-            returnKeyType="go"
-          />
+          {/* Email field */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>EMAIL</Text>
+            <TextInput
+              style={styles.fieldInput}
+              placeholder="you@example.com"
+              placeholderTextColor={Colors.ink300}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={email}
+              onChangeText={setEmail}
+            />
+          </View>
+
+          {/* Password field */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>PASSWORD</Text>
+            <TextInput
+              style={styles.fieldInput}
+              placeholder={emailMode === 'signup' ? 'Min 8 characters' : '••••••••'}
+              placeholderTextColor={Colors.ink300}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={password}
+              onChangeText={setPassword}
+              onSubmitEditing={handleEmailAuth}
+              returnKeyType="go"
+            />
+          </View>
 
           <TouchableOpacity
-            style={styles.emailButton}
+            style={styles.emailBtn}
             onPress={handleEmailAuth}
             disabled={emailLoading}
           >
             {emailLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.emailButtonText}>
+              <Text style={styles.emailBtnText}>
                 {emailMode === 'signin' ? 'Sign In →' : 'Create Account →'}
               </Text>
             )}
@@ -327,34 +329,53 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.primary },
-  hero: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 32, paddingHorizontal: 24 },
-  logoWrap: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#fff',
+  container: {
+    flex: 1,
+    backgroundColor: Colors.cream50,
+  },
+
+  wordmarkRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
+    gap: 8,
+    paddingHorizontal: 20,
+    marginBottom: 8,
   },
-  title: { fontFamily: Fonts.heading, fontSize: 34, color: '#fff', marginBottom: 6 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 16, color: Colors.primaryMid },
+  wordmarkText: {
+    fontFamily: Fonts.headingSemi,
+    fontSize: 17,
+    color: Colors.green700,
+    letterSpacing: -0.3,
+  },
 
-  cardScroll: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+  scroll: {
+    paddingHorizontal: 20,
+    paddingBottom: 48,
+    gap: 16,
   },
-  card: {
-    padding: 32,
-    paddingBottom: 44,
-    gap: 12,
-  },
-  cardTitle: { fontFamily: Fonts.headingSemi, fontSize: 18, color: Colors.text, marginBottom: 4 },
-  error: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger },
 
-  googleButton: {
+  headline: {
+    fontFamily: Fonts.heading,
+    fontSize: 32,
+    color: Colors.ink900,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  subheadline: {
+    fontFamily: Fonts.body,
+    fontSize: 15,
+    color: Colors.ink500,
+    marginBottom: 8,
+  },
+
+  error: {
+    fontFamily: Fonts.body,
+    fontSize: 13,
+    color: Colors.danger,
+  },
+
+  // OAuth buttons
+  oauthBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -364,12 +385,12 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 15,
     minHeight: 52,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
   },
-  googleIcon: { fontFamily: Fonts.bodyBold, fontSize: 18, color: '#4285F4' },
-  googleButtonText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.text },
+  googleG: { fontFamily: Fonts.bodyBold, fontSize: 17, color: '#4285F4' },
+  oauthBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.ink900 },
 
-  appleButton: {
+  appleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -380,54 +401,66 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   appleIcon: { fontSize: 18, color: '#fff' },
-  appleButtonText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
+  appleBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
 
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
-  dividerText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textLight },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.ink100 },
+  dividerText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink300 },
 
-  emailForm: { gap: 10 },
-  modeTabs: {
-    flexDirection: 'row',
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    padding: 4,
-  },
-  modeTab: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  modeTabActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
-  modeTabText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.textMuted },
-  modeTabTextActive: { color: Colors.text },
-
-  input: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontFamily: Fonts.body,
+  // Email section
+  emailSection: { gap: 16 },
+  modeTabs: { flexDirection: 'row', gap: 20 },
+  modeTabBtn: { alignItems: 'center', paddingBottom: 4 },
+  modeTabText: {
+    fontFamily: Fonts.bodyMed,
     fontSize: 15,
-    color: Colors.text,
-    backgroundColor: '#fff',
+    color: Colors.ink400,
   },
-  emailButton: {
-    backgroundColor: Colors.primary,
+  modeTabActive: { color: Colors.green700 },
+  modeTabUnderline: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: Colors.green700,
+    borderRadius: 1,
+  },
+
+  fieldGroup: { gap: 6 },
+  fieldLabel: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+  },
+  fieldInput: {
+    fontFamily: Fonts.body,
+    fontSize: 16,
+    color: Colors.ink900,
+    borderBottomWidth: 1.5,
+    borderBottomColor: Colors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 0,
+  },
+
+  emailBtn: {
+    backgroundColor: Colors.green900,
     borderRadius: 999,
     paddingVertical: 15,
     alignItems: 'center',
     minHeight: 52,
     justifyContent: 'center',
+    marginTop: 4,
   },
-  emailButtonText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
+  emailBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
 
-  successDesc: { fontFamily: Fonts.body, fontSize: 15, color: Colors.textMuted, lineHeight: 22, marginBottom: 8 },
-  successEmail: { fontFamily: Fonts.bodyBold, color: Colors.text },
+  successCard: { paddingHorizontal: 20, paddingTop: 24, gap: 16 },
+  successDesc: { fontFamily: Fonts.body, fontSize: 15, color: Colors.ink500, lineHeight: 22 },
+  successEmail: { fontFamily: Fonts.bodyBold, color: Colors.ink900 },
 
-  terms: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginTop: 4 },
-  devBtn: { marginTop: 4, alignItems: 'center', padding: 10 },
-  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, textDecorationLine: 'underline' },
+  terms: { fontFamily: Fonts.body, fontSize: 11, color: Colors.ink400, textAlign: 'center' },
+  devBtn: { alignItems: 'center', padding: 10 },
+  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink300, textDecorationLine: 'underline' },
 })

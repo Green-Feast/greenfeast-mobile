@@ -13,12 +13,15 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Check } from 'lucide-react-native'
+import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useOnboardingStore, type AddOnSelection } from '@/store/onboarding'
 import { MENU_LABELS, M2_INFO, CONSTRAINT_LABELS } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import SectionProgress from '@/components/SectionProgress'
+import OnboardingProgress from '@/components/OnboardingProgress'
+import AllergenBadge from '@/components/AllergenBadge'
+import MacroRow from '@/components/MacroRow'
 
 type Plan = { id: string; name: string; meals_total: number; base_price: number }
 type Addon = {
@@ -72,7 +75,7 @@ export default function RecommendationScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color={Colors.primary} size="large" />
+        <ActivityIndicator color={Colors.green700} size="large" />
       </View>
     )
   }
@@ -107,13 +110,13 @@ export default function RecommendationScreen() {
     fat: Math.round(BASE_MEAL.fat + sumMacro('fat')),
   }
 
-  // Free-text dietary notes → individual green pills.
+  // Free-text dietary notes → individual pills.
   const freeTextPills = dietaryFreeText
     .split(/[,\n]/)
     .map((s) => s.trim())
     .filter(Boolean)
 
-  // Green pills: allergen "X Free" + free-text notes + derived constraints.
+  // Pills: allergen "X Free" + free-text notes + derived constraints.
   const pills = [
     ...allergens.map((a) => `${a} Free`),
     ...freeTextPills,
@@ -131,22 +134,26 @@ export default function RecommendationScreen() {
     return addonRows.map((a) => ({ id: a.id, name: a.name, pricePerMeal: a.price_per_meal }))
   }
   function handleAccept() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     setPlan(recommendedPlanId, planName, buildAddOns())
     router.push('/(onboarding)/days')
   }
   function handleTrial() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setPlan('trial', planName, buildAddOns())
     router.push('/(onboarding)/days')
   }
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
-    setPage(Math.round(e.nativeEvent.contentOffset.x / PAGE_W))
+    const next = Math.round(e.nativeEvent.contentOffset.x / PAGE_W)
+    if (next !== page) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setPage(next)
   }
 
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <View style={styles.padded}>
-          <SectionProgress current={3} />
+          <OnboardingProgress steps={4} current={3} />
         </View>
 
         {/* 4-card carousel */}
@@ -161,6 +168,7 @@ export default function RecommendationScreen() {
           <Page>
             <View style={styles.card}>
               <Text style={styles.eyebrow}>Built for you</Text>
+              <Text style={styles.script}>made for you</Text>
               <Text style={styles.planName}>{planName}</Text>
               <Text style={styles.tagline}>{tagline}</Text>
               <View style={styles.menuBadge}>
@@ -174,9 +182,7 @@ export default function RecommendationScreen() {
 
               {pills.length > 0 && (
                 <View style={styles.pillRow}>
-                  {pills.map((p) => (
-                    <View key={p} style={styles.pill}><Text style={styles.pillText}>{p}</Text></View>
-                  ))}
+                  {pills.map((p) => <AllergenBadge key={p} label={p} />)}
                 </View>
               )}
 
@@ -209,18 +215,21 @@ export default function RecommendationScreen() {
               <Text style={styles.cardTitle}>What's in each meal</Text>
 
               {/* Full approx macros per meal (base meal + your add-ons) */}
-              <View style={styles.macroGrid}>
-                <MacroStat value={`${mealMacros.kcal}`} unit="kcal" label="Calories" />
-                <MacroStat value={`${mealMacros.protein}g`} unit="" label="Protein" highlight />
-                <MacroStat value={`${mealMacros.carbs}g`} unit="" label="Carbs" />
-                <MacroStat value={`${mealMacros.fat}g`} unit="" label="Fat" />
+              <View style={styles.macroRowWrap}>
+                <MacroRow
+                  kcal={mealMacros.kcal}
+                  protein={mealMacros.protein}
+                  carbs={mealMacros.carbs}
+                  fat={mealMacros.fat}
+                  size="lg"
+                />
               </View>
 
               {addonRows.length > 0 ? (
                 <View style={styles.macroList}>
                   <Text style={styles.macroListHead}>Add-on contributions (per meal)</Text>
                   {addonRows.map((a) => (
-                    <View key={a.id} style={styles.macroRow}>
+                    <View key={a.id} style={styles.macroLine}>
                       <Text style={styles.macroName}>{a.name}</Text>
                       <Text style={styles.macroVals}>
                         {[
@@ -288,7 +297,13 @@ export default function RecommendationScreen() {
             <Text style={styles.trialBtnText}>Try 5 meals first · {fmt(trialTotal)}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.rejectLink} onPress={() => router.push('/(onboarding)/plan')}>
+          <TouchableOpacity
+            style={styles.rejectLink}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+              router.push('/(onboarding)/plan')
+            }}
+          >
             <Text style={styles.rejectLinkText}>or choose a different plan</Text>
           </TouchableOpacity>
         </View>
@@ -299,17 +314,6 @@ export default function RecommendationScreen() {
 
 function Page({ children }: { children: React.ReactNode }) {
   return <View style={{ width: PAGE_W, paddingHorizontal: 24 }}>{children}</View>
-}
-
-function MacroStat({ value, unit, label, highlight }: { value: string; unit: string; label: string; highlight?: boolean }) {
-  return (
-    <View style={[styles.macroStat, highlight && styles.macroStatHighlight]}>
-      <Text style={[styles.macroStatValue, highlight && styles.macroStatValueHi]}>
-        {value}{unit ? <Text style={styles.macroStatUnit}> {unit}</Text> : null}
-      </Text>
-      <Text style={[styles.macroStatLabel, highlight && styles.macroStatLabelHi]}>{label}</Text>
-    </View>
-  )
 }
 
 function ChecklistItem({ label }: { label: string }) {
@@ -324,85 +328,69 @@ function ChecklistItem({ label }: { label: string }) {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
-  container: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.cream50 },
+  container: { flex: 1, backgroundColor: Colors.cream50 },
   padded: { paddingHorizontal: 24 },
 
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     borderRadius: 20,
     borderWidth: 2,
-    borderColor: Colors.primary,
+    borderColor: Colors.green700,
     padding: 24,
     minHeight: 380,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
   },
-  eyebrow: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
-  planName: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 6 },
-  cardTitle: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.text, marginBottom: 12 },
-  tagline: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20, marginBottom: 14 },
-  menuBadge: { alignSelf: 'flex-start', backgroundColor: Colors.primary, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, marginBottom: 18 },
+  eyebrow: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.green700, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
+  script: { fontFamily: Fonts.script, fontSize: 22, color: Colors.green700, marginBottom: 2 },
+  planName: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.ink900, marginBottom: 6 },
+  cardTitle: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.ink900, marginBottom: 12 },
+  tagline: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, lineHeight: 20, marginBottom: 14 },
+  menuBadge: { alignSelf: 'flex-start', backgroundColor: Colors.green700, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, marginBottom: 18 },
   menuBadgeText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: '#fff' },
-  menuBody: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 22 },
+  menuBody: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, lineHeight: 22 },
 
   checklist: { gap: 12, marginBottom: 18 },
   checkItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  checkIcon: { width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
-  checkLabel: { fontFamily: Fonts.bodyMed, fontSize: 15, color: Colors.text },
+  checkIcon: { width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.green700, alignItems: 'center', justifyContent: 'center' },
+  checkLabel: { fontFamily: Fonts.bodyMed, fontSize: 15, color: Colors.ink900 },
 
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 },
-  pill: { backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
-  pillText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
 
-  proteinLine: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 18, marginBottom: 14 },
-  social: { fontFamily: Fonts.body, fontSize: 13, color: Colors.primary },
+  proteinLine: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, lineHeight: 18, marginBottom: 14 },
+  social: { fontFamily: Fonts.body, fontSize: 13, color: Colors.green700 },
 
-  macroGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 18 },
-  macroStat: {
-    flexGrow: 1, flexBasis: '47%', backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border,
-    borderRadius: 14, paddingVertical: 14, paddingHorizontal: 12, alignItems: 'center',
-  },
-  macroStatHighlight: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  macroStatValue: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.text },
-  macroStatValueHi: { color: Colors.primary },
-  macroStatUnit: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.textMuted },
-  macroStatLabel: { fontFamily: Fonts.bodyMed, fontSize: 12, color: Colors.textMuted, marginTop: 4 },
-  macroStatLabelHi: { color: Colors.primary },
+  macroRowWrap: { marginBottom: 18 },
   macroList: { gap: 10 },
-  macroListHead: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
-  macroRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
-  macroName: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
-  macroVals: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, textAlign: 'right', flexShrink: 1 },
-  macroNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, marginTop: 16 },
+  macroListHead: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.ink500, textTransform: 'uppercase', letterSpacing: 1 },
+  macroLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  macroName: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.ink900 },
+  macroVals: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, textAlign: 'right', flexShrink: 1 },
+  macroNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink400, marginTop: 16 },
 
   priceList: { gap: 12, marginBottom: 18 },
   priceLine: { flexDirection: 'row', justifyContent: 'space-between', gap: 16 },
-  priceLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, flex: 1 },
-  priceValue: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+  priceLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, flex: 1 },
+  priceValue: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.ink900 },
   totalBlock: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 16 },
-  totalLabel: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
-  totalValue: { fontFamily: Fonts.heading, fontSize: 30, color: Colors.primary },
+  totalLabel: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.ink500, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
+  totalValue: { fontFamily: Fonts.heading, fontSize: 30, color: Colors.green700 },
 
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 7, marginTop: 16, marginBottom: 24 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.border },
-  dotActive: { backgroundColor: Colors.primary, width: 20 },
+  dotActive: { backgroundColor: Colors.green700, width: 20 },
 
   trialBtn: {
     borderWidth: 1.5,
-    borderColor: Colors.primary,
+    borderColor: Colors.green700,
     borderRadius: 999,
     paddingVertical: 15,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 52,
     marginBottom: 16,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
   },
-  trialBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.primary },
+  trialBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.green700 },
   rejectLink: { alignItems: 'center' },
-  rejectLinkText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, textDecorationLine: 'underline' },
+  rejectLinkText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, textDecorationLine: 'underline' },
 })

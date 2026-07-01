@@ -20,6 +20,7 @@ import {
   ChevronUp,
   RefreshCw,
 } from 'lucide-react-native'
+import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
@@ -44,7 +45,7 @@ export default function AccountScreen() {
     await signOut()
     // AuthGate also redirects on session=null; this is an explicit fallback so
     // logout can never appear to do nothing.
-    router.replace('/(auth)/login')
+    router.replace('/(auth)/login' as any)
   }
 
   async function handleDevReset() {
@@ -103,6 +104,16 @@ export default function AccountScreen() {
 
   const initial = (name || 'G').charAt(0).toUpperCase()
 
+  function toggleFaqSection() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setFaqExpanded((v) => !v)
+  }
+
+  function toggleFaqItem(i: number) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setOpenFaq(openFaq === i ? null : i)
+  }
+
   // ── Skeleton loading ──────────────────────────────────────────────────────
 
   if (loading) {
@@ -150,7 +161,7 @@ export default function AccountScreen() {
           style={styles.retryBtn}
           onPress={() => { setLoading(true); fetchData().finally(() => setLoading(false)) }}
         >
-          <RefreshCw size={14} color={Colors.primary} />
+          <RefreshCw size={14} color={Colors.green700} />
           <Text style={styles.retryText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -165,7 +176,7 @@ export default function AccountScreen() {
         contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 16 }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Account</Text>
+        <Text style={styles.eyebrow}>ACCOUNT</Text>
 
         {/* Profile card */}
         <View style={styles.card}>
@@ -192,20 +203,20 @@ export default function AccountScreen() {
 
           <Pressable
             style={({ pressed }) => [styles.row, faqExpanded && styles.rowBorder, pressed && styles.rowPressed]}
-            onPress={() => setFaqExpanded((v) => !v)}
+            onPress={toggleFaqSection}
           >
-            <HelpCircle size={18} color={Colors.primary} />
+            <HelpCircle size={18} color={Colors.green700} />
             <Text style={[styles.rowLabel, { flex: 1 }]}>FAQ</Text>
-            {faqExpanded ? <ChevronUp size={16} color={Colors.textLight} /> : <ChevronDown size={16} color={Colors.textLight} />}
+            {faqExpanded ? <ChevronUp size={16} color={Colors.ink400} /> : <ChevronDown size={16} color={Colors.ink400} />}
           </Pressable>
 
           {faqExpanded && (
             <View style={styles.faqList}>
               {FAQS.map((faq, i) => (
                 <View key={i} style={i < FAQS.length - 1 && styles.faqItemBorder}>
-                  <Pressable style={styles.faqQuestion} onPress={() => setOpenFaq(openFaq === i ? null : i)}>
+                  <Pressable style={styles.faqQuestion} onPress={() => toggleFaqItem(i)}>
                     <Text style={styles.faqQ}>{faq.q}</Text>
-                    {openFaq === i ? <ChevronUp size={14} color={Colors.textLight} /> : <ChevronDown size={14} color={Colors.textLight} />}
+                    {openFaq === i ? <ChevronUp size={14} color={Colors.ink400} /> : <ChevronDown size={14} color={Colors.ink400} />}
                   </Pressable>
                   {openFaq === i && <Text style={styles.faqA}>{faq.a}</Text>}
                 </View>
@@ -217,8 +228,8 @@ export default function AccountScreen() {
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             onPress={() => setLogoutConfirm(true)}
           >
-            <LogOut size={18} color={Colors.textMuted} />
-            <Text style={[styles.rowLabel, { color: Colors.textMuted }]}>Logout</Text>
+            <LogOut size={18} color={Colors.danger} />
+            <Text style={[styles.rowLabel, { color: Colors.danger }]}>Logout</Text>
           </Pressable>
 
           {SHOW_DEV_SKIP && (
@@ -280,53 +291,57 @@ export default function AccountScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.cream50 },
   scroll: { paddingHorizontal: 16, paddingBottom: 32 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 20 },
+  eyebrow: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: 12,
+  },
 
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream100,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: Colors.ink100,
   },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.green700,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: { fontFamily: Fonts.bodyBold, fontSize: 18, color: '#fff' },
-  profileName: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.text },
-  profilePhone: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, marginTop: 2 },
+  profileName: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.ink900 },
+  profilePhone: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, marginTop: 2 },
 
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 16, minHeight: 56 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
-  rowPressed: { backgroundColor: Colors.hover },
-  rowDanger: { borderTopWidth: 1, borderTopColor: Colors.borderFaint },
-  rowLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.ink100 },
+  rowPressed: { backgroundColor: Colors.cream200 },
+  rowDanger: { borderTopWidth: 1, borderTopColor: Colors.ink100 },
+  rowLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink900 },
 
-  faqList: { paddingHorizontal: 16, paddingBottom: 4, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
-  faqItemBorder: { borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
+  faqList: { paddingHorizontal: 16, paddingBottom: 4, borderBottomWidth: 1, borderBottomColor: Colors.ink100 },
+  faqItemBorder: { borderBottomWidth: 1, borderBottomColor: Colors.ink100 },
   faqQuestion: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, paddingVertical: 12 },
-  faqQ: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.text, flex: 1 },
-  faqA: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, lineHeight: 18, paddingBottom: 12 },
+  faqQ: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.ink900, flex: 1 },
+  faqA: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, lineHeight: 18, paddingBottom: 12 },
 
-  version: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, textAlign: 'center', marginTop: 8 },
+  version: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink400, textAlign: 'center', marginTop: 8 },
 
   // Error state
   errorWrap: { justifyContent: 'center', alignItems: 'center', padding: 32 },
   errorEmoji: { fontSize: 40, marginBottom: 12 },
-  errorTitle: { fontFamily: Fonts.headingSemi, fontSize: 18, color: Colors.text, textAlign: 'center', marginBottom: 6 },
-  errorDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, textAlign: 'center', marginBottom: 20 },
+  errorTitle: { fontFamily: Fonts.headingSemi, fontSize: 18, color: Colors.ink900, textAlign: 'center', marginBottom: 6 },
+  errorDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, textAlign: 'center', marginBottom: 20 },
   retryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -335,21 +350,21 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 999,
     borderWidth: 1.5,
-    borderColor: Colors.primary,
+    borderColor: Colors.green700,
   },
-  retryText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.primary },
+  retryText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.green700 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%', maxWidth: 320 },
-  modalTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text, marginBottom: 8 },
-  modalDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, marginBottom: 12 },
+  modalCard: { backgroundColor: Colors.cream50, borderRadius: 24, padding: 24, width: '100%', maxWidth: 320 },
+  modalTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.ink900, marginBottom: 8 },
+  modalDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, marginBottom: 12 },
   modalButtons: { flexDirection: 'row', gap: 12 },
   modalBtn: { flex: 1, borderRadius: 999, paddingVertical: 13, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
-  modalBtnGhost: { backgroundColor: Colors.primaryLight },
-  modalBtnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.primary },
-  modalBtnPrimary: { backgroundColor: Colors.primary },
+  modalBtnGhost: { backgroundColor: Colors.green50 },
+  modalBtnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.green700 },
+  modalBtnPrimary: { backgroundColor: Colors.green700 },
   modalBtnPrimaryText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
-  modalBtnDanger: { backgroundColor: '#ef4444' },
+  modalBtnDanger: { backgroundColor: Colors.danger },
   modalBtnDangerText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
-  resetError: { fontFamily: Fonts.body, fontSize: 12, color: '#ef4444', marginBottom: 12, textAlign: 'center' },
+  resetError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginBottom: 12, textAlign: 'center' },
 })

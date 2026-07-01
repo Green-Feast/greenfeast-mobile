@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { useOnboardingStore } from '@/store/onboarding'
@@ -18,7 +19,7 @@ import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
 import RazorpayWebView from '@/components/RazorpayWebView'
-import SectionProgress from '@/components/SectionProgress'
+import OnboardingProgress from '@/components/OnboardingProgress'
 
 type Method = 'razorpay' | 'cod'
 type Phase = 'summary' | 'creating' | 'checkout' | 'success'
@@ -76,6 +77,13 @@ export default function PaymentScreen() {
   const planAmount = PLAN_AMOUNTS[store.planId ?? ''] ?? 149900
   const addonTotal = store.addOns.reduce((s, a) => s + a.pricePerMeal, 0) * (PLAN_DELIVERIES[store.planId ?? ''] ?? 5)
   const grandTotal = planAmount + addonTotal
+  const firstName = userName.split(' ')[0]
+
+  useEffect(() => {
+    if (phase === 'success') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    }
+  }, [phase])
 
   async function createRecords(): Promise<string> {
     const { data: { user } } = await supabase.auth.getUser()
@@ -366,7 +374,7 @@ export default function PaymentScreen() {
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 120 }]}
       >
-        <SectionProgress current={4} />
+        <OnboardingProgress steps={4} current={3} />
         <Text style={styles.title}>Complete your order</Text>
 
         {/* Order recap */}
@@ -394,7 +402,7 @@ export default function PaymentScreen() {
 
         <TouchableOpacity
           style={[styles.methodCard, method === 'razorpay' && styles.methodCardActive]}
-          onPress={() => setMethod('razorpay')}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMethod('razorpay') }}
         >
           <View style={[styles.radio, method === 'razorpay' && styles.radioActive]}>
             {method === 'razorpay' && <View style={styles.radioDot} />}
@@ -408,7 +416,7 @@ export default function PaymentScreen() {
 
         <TouchableOpacity
           style={[styles.methodCard, method === 'cod' && styles.methodCardActive]}
-          onPress={() => setMethod('cod')}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMethod('cod') }}
         >
           <View style={[styles.radio, method === 'cod' && styles.radioActive]}>
             {method === 'cod' && <View style={styles.radioDot} />}
@@ -469,6 +477,7 @@ export default function PaymentScreen() {
         <View style={styles.successOverlay}>
           <View style={styles.successCard}>
             <Text style={styles.successEmoji}>🎉</Text>
+            {firstName ? <Text style={styles.successScript}>Welcome aboard, {firstName}.</Text> : null}
             <Text style={styles.successTitle}>Welcome to GreenFeast!</Text>
             <Text style={styles.successDesc}>
               {method === 'cod'
@@ -500,40 +509,40 @@ export default function PaymentScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.cream50 },
   scroll: { padding: 24 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 20 },
+  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.ink900, marginTop: 24, marginBottom: 20 },
 
   recapCard: {
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: Colors.green50,
     borderRadius: 16,
     padding: 20,
     marginBottom: 28,
     borderWidth: 2,
-    borderColor: Colors.primary,
+    borderColor: Colors.green700,
     gap: 4,
   },
-  recapPlan: { fontFamily: Fonts.heading, fontSize: 17, color: Colors.primary },
-  recapAmount: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text },
+  recapPlan: { fontFamily: Fonts.heading, fontSize: 17, color: Colors.green700 },
+  recapAmount: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.ink900 },
   recapRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   addonRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  recapDetail: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
-  recapDot: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textLight },
+  recapDetail: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500 },
+  recapDot: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink400 },
 
-  sectionTitle: { fontFamily: Fonts.headingSemi, fontSize: 15, color: Colors.text, marginBottom: 12 },
+  sectionTitle: { fontFamily: Fonts.headingSemi, fontSize: 15, color: Colors.ink900, marginBottom: 12 },
 
   methodCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     borderRadius: 14,
     padding: 16,
     borderWidth: 2,
     borderColor: Colors.border,
     marginBottom: 10,
   },
-  methodCardActive: { borderColor: Colors.primary },
+  methodCardActive: { borderColor: Colors.green700 },
   radio: {
     width: 22,
     height: 22,
@@ -543,22 +552,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radioActive: { borderColor: Colors.primary },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.primary },
+  radioActive: { borderColor: Colors.green700 },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.green700 },
   methodText: { flex: 1 },
-  methodTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text },
-  methodDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginTop: 2 },
+  methodTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.ink900 },
+  methodDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, marginTop: 2 },
   methodIcon: { fontSize: 24 },
 
   infoBox: {
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream100,
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,
     borderLeftWidth: 3,
-    borderLeftColor: Colors.primary,
+    borderLeftColor: Colors.green700,
   },
-  infoText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 20 },
+  infoText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, lineHeight: 20 },
 
   error: {
     fontFamily: Fonts.body,
@@ -573,7 +582,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
@@ -587,7 +596,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   successCard: {
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     borderRadius: 24,
     padding: 32,
     alignItems: 'center',
@@ -595,14 +604,15 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   successEmoji: { fontSize: 56 },
-  successTitle: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.text, textAlign: 'center' },
+  successScript: { fontFamily: Fonts.script, fontSize: 24, color: Colors.green700 },
+  successTitle: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.ink900, textAlign: 'center' },
   successDesc: {
     fontFamily: Fonts.body,
     fontSize: 15,
-    color: Colors.textMuted,
+    color: Colors.ink500,
     textAlign: 'center',
     lineHeight: 22,
   },
   devBtn: { marginTop: 16, alignItems: 'center', padding: 10 },
-  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, textDecorationLine: 'underline' },
+  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink400, textDecorationLine: 'underline' },
 })

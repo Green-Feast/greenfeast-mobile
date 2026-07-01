@@ -13,10 +13,10 @@ export default function TabsLayout() {
         // Hide the bar while the keyboard is open and kill the platform
         // elevation/shadow so no grey box artifact lingers after it closes.
         tabBarHideOnKeyboard: true,
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.textLight,
+        tabBarActiveTintColor: Colors.green700,
+        tabBarInactiveTintColor: Colors.ink400,
         tabBarStyle: {
-          backgroundColor: '#fff',
+          backgroundColor: Colors.cream50,
           borderTopColor: Colors.border,
           borderTopWidth: 1,
           height: 64,
@@ -27,7 +27,7 @@ export default function TabsLayout() {
           shadowOpacity: 0,
         },
         tabBarLabelStyle: {
-          fontFamily: Fonts.headingMed,
+          fontFamily: Fonts.bodyMed,
           fontSize: 10,
         },
       }}

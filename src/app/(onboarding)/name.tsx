@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import OnboardingProgress from '@/components/OnboardingProgress'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 export default function OnboardingNameScreen() {
@@ -39,9 +40,8 @@ export default function OnboardingNameScreen() {
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
-      // Session points to a deleted/expired auth user — clear it and restart.
       await supabase.auth.signOut()
-      router.replace('/(auth)/login')
+      router.replace('/(auth)/login' as any)
       return
     }
     const { error: updateError } = await supabase
@@ -60,7 +60,7 @@ export default function OnboardingNameScreen() {
   return (
     <KeyboardAwareScreen
       style={styles.container}
-      contentContainerStyle={[styles.inner, { paddingTop: insets.top + 24 }]}
+      contentContainerStyle={[styles.inner, { paddingTop: insets.top + 16 }]}
       footerStyle={styles.footer}
       footer={
         <Button onPress={handleContinue} disabled={!isValid} loading={loading}>
@@ -68,14 +68,26 @@ export default function OnboardingNameScreen() {
         </Button>
       }
     >
-      <Text style={styles.step}>Welcome</Text>
-      <Text style={styles.title}>Confirm your name</Text>
+      {/* Progress bar */}
+      <OnboardingProgress steps={4} current={0} />
 
-      <View style={styles.form}>
-        <Text style={styles.label}>Your name</Text>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.eyebrow}>YOU</Text>
+        <Text style={styles.title}>What should we{'\n'}call you?</Text>
+        <Text style={styles.subtitle}>So we can make this feel like yours.</Text>
+      </View>
+
+      {/* Underline input */}
+      <View style={styles.field}>
+        <Text style={styles.label}>YOUR NAME</Text>
         <TextInput
           ref={inputRef}
-          style={[styles.input, focused && styles.inputFocused, !!error && styles.inputError]}
+          style={[
+            styles.input,
+            focused && styles.inputFocused,
+            !!error && styles.inputError,
+          ]}
           placeholder="Enter your full name"
           value={name}
           onChangeText={(t) => {
@@ -84,7 +96,7 @@ export default function OnboardingNameScreen() {
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholderTextColor={Colors.textLight}
+          placeholderTextColor={Colors.ink300}
           autoCapitalize="words"
           returnKeyType="done"
           onSubmitEditing={handleContinue}
@@ -96,30 +108,63 @@ export default function OnboardingNameScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  inner: { flexGrow: 1, paddingHorizontal: 24 },
-  footer: { paddingHorizontal: 24 },
-  step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
-  title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 28 },
-  form: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: Colors.border,
+  container: { flex: 1, backgroundColor: Colors.cream50 },
+  inner: { flexGrow: 1, gap: 0 },
+  footer: { paddingHorizontal: 20 },
+
+  header: { paddingHorizontal: 20, marginTop: 32, marginBottom: 40 },
+  eyebrow: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: 10,
   },
-  label: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, marginBottom: 10 },
-  input: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+  title: {
+    fontFamily: Fonts.heading,
+    fontSize: 36,
+    color: Colors.ink900,
+    lineHeight: 42,
+    marginBottom: 10,
+  },
+  subtitle: {
     fontFamily: Fonts.body,
-    fontSize: 17,
-    color: Colors.text,
+    fontSize: 15,
+    color: Colors.ink500,
+    lineHeight: 22,
   },
-  inputFocused: { borderColor: Colors.primary },
-  inputError: { borderColor: Colors.danger },
-  error: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 8 },
+
+  field: {
+    paddingHorizontal: 20,
+  },
+  label: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 8,
+  },
+  input: {
+    fontFamily: Fonts.heading,
+    fontSize: 24,
+    color: Colors.ink900,
+    borderBottomWidth: 1.5,
+    borderBottomColor: Colors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 0,
+  },
+  inputFocused: {
+    borderBottomColor: Colors.green700,
+  },
+  inputError: {
+    borderBottomColor: Colors.danger,
+  },
+  error: {
+    fontFamily: Fonts.body,
+    fontSize: 12,
+    color: Colors.danger,
+    marginTop: 8,
+  },
 })

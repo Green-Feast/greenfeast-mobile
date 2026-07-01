@@ -12,7 +12,8 @@ import { supabase } from '@/lib/supabase'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import SectionProgress from '@/components/SectionProgress'
+import OnboardingProgress from '@/components/OnboardingProgress'
+import AllergenBadge from '@/components/AllergenBadge'
 
 type Plan = { id: string; name: string; meals_total: number; base_price: number }
 
@@ -59,7 +60,7 @@ export default function SummaryScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color={Colors.primary} />
+        <ActivityIndicator color={Colors.green700} />
       </View>
     )
   }
@@ -67,7 +68,7 @@ export default function SummaryScreen() {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]} showsVerticalScrollIndicator={false}>
-        <SectionProgress current={4} />
+        <OnboardingProgress steps={4} current={3} />
         <View style={styles.header}>
           <Text style={styles.title}>Your subscription</Text>
         </View>
@@ -95,25 +96,17 @@ export default function SummaryScreen() {
           </Section>
         )}
 
-        {/* Dietary — every tag rendered as a green pill */}
+        {/* Dietary — every tag rendered as an allergen badge */}
         <Section title="Dietary Profile">
           <View style={styles.badgeRow}>
             {store.dietaryPreference !== 'none' && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>
-                  {store.dietaryPreference.charAt(0).toUpperCase() + store.dietaryPreference.slice(1)}
-                </Text>
-              </View>
+              <AllergenBadge label={store.dietaryPreference.charAt(0).toUpperCase() + store.dietaryPreference.slice(1)} />
             )}
             {store.allergens.map((a) => (
-              <View key={a} style={styles.badge}>
-                <Text style={styles.badgeText}>{a} Free</Text>
-              </View>
+              <AllergenBadge key={a} label={`${a} Free`} />
             ))}
             {freeTextConstraints.map((c, i) => (
-              <View key={`c-${i}`} style={styles.badge}>
-                <Text style={styles.badgeText}>{c}</Text>
-              </View>
+              <AllergenBadge key={`c-${i}`} label={c} />
             ))}
             {store.dietaryPreference === 'none' &&
               store.allergens.length === 0 &&
@@ -176,26 +169,26 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
-  container: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.cream50 },
+  container: { flex: 1, backgroundColor: Colors.cream50 },
   scroll: { padding: 24, paddingBottom: 20 },
-  header: { marginBottom: 24 },
-  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text },
+  header: { marginTop: 24, marginBottom: 24 },
+  title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.ink900 },
   section: { marginBottom: 20 },
-  sectionTitle: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  sectionTitle: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.ink500, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
   sectionCard: {
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream100,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
     padding: 16,
     gap: 12,
   },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 },
-  rowLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, flex: 1 },
-  rowValue: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, flex: 1, textAlign: 'right' },
+  rowLabel: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, flex: 1 },
+  rowValue: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.ink900, flex: 1, textAlign: 'right' },
   badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  badge: { backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  badgeText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
-  noteText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 18 },
+  noteText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, lineHeight: 18 },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -203,15 +196,15 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
     paddingTop: 12,
   },
-  totalLabel: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text },
-  totalValue: { fontFamily: Fonts.heading, fontSize: 15, color: Colors.primary },
+  totalLabel: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.ink900 },
+  totalValue: { fontFamily: Fonts.heading, fontSize: 15, color: Colors.green700 },
   spacer: { height: 120 },
   cta: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.border,

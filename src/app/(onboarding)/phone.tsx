@@ -11,6 +11,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import OnboardingProgress from '@/components/OnboardingProgress'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 export default function OnboardingPhoneScreen() {
@@ -45,7 +46,7 @@ export default function OnboardingPhoneScreen() {
   return (
     <KeyboardAwareScreen
       style={styles.container}
-      contentContainerStyle={[styles.inner, { paddingTop: insets.top + 24 }]}
+      contentContainerStyle={[styles.inner, { paddingTop: insets.top + 16 }]}
       footerStyle={styles.footer}
       footer={
         <Button onPress={handleContinue} disabled={!isValid} loading={loading}>
@@ -53,19 +54,25 @@ export default function OnboardingPhoneScreen() {
         </Button>
       }
     >
-      <Text style={styles.step}>Setup</Text>
-      <Text style={styles.title}>Your WhatsApp number</Text>
-      <Text style={styles.subtitle}>We'll send your order updates here on WhatsApp.</Text>
+      {/* Progress bar */}
+      <OnboardingProgress steps={4} current={0} />
 
-      <View style={styles.form}>
-        <Text style={styles.label}>WhatsApp number</Text>
-        <View style={styles.inputRow}>
-          <View style={styles.countryCode}>
-            <Text style={styles.countryCodeText}>+91</Text>
-          </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.eyebrow}>YOUR NUMBER</Text>
+        <Text style={styles.title}>What's your{'\n'}WhatsApp number?</Text>
+        <Text style={styles.subtitle}>We'll send your order updates here.</Text>
+      </View>
+
+      {/* Underline phone input */}
+      <View style={styles.field}>
+        <Text style={styles.label}>MOBILE NUMBER</Text>
+        <View style={[styles.inputRow, focused && styles.inputRowFocused]}>
+          <Text style={styles.prefix}>+91</Text>
+          <View style={styles.prefixSeparator} />
           <TextInput
             ref={inputRef}
-            style={[styles.input, focused && styles.inputFocused]}
+            style={styles.input}
             placeholder="98765 43210"
             keyboardType="phone-pad"
             maxLength={10}
@@ -76,7 +83,7 @@ export default function OnboardingPhoneScreen() {
             }}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholderTextColor={Colors.textLight}
+            placeholderTextColor={Colors.ink300}
           />
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -86,42 +93,76 @@ export default function OnboardingPhoneScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  inner: { flexGrow: 1, paddingHorizontal: 24 },
-  footer: { paddingHorizontal: 24 },
-  step: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
-  title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text, marginBottom: 8 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 15, color: Colors.textMuted, lineHeight: 22, marginBottom: 28 },
-  form: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: Colors.border,
+  container: { flex: 1, backgroundColor: Colors.cream50 },
+  inner: { flexGrow: 1, gap: 0 },
+  footer: { paddingHorizontal: 20 },
+
+  header: { paddingHorizontal: 20, marginTop: 32, marginBottom: 40 },
+  eyebrow: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: 10,
   },
-  label: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, marginBottom: 10 },
-  inputRow: { flexDirection: 'row', gap: 8 },
-  countryCode: {
-    paddingHorizontal: 14,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    justifyContent: 'center',
+  title: {
+    fontFamily: Fonts.heading,
+    fontSize: 36,
+    color: Colors.ink900,
+    lineHeight: 42,
+    marginBottom: 10,
   },
-  countryCodeText: { fontFamily: Fonts.bodySemi, fontSize: 16, color: Colors.text },
+  subtitle: {
+    fontFamily: Fonts.body,
+    fontSize: 15,
+    color: Colors.ink500,
+    lineHeight: 22,
+  },
+
+  field: { paddingHorizontal: 20 },
+  label: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 8,
+  },
+
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1.5,
+    borderBottomColor: Colors.border,
+    paddingVertical: 10,
+    gap: 12,
+  },
+  inputRowFocused: {
+    borderBottomColor: Colors.green700,
+  },
+  prefix: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 22,
+    color: Colors.ink500,
+  },
+  prefixSeparator: {
+    width: 1,
+    height: 22,
+    backgroundColor: Colors.border,
+  },
   input: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontFamily: Fonts.body,
-    fontSize: 17,
+    fontFamily: Fonts.heading,
+    fontSize: 24,
+    color: Colors.ink900,
     letterSpacing: 2,
-    color: Colors.text,
+    padding: 0,
   },
-  inputFocused: { borderColor: Colors.primary },
-  hint: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 10 },
-  error: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 8 },
+  error: {
+    fontFamily: Fonts.body,
+    fontSize: 12,
+    color: Colors.danger,
+    marginTop: 8,
+  },
 })

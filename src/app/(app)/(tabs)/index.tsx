@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ArrowRight, Leaf, RefreshCw } from 'lucide-react-native'
+import MacroRow from '@/components/MacroRow'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
@@ -169,15 +170,16 @@ export default function Home() {
         contentContainerStyle={{ paddingBottom: 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
-        {/* Hero */}
+        {/* Editorial header (cream canvas) */}
         <View style={[styles.hero, { paddingTop: insets.top + 20 }]}>
-          {/* subtle yellow glow accents */}
-          <View style={[styles.glow, { top: 30, left: -40 }]} />
-          <View style={[styles.glow, { top: -20, right: -30, width: 140, height: 140 }]} />
+          <View style={styles.logoRow}>
+            <Logo size={28} />
+            <Text style={styles.wordmark}>greenfeast</Text>
+          </View>
 
-          <Logo size={40} />
-
-          {userName ? <Text style={styles.greeting}>{getGreeting(userName)}</Text> : null}
+          {userName ? (
+            <Text style={styles.greeting}>{getGreeting(userName)}</Text>
+          ) : null}
 
           <Text style={styles.heroTitle}>Nutrition,{'\n'}considered.</Text>
           <Text style={styles.heroSubtitle}>
@@ -185,11 +187,10 @@ export default function Home() {
           </Text>
 
           <Pressable
-            style={({ pressed }) => [styles.heroCta, pressed && { transform: [{ scale: 0.97 }] }]}
+            style={({ pressed }) => [styles.heroCta, pressed && { opacity: 0.85 }]}
             onPress={() => router.push(hasSubscription ? '/(app)/(tabs)/subscription' : '/(onboarding)/health')}
           >
-            <Text style={styles.heroCtaText}>{hasSubscription ? 'My plan' : 'Build your plan'}</Text>
-            <ArrowRight size={15} color={Colors.text} strokeWidth={2.5} />
+            <Text style={styles.heroCtaText}>{hasSubscription ? 'My plan →' : 'Build your plan →'}</Text>
           </Pressable>
         </View>
 
@@ -202,17 +203,15 @@ export default function Home() {
             </View>
             {todayOrder ? (
               <View style={styles.todayCard}>
-                <View style={styles.todayCardLeft}>
-                  <Text style={styles.todayMeal}>{todayOrder.meal_templates.name}</Text>
-                  <Text style={styles.todayMeta}>
-                    {todayOrder.meal_templates.kcal ? `${todayOrder.meal_templates.kcal} kcal` : ''}
-                    {todayOrder.meal_templates.protein ? ` · ${todayOrder.meal_templates.protein}g protein` : ''}
-                  </Text>
-                  <View style={styles.todayBadge}>
-                    <Text style={styles.todayBadgeText}>{STATUS_LABELS[todayOrder.status] ?? todayOrder.status}</Text>
-                  </View>
+                <View style={styles.todayBadge}>
+                  <Text style={styles.todayBadgeText}>{STATUS_LABELS[todayOrder.status] ?? todayOrder.status}</Text>
                 </View>
-              </View>
+                <Text style={styles.todayMeal}>{todayOrder.meal_templates.name}</Text>
+                <MacroRow
+                  protein={todayOrder.meal_templates.protein}
+                  kcal={todayOrder.meal_templates.kcal}
+                  size="sm"
+                /></View>
             ) : (
               <View style={styles.noDeliveryCard}>
                 <Text style={styles.noDeliveryEmoji}>🌿</Text>
@@ -272,8 +271,7 @@ export default function Home() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
-  // Skeleton in hero needs a semi-transparent white tint
-  skeletonHero: { backgroundColor: 'rgba(255,255,255,0.18)', marginBottom: 8 },
+  skeletonHero: { marginBottom: 8 },
 
   // Error state
   errorWrap: { justifyContent: 'center', alignItems: 'center', padding: 32 },
@@ -308,34 +306,32 @@ const styles = StyleSheet.create({
   noDeliveryDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19 },
 
   hero: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-    overflow: 'hidden',
+    paddingHorizontal: 20,
+    paddingBottom: 28,
   },
-  glow: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 999,
-    backgroundColor: Colors.accent,
-    opacity: 0.06,
-  },
-  greeting: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.primaryMid, marginTop: 20, marginBottom: 4 },
-  heroTitle: { fontFamily: Fonts.heading, fontSize: 32, color: '#fff', lineHeight: 38, marginBottom: 12 },
-  heroSubtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.primaryMid, lineHeight: 21, maxWidth: 280 },
-  heroCta: {
+  logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginBottom: 24,
+  },
+  wordmark: {
+    fontFamily: Fonts.headingSemi,
+    fontSize: 17,
+    color: Colors.green700,
+    letterSpacing: -0.3,
+  },
+  greeting: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.ink400, marginBottom: 6 },
+  heroTitle: { fontFamily: Fonts.heading, fontSize: 40, color: Colors.ink900, lineHeight: 46, marginBottom: 12 },
+  heroSubtitle: { fontFamily: Fonts.body, fontSize: 15, color: Colors.ink500, lineHeight: 22, marginBottom: 24 },
+  heroCta: {
     alignSelf: 'flex-start',
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.green900,
     paddingHorizontal: 20,
     paddingVertical: 13,
     borderRadius: 999,
-    marginTop: 24,
   },
-  heroCtaText: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
+  heroCtaText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
 
   section: { paddingHorizontal: 16, paddingTop: 24 },
   sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
@@ -348,47 +344,45 @@ const styles = StyleSheet.create({
   },
 
   todayCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: Colors.cream100,
+    borderRadius: 20,
     padding: 18,
     borderWidth: 2,
-    borderColor: Colors.primary,
+    borderColor: Colors.green700,
+    gap: 8,
   },
-  todayCardLeft: { gap: 6 },
-  todayMeal: { fontFamily: Fonts.headingSemi, fontSize: 18, color: Colors.text },
-  todayMeta: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
   todayBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: Colors.green50,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    marginTop: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  todayBadgeText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
+  todayBadgeText: { fontFamily: Fonts.bodyMed, fontSize: 11, color: Colors.green700, textTransform: 'uppercase', letterSpacing: 0.8 },
+  todayMeal: { fontFamily: Fonts.heading, fontSize: 20, color: Colors.ink900 },
 
   storyCard: {
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream200,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
     padding: 16,
     flexDirection: 'row',
-    gap: 16,
+    gap: 14,
   },
-  storyEmoji: { fontSize: 24, marginTop: 2 },
-  storyHeadline: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginBottom: 4 },
-  storyBody: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, lineHeight: 18 },
+  storyEmoji: { fontSize: 22, marginTop: 2 },
+  storyHeadline: { fontFamily: Fonts.heading, fontSize: 16, color: Colors.ink900, marginBottom: 6 },
+  storyBody: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, lineHeight: 19 },
 
   menuNudgeWrap: { paddingHorizontal: 16, paddingTop: 16 },
   menuNudge: {
-    backgroundColor: Colors.forest,
-    borderRadius: 16,
+    backgroundColor: Colors.green900,
+    borderRadius: 20,
     paddingHorizontal: 20,
     paddingVertical: 20,
     flexDirection: 'row',
     alignItems: 'center',
   },
   menuNudgeTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: '#fff' },
-  menuNudgeSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.primaryMid, marginTop: 2 },
+  menuNudgeSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.green200, marginTop: 2 },
 })

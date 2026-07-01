@@ -8,7 +8,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
-import { ArrowLeft, Sparkles } from 'lucide-react-native'
+import { ArrowLeft } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
@@ -18,24 +18,21 @@ export type WizardStep = {
   key: string
   title: string
   subtitle?: string
-  emoji?: string            // shown in the question-card badge; defaults to a sparkle
+  eyebrow?: string
+  emoji?: string   // legacy — ignored in new design, kept for backward compat
   canNext: boolean
-  // Set false for steps whose content manages its own scroll/gestures (e.g. a
-  // drag-to-rank list), so the wizard doesn't wrap them in a ScrollView.
+  // Set false for steps that manage their own scroll/gestures (e.g. drag-to-rank)
   scroll?: boolean
   render: () => ReactNode
 }
 
 type Props = {
   steps: WizardStep[]
-  nextLabel?: string         // label shown on the final step's button
+  nextLabel?: string
   onComplete: () => void
-  onExitFirst?: () => void   // back-press on the first step
+  onExitFirst?: () => void
 }
 
-// A single-purpose-per-page wizard. Each step shows its question inside a
-// prominent card (with an icon badge), the answer UI below it in a scroll
-// area, and a sticky footer button that stays above the keyboard.
 export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, onExitFirst }: Props) {
   const insets = useSafeAreaInsets()
   const [index, setIndex] = useState(0)
@@ -63,7 +60,7 @@ export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, on
 
   function next() {
     if (!step.canNext) return
-    Haptics.selectionAsync().catch(() => {})
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
     if (isLast) { onComplete(); return }
     animateTo(index + 1, 1)
   }
@@ -77,11 +74,11 @@ export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, on
     <View style={styles.container}>
       {/* Progress header */}
       <View style={[styles.top, { paddingTop: insets.top + 12 }]}>
-        <Pressable onPress={back} hitSlop={10} style={styles.backBtn}>
-          <ArrowLeft size={22} color={Colors.text} />
+        <Pressable onPress={back} hitSlop={12} style={styles.backBtn}>
+          <ArrowLeft size={20} color={Colors.ink900} />
         </Pressable>
         <View style={styles.track}>
-          <View style={[styles.fill, { width: `${pct}%` }]} />
+          <View style={[styles.fill, { width: `${pct}%` as any }]} />
         </View>
         <Text style={styles.count}>{index + 1}/{steps.length}</Text>
       </View>
@@ -116,11 +113,9 @@ export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, on
 function QuestionCard({ step }: { step: WizardStep }) {
   return (
     <View style={styles.qCard}>
-      <View style={styles.badge}>
-        {step.emoji
-          ? <Text style={styles.badgeEmoji}>{step.emoji}</Text>
-          : <Sparkles size={20} color={Colors.primary} />}
-      </View>
+      {step.eyebrow ? (
+        <Text style={styles.eyebrow}>{step.eyebrow}</Text>
+      ) : null}
       <Text style={styles.title}>{step.title}</Text>
       {step.subtitle ? <Text style={styles.subtitle}>{step.subtitle}</Text> : null}
     </View>
@@ -128,37 +123,74 @@ function QuestionCard({ step }: { step: WizardStep }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  top: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingBottom: 8 },
+  container: { flex: 1, backgroundColor: Colors.cream50 },
+
+  top: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
   backBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  track: { flex: 1, height: 6, borderRadius: 999, backgroundColor: Colors.border, overflow: 'hidden' },
-  fill: { height: '100%', borderRadius: 999, backgroundColor: Colors.primary },
-  count: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, minWidth: 32, textAlign: 'right' },
+  track: {
+    flex: 1,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: Colors.border,
+    overflow: 'hidden',
+  },
+  fill: { height: '100%', borderRadius: 999, backgroundColor: Colors.green700 },
+  count: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 12,
+    color: Colors.ink400,
+    minWidth: 32,
+    textAlign: 'right',
+  },
 
   body: { flex: 1 },
   fillView: { flex: 1 },
-  scroll: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24, flexGrow: 1 },
+  scroll: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
 
-  // The question presented as a card with an icon badge — gives each step
-  // visual weight instead of a bare centered heading.
   qCard: {
-    backgroundColor: Colors.primaryLight,
-    borderRadius: 24,
-    paddingVertical: 28,
-    paddingHorizontal: 22,
-    alignItems: 'center',
-    marginBottom: 24,
+    paddingTop: 8,
+    paddingBottom: 28,
   },
-  badge: {
-    width: 48, height: 48, borderRadius: 24, backgroundColor: '#fff',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
-    shadowColor: Colors.primary, shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  eyebrow: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: 10,
   },
-  badgeEmoji: { fontSize: 24 },
-  title: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.text, textAlign: 'center', lineHeight: 30 },
-  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, textAlign: 'center', lineHeight: 20, marginTop: 8 },
+  title: {
+    fontFamily: Fonts.heading,
+    fontSize: 32,
+    color: Colors.ink900,
+    lineHeight: 38,
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontFamily: Fonts.body,
+    fontSize: 15,
+    color: Colors.ink500,
+    lineHeight: 22,
+  },
 
   content: { alignSelf: 'stretch' },
 
-  footer: { paddingHorizontal: 24, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.background },
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.cream50,
+  },
 })

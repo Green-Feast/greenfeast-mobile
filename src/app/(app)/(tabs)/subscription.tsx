@@ -14,11 +14,13 @@ import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Pause, Play, SkipForward, ArrowRight, Wallet, MapPin, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight } from 'lucide-react-native'
+import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import SubscribeGate from '@/components/SubscribeGate'
 import RazorpayWebView from '@/components/RazorpayWebView'
+import MacroRow from '@/components/MacroRow'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -623,7 +625,7 @@ export default function SubscriptionScreen() {
             return (
               <Pressable
                 key={d}
-                onPress={() => setSelectedDay(d)}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedDay(d) }}
                 style={({ pressed }) => pressed && { opacity: 0.7 }}
               >
                 {cell}
@@ -682,24 +684,7 @@ export default function SubscriptionScreen() {
               {/* Macro chips */}
               {(heroProtein > 0 || heroCarbs > 0 || heroFat > 0) && (
                 <View style={s.heroMacroStrip}>
-                  {heroProtein > 0 && (
-                    <View style={s.heroMacroBox}>
-                      <Text style={s.heroMacroVal}>{Math.round(heroProtein)}g</Text>
-                      <Text style={s.heroMacroLabel}>Protein</Text>
-                    </View>
-                  )}
-                  {heroCarbs > 0 && (
-                    <View style={s.heroMacroBox}>
-                      <Text style={s.heroMacroVal}>{Math.round(heroCarbs)}g</Text>
-                      <Text style={s.heroMacroLabel}>Carbs</Text>
-                    </View>
-                  )}
-                  {heroFat > 0 && (
-                    <View style={s.heroMacroBox}>
-                      <Text style={s.heroMacroVal}>{Math.round(heroFat)}g</Text>
-                      <Text style={s.heroMacroLabel}>Fat</Text>
-                    </View>
-                  )}
+                  <MacroRow protein={heroProtein} carbs={heroCarbs} fat={heroFat} size="md" />
                 </View>
               )}
             </View>
@@ -709,7 +694,7 @@ export default function SubscriptionScreen() {
               {!heroLocked && (
                 <Pressable
                   style={({ pressed }) => [s.heroSkipBtn, pressed && { opacity: 0.7 }]}
-                  onPress={() => setSkipConfirm(selectedDay)}
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSkipConfirm(selectedDay) }}
                 >
                   <SkipForward size={15} color={Colors.text} strokeWidth={2} />
                   <Text style={s.heroSkipText}>Skip</Text>
@@ -717,7 +702,7 @@ export default function SubscriptionScreen() {
               )}
               <Pressable
                 style={({ pressed }) => [s.heroCustomizeBtn, !heroLocked && { flex: 1.4 }, pressed && { opacity: 0.85 }]}
-                onPress={() => { setAddMode(false); setShowDayModal(true) }}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setAddMode(false); setShowDayModal(true) }}
               >
                 <SlidersHorizontal size={15} color="#fff" strokeWidth={2} />
                 <Text style={s.heroCustomizeText}>{heroLocked ? 'View details →' : 'Customize →'}</Text>
@@ -744,14 +729,14 @@ export default function SubscriptionScreen() {
           <View style={s.slotToggle}>
             <Pressable
               style={[s.slotBtn, selectedSlot === 'lunch' && s.slotBtnActive]}
-              onPress={() => setSelectedSlot('lunch')}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedSlot('lunch') }}
             >
               <Utensils size={15} color={selectedSlot === 'lunch' ? '#fff' : Colors.textMuted} strokeWidth={2} />
               <Text style={[s.slotBtnText, selectedSlot === 'lunch' && s.slotBtnTextActive]}>Lunch</Text>
             </Pressable>
             <Pressable
               style={[s.slotBtn, selectedSlot === 'dinner' && s.slotBtnActive]}
-              onPress={() => setSelectedSlot('dinner')}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedSlot('dinner') }}
             >
               <Moon size={15} color={selectedSlot === 'dinner' ? '#fff' : Colors.textMuted} strokeWidth={2} />
               <Text style={[s.slotBtnText, selectedSlot === 'dinner' && s.slotBtnTextActive]}>Dinner</Text>
@@ -789,14 +774,14 @@ export default function SubscriptionScreen() {
         <View style={s.quickActions}>
           <Pressable
             style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
-            onPress={() => nextOrder ? setSkipConfirm(nextOrder.delivery_date) : null}
+            onPress={() => { if (nextOrder) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSkipConfirm(nextOrder.delivery_date) } }}
           >
             <SkipForward size={22} color={nextOrder ? Colors.primary : Colors.textLight} />
             <Text style={[s.actionBoxLabel, !nextOrder && { color: Colors.textLight }]}>Skip next</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
-            onPress={() => router.push('/(app)/plan-settings')}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); router.push('/(app)/plan-settings') }}
           >
             {sub.status === 'paused'
               ? <Play size={22} color={Colors.primary} />
@@ -1729,10 +1714,7 @@ const s = StyleSheet.create({
   heroQtyPillText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.primary },
 
   // Macro strip
-  heroMacroStrip: { flexDirection: 'row', gap: 8 },
-  heroMacroBox: { flex: 1, backgroundColor: Colors.primaryLight, borderRadius: 10, padding: 8, alignItems: 'center' },
-  heroMacroVal: { fontFamily: Fonts.heading, fontSize: 13, color: Colors.primary },
-  heroMacroLabel: { fontFamily: Fonts.body, fontSize: 10, color: Colors.textMuted, marginTop: 3 },
+  heroMacroStrip: { paddingTop: 2 },
 
   // Hero action buttons
   heroCardBtns: { flexDirection: 'row', gap: 10, paddingHorizontal: 18, paddingBottom: 18 },

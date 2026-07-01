@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Animated, Easing } from 'react-native'
 import { useRouter } from 'expo-router'
 import { Check } from 'lucide-react-native'
 import { Colors, Fonts } from '@/constants/colors'
+import { useAuthStore } from '@/store/auth'
 
 const STEPS = [
   'Calculating your protein target',
@@ -17,9 +18,12 @@ const TOTAL_MS = STEPS.length * STEP_MS + TAIL_MS
 
 export default function LoadingScreen() {
   const router = useRouter()
+  const { user } = useAuthStore()
   const [done, setDone] = useState(0) // number of completed steps
   const pulse = useRef(new Animated.Value(0)).current
   const progress = useRef(new Animated.Value(0)).current
+
+  const firstName = ((user?.user_metadata?.full_name as string) ?? (user?.user_metadata?.name as string) ?? '').split(' ')[0]
 
   useEffect(() => {
     // Gentle breathing pulse on the leaf badge.
@@ -51,7 +55,7 @@ export default function LoadingScreen() {
   }, [])
 
   const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] })
-  const glow = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.85] })
+  const glow = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.75] })
   const barWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] })
 
   return (
@@ -63,7 +67,9 @@ export default function LoadingScreen() {
         </Animated.View>
       </View>
 
-      <Text style={styles.title}>Building your{'\n'}personalised plan</Text>
+      <Text style={styles.title}>
+        {firstName ? `Building your plan,\n${firstName}.` : 'Building your\npersonalised plan.'}
+      </Text>
 
       {/* Progress bar */}
       <View style={styles.track}>
@@ -117,46 +123,46 @@ function StepRow({ label, isDone, isActive }: { label: string; isDone: boolean; 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.cream50,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
   },
-  badgeWrap: { alignItems: 'center', justifyContent: 'center', marginBottom: 28 },
+  badgeWrap: { alignItems: 'center', justifyContent: 'center', marginBottom: 32 },
   glow: {
     position: 'absolute',
     width: 110,
     height: 110,
     borderRadius: 55,
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: Colors.green50,
   },
   badge: {
     width: 84,
     height: 84,
     borderRadius: 42,
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: Colors.green50,
     alignItems: 'center',
     justifyContent: 'center',
   },
   badgeIcon: { fontSize: 38 },
   title: {
     fontFamily: Fonts.heading,
-    fontSize: 24,
-    color: Colors.text,
+    fontSize: 28,
+    color: Colors.ink900,
     textAlign: 'center',
-    marginBottom: 28,
-    lineHeight: 31,
+    marginBottom: 32,
+    lineHeight: 35,
   },
   track: {
     width: '78%',
-    height: 6,
+    height: 4,
     borderRadius: 999,
     backgroundColor: Colors.border,
     overflow: 'hidden',
-    marginBottom: 28,
+    marginBottom: 32,
   },
-  fill: { height: '100%', borderRadius: 999, backgroundColor: Colors.primary },
-  steps: { alignSelf: 'stretch', paddingHorizontal: 24, gap: 14 },
+  fill: { height: '100%', borderRadius: 999, backgroundColor: Colors.green700 },
+  steps: { alignSelf: 'stretch', paddingHorizontal: 24, gap: 16 },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   stepDot: {
     width: 22,
@@ -164,12 +170,12 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     borderWidth: 2,
     borderColor: Colors.border,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.cream50,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepDotActive: { borderColor: Colors.primary },
-  stepDotDone: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  stepText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textLight, flex: 1 },
-  stepTextOn: { color: Colors.text, fontFamily: Fonts.bodyMed },
+  stepDotActive: { borderColor: Colors.green700 },
+  stepDotDone: { backgroundColor: Colors.green700, borderColor: Colors.green700 },
+  stepText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink400, flex: 1 },
+  stepTextOn: { color: Colors.ink900, fontFamily: Fonts.bodyMed },
 })

@@ -19,7 +19,7 @@ export default function DietaryScreen() {
   const [freeText, setFreeText] = useState('')
 
   function toggleAllergen(val: string) {
-    Haptics.selectionAsync().catch(() => {})
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
     setAllergens((prev) => (prev.includes(val) ? prev.filter((x) => x !== val) : [...prev, val]))
   }
 
@@ -42,6 +42,7 @@ export default function DietaryScreen() {
   const steps: WizardStep[] = [
     {
       key: 'allergens',
+      eyebrow: 'YOUR FOOD',
       title: 'Any allergies or things to avoid?',
       subtitle: "We'll keep these out of every meal.",
       emoji: '🚫',
@@ -91,18 +92,32 @@ export default function DietaryScreen() {
 }
 
 const styles = StyleSheet.create({
-  pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
+  pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   pill: {
     paddingHorizontal: 16, paddingVertical: 11, borderRadius: 999,
-    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: '#fff',
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.cream50,
   },
-  pillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  pillText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.textMuted },
+  pillActive: { backgroundColor: Colors.green700, borderColor: Colors.green700 },
+  pillText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.ink500 },
   pillTextActive: { color: '#fff' },
-  fieldLabel: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, marginTop: 28, marginBottom: 10 },
-  textarea: {
-    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12,
-    padding: 16, fontFamily: Fonts.body, fontSize: 15, color: Colors.text, minHeight: 110,
+  fieldLabel: {
+    fontFamily: Fonts.bodyMed,
+    fontSize: 11,
+    color: Colors.ink400,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginTop: 28,
+    marginBottom: 8,
   },
-  charCount: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, textAlign: 'right', marginTop: 6 },
+  textarea: {
+    fontFamily: Fonts.body,
+    fontSize: 15,
+    color: Colors.ink900,
+    borderBottomWidth: 1.5,
+    borderBottomColor: Colors.border,
+    paddingVertical: 10,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  charCount: { fontFamily: Fonts.body, fontSize: 11, color: Colors.ink300, textAlign: 'right', marginTop: 6 },
 })
