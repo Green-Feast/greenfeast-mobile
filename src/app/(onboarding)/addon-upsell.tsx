@@ -68,7 +68,7 @@ export default function AddonUpsellScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}>
       <SectionProgress current={3} />
       <Text style={styles.title}>Before you continue</Text>
       <Text style={styles.subtitle}>These add-ons were picked for your goal.</Text>

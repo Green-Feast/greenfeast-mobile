@@ -189,7 +189,7 @@ export default function LoginScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: 48 + insets.bottom }]}
       >
         {/* Headline */}
         <Text style={styles.headline}>Sign in to continue</Text>

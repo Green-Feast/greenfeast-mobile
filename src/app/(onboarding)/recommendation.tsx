@@ -151,7 +151,7 @@ export default function RecommendationScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }} showsVerticalScrollIndicator={false}>
         <View style={styles.padded}>
           <OnboardingProgress steps={4} current={3} />
         </View>

@@ -160,7 +160,7 @@ export default function PlanSettingsScreen() {
   return (
     <View style={s.container}>
       <ScrollView
-        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8 }]}
+        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8, paddingBottom: 40 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
@@ -247,6 +247,7 @@ export default function PlanSettingsScreen() {
 function PauseModal({ visible, subId, onClose, onDone }: {
   visible: boolean; subId: string; onClose: () => void; onDone: () => void
 }) {
+  const insets = useSafeAreaInsets()
   const [step, setStep] = useState<'from' | 'until'>('from')
   const [fromDate, setFromDate] = useState<string | null>(null)
   const [untilDate, setUntilDate] = useState<string | null>(null)
@@ -276,7 +277,7 @@ function PauseModal({ visible, subId, onClose, onDone }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={reset}>
       <View style={m.overlay}>
-        <View style={m.sheet}>
+        <View style={[m.sheet, { paddingBottom: 32 + insets.bottom }]}>
           <View style={m.handle} />
           <SheetHeader title="Pause subscription" onClose={reset} />
 
@@ -337,6 +338,7 @@ function PauseModal({ visible, subId, onClose, onDone }: {
 function SkipModal({ visible, subId, userId, onClose, onDone }: {
   visible: boolean; subId: string; userId: string; onClose: () => void; onDone: () => void
 }) {
+  const insets = useSafeAreaInsets()
   const [orders, setOrders] = useState<UpcomingOrder[]>([])
   const [loadingOrders, setLoadingOrders] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -375,7 +377,7 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={reset}>
       <View style={m.overlay}>
-        <View style={m.sheet}>
+        <View style={[m.sheet, { paddingBottom: 32 + insets.bottom }]}>
           <View style={m.handle} />
           <SheetHeader title="Skip a delivery" onClose={reset} />
           <Text style={m.stepLabel}>Select a day to skip</Text>
@@ -414,6 +416,7 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
 function ChangePlanModal({ visible, subId, currentPlanName, onClose, onDone }: {
   visible: boolean; subId: string; currentPlanName: string; onClose: () => void; onDone: () => void
 }) {
+  const insets = useSafeAreaInsets()
   const { user } = useAuthStore()
   const [plans, setPlans] = useState<Plan[]>([])
   const [loadingPlans, setLoadingPlans] = useState(false)
@@ -586,7 +589,7 @@ function ChangePlanModal({ visible, subId, currentPlanName, onClose, onDone }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={m.overlay}>
-        <View style={[m.sheet, { flex: 1, maxHeight: '92%' }]}>
+        <View style={[m.sheet, { flex: 1, maxHeight: '92%', paddingBottom: 32 + insets.bottom }]}>
           <View style={m.handle} />
           <SheetHeader title="Change plan" onClose={onClose} />
           <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
@@ -747,6 +750,7 @@ function CancelModal({ visible, subId, onClose, onDone }: {
 function DietaryModal({ visible, userId, onClose, onDone }: {
   visible: boolean; userId: string; onClose: () => void; onDone: () => void
 }) {
+  const insets = useSafeAreaInsets()
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -801,7 +805,7 @@ function DietaryModal({ visible, userId, onClose, onDone }: {
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={m.overlay}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <View style={[m.sheet, { maxHeight: '90%', flex: 1 }]}>
+          <View style={[m.sheet, { maxHeight: '90%', flex: 1, paddingBottom: 32 + insets.bottom }]}>
             <View style={m.handle} />
             <SheetHeader title="Dietary preferences" onClose={onClose} />
             {loading ? (

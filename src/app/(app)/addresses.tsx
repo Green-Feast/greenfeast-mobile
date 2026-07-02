@@ -226,7 +226,7 @@ export default function AddressesScreen() {
         <View style={f.overlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setFormOpen(false)} />
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <View style={f.sheet}>
+            <View style={[f.sheet, { paddingBottom: 24 + insets.bottom }]}>
               <View style={f.handle} />
               <View style={f.header}>
                 <Text style={f.title}>{editingId ? 'Edit address' : 'Add address'}</Text>

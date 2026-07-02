@@ -957,7 +957,7 @@ export default function SubscriptionScreen() {
             <ScrollView
               showsVerticalScrollIndicator={false}
               style={{ flex: 1 }}
-              contentContainerStyle={{ paddingBottom: 24 }}
+              contentContainerStyle={{ paddingBottom: 24 + insets.bottom }}
               alwaysBounceVertical
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
@@ -1270,7 +1270,7 @@ export default function SubscriptionScreen() {
                 <X size={20} color={Colors.textMuted} />
               </Pressable>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom }}>
               {transactions.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <Text style={s.dayModalNoOrderText}>No transactions yet</Text>
@@ -1317,7 +1317,7 @@ export default function SubscriptionScreen() {
                 <X size={20} color={Colors.textMuted} />
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 20 + insets.bottom }} showsVerticalScrollIndicator={false}>
               <Text style={s.amountDisplayLabel}>Select amount</Text>
 
               {/* Quick chips */}

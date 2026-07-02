@@ -101,7 +101,7 @@ export default function AddressScreen() {
   return (
     <KeyboardAwareScreen
       style={styles.container}
-      contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}
+      contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}
     >
       <OnboardingProgress steps={4} current={3} />
       <View style={styles.header}>

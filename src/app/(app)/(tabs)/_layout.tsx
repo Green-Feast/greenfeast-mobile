@@ -1,10 +1,12 @@
 import { Tabs } from 'expo-router'
 import { Home, BookOpen, UtensilsCrossed, User, Sparkles } from 'lucide-react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors, Fonts } from '@/constants/colors'
 import { useAuthStore } from '@/store/auth'
 
 export default function TabsLayout() {
   const hasSubscription = useAuthStore((s) => s.hasSubscription)
+  const insets = useSafeAreaInsets()
 
   return (
     <Tabs
@@ -19,9 +21,12 @@ export default function TabsLayout() {
           backgroundColor: Colors.cream50,
           borderTopColor: Colors.border,
           borderTopWidth: 1,
-          height: 64,
+          // Base 64px content height + whatever the system nav bar/home
+          // indicator needs (insets.bottom is ~0 on gesture nav, ~48dp on
+          // 3-button nav) — otherwise the tab bar sits underneath it.
+          height: 64 + insets.bottom,
           paddingTop: 8,
-          paddingBottom: 8,
+          paddingBottom: 8 + insets.bottom,
           elevation: 0,
           shadowColor: 'transparent',
           shadowOpacity: 0,

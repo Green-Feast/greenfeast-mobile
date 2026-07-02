@@ -162,7 +162,7 @@ export default function MenuScreen() {
       {/* Detail modal */}
       <Modal visible={!!selected} transparent animationType="slide" onRequestClose={() => setSelected(null)}>
         <Pressable style={styles.modalOverlay} onPress={() => setSelected(null)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={[styles.modalCard, { paddingBottom: 48 + insets.bottom }]} onPress={(e) => e.stopPropagation()}>
             <Pressable style={styles.modalClose} onPress={() => setSelected(null)} hitSlop={8}>
               <X size={20} color={Colors.textMuted} />
             </Pressable>

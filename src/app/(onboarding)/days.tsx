@@ -40,7 +40,7 @@ export default function DaysScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}>
       <OnboardingProgress steps={4} current={3} />
       <View style={styles.header}>
         <Text style={styles.title}>When do you want your meals?</Text>
