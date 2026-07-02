@@ -52,6 +52,15 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.1.0 — 2026-07-02
+- Build 1, OTA 0.
+- Fixed `eas.json` build profiles missing a `"channel"` key — every build made
+  before this one had no update channel embedded, so no `eas update` could
+  ever reach an installed app. New builds now correctly wire
+  development/preview/production channels.
+- Also carries everything already published to the `preview` OTA branch
+  (Android 3-button nav bar inset fixes, in-app version display).
+
 ### 1.0.1 — 2026-07-02
 - Build 0, OTA 1.
 - Version control implemented.

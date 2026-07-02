@@ -49,6 +49,14 @@ reflect the latest commits, that's expected, not a bug to fix.
 
 # Known gotchas
 
+- **`eas.json` build profiles must each have a `"channel"` key** (`development`/`preview`/
+  `production`, matching the EAS branch names). This is baked into the native binary at build
+  time — a build made without it can **never** receive any `eas update`, no matter how many
+  updates get published, because the installed app has no channel to check. This bit us once:
+  every build made before 2026-07-02 had no channel set, so months of OTA updates silently
+  went nowhere. If an OTA update doesn't seem to be reaching a device, check
+  `eas build:list --json` for a `channel` field on the installed build before assuming
+  anything else — a missing channel means only a fresh build can fix it, not another update.
 - `tsconfig.json`'s `@/assets/*` path alias maps to the **project-root** `assets/` folder,
   not `src/assets/` — the more general `@/*` → `./src/*` alias does NOT cover it. Any asset
   `require()`d via `@/assets/...` must physically live in root `assets/`, or Metro fails to
