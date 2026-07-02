@@ -25,6 +25,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
+import { APP_VERSION_STRING } from '@/constants/version'
 import Skeleton from '@/components/Skeleton'
 
 const FAQS = [
@@ -243,7 +244,7 @@ export default function AccountScreen() {
           )}
         </View>
 
-        <Text style={styles.version}>GreenFeast v1.0</Text>
+        <Text style={styles.version}>GreenFeast v{APP_VERSION_STRING}</Text>
       </ScrollView>
 
       {/* Logout confirm */}

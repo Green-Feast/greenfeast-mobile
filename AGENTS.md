@@ -38,6 +38,15 @@ edge functions). Payments via Razorpay.
   native config like `adaptiveIcon`/`softwareKeyboardLayoutMode`) can't ship via OTA at all
   and require a full rebuild.
 
+# Versioning
+
+The app displays a custom `1.x.y` version on the Account screen (`src/constants/version.ts`),
+independent of `app.json`'s `expo.version`. **`x` bumps only on a new `eas build` (and resets
+`y` to 0); `y` bumps only on a new `eas update`.** Full workflow and changelog: `VERSION.md` at
+the project root. **Never bump the version yourself unless the user explicitly approves a
+release** — a commit landing on `main` is not, by itself, a release. If `VERSION.md` doesn't
+reflect the latest commits, that's expected, not a bug to fix.
+
 # Known gotchas
 
 - `tsconfig.json`'s `@/assets/*` path alias maps to the **project-root** `assets/` folder,
