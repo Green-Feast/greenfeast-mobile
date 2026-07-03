@@ -3,6 +3,7 @@ import { Home, BookOpen, UtensilsCrossed, User, Sparkles } from 'lucide-react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors, Fonts } from '@/constants/colors'
 import { useAuthStore } from '@/store/auth'
+import TabBarButton from '@/components/TabBarButton'
 
 export default function TabsLayout() {
   const hasSubscription = useAuthStore((s) => s.hasSubscription)
@@ -17,6 +18,7 @@ export default function TabsLayout() {
         tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: Colors.green700,
         tabBarInactiveTintColor: Colors.ink400,
+        tabBarButton: TabBarButton,
         tabBarStyle: {
           backgroundColor: Colors.cream50,
           borderTopColor: Colors.border,

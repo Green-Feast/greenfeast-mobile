@@ -52,6 +52,11 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.1.1 — 2026-07-02
+- Build 1, OTA 1.
+- Replaced the default Android ripple on the bottom tab bar with a custom
+  scale/opacity press animation (Reanimated) and a light haptic tick.
+
 ### 1.1.0 — 2026-07-02
 - Build 1, OTA 0.
 - Fixed `eas.json` build profiles missing a `"channel"` key — every build made
