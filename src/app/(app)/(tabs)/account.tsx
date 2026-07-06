@@ -21,6 +21,7 @@ import {
   RefreshCw,
 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
+import { useUpdates } from 'expo-updates'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
@@ -40,6 +41,7 @@ export default function AccountScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
   const { user, signOut } = useAuthStore()
+  const { currentlyRunning } = useUpdates()
 
   async function handleLogout() {
     setLogoutConfirm(false)
@@ -245,6 +247,23 @@ export default function AccountScreen() {
         </View>
 
         <Text style={styles.version}>GreenFeast v{APP_VERSION_STRING}</Text>
+
+        {SHOW_DEV_SKIP && (
+          <View style={styles.diag}>
+            <Text style={styles.diagText}>
+              channel: {currentlyRunning.channel ?? '(none — cannot OTA)'}
+            </Text>
+            <Text style={styles.diagText}>
+              source: {currentlyRunning.isEmbeddedLaunch ? 'embedded build' : 'OTA update'}
+            </Text>
+            <Text style={styles.diagText}>
+              updateId: {currentlyRunning.updateId ?? '(embedded)'}
+            </Text>
+            <Text style={styles.diagText}>
+              runtime: {currentlyRunning.runtimeVersion ?? '—'}
+            </Text>
+          </View>
+        )}
       </ScrollView>
 
       {/* Logout confirm */}
@@ -337,6 +356,8 @@ const styles = StyleSheet.create({
   faqA: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, lineHeight: 18, paddingBottom: 12 },
 
   version: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink400, textAlign: 'center', marginTop: 8 },
+  diag: { marginTop: 12, paddingHorizontal: 16, gap: 2 },
+  diagText: { fontFamily: Fonts.body, fontSize: 11, color: Colors.ink400, textAlign: 'center' },
 
   // Error state
   errorWrap: { justifyContent: 'center', alignItems: 'center', padding: 32 },

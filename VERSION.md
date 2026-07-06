@@ -52,6 +52,17 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.2.0 — 2026-07-06
+- Build 2, OTA 0.
+- New native build. Embeds all fixes from 1.1.0–1.1.2 directly (nav bar
+  insets, version display, tab bar press animation + crash fix) so they land
+  regardless of OTA state.
+- Added a dev-only updates diagnostic on the Account screen (channel / embedded
+  vs OTA / updateId / runtime), gated behind SHOW_DEV_SKIP, to make OTA state
+  visible on-device. Needed because OTA updates were not reaching an older
+  install and the on-device channel/update state couldn't be inspected
+  otherwise.
+
 ### 1.1.2 — 2026-07-02
 - Build 1, OTA 2.
 - Fixed a crash introduced in 1.1.1: expo-router's tab bar invokes
