@@ -52,6 +52,14 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.1.2 — 2026-07-02
+- Build 1, OTA 2.
+- Fixed a crash introduced in 1.1.1: expo-router's tab bar invokes
+  `tabBarButton` as a plain function call rather than via JSX, so a component
+  using Reanimated hooks directly couldn't be passed as that option — its
+  hooks attached to the wrong fiber and crashed on mount. Fixed by wrapping it
+  in JSX (`(props) => <TabBarButton {...props} />`) at the call site instead.
+
 ### 1.1.1 — 2026-07-02
 - Build 1, OTA 1.
 - Replaced the default Android ripple on the bottom tab bar with a custom

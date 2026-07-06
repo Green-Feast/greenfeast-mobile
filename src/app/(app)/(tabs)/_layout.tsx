@@ -18,7 +18,12 @@ export default function TabsLayout() {
         tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: Colors.green700,
         tabBarInactiveTintColor: Colors.ink400,
-        tabBarButton: TabBarButton,
+        // NOTE: expo-router's BottomTabItem invokes this as a plain function
+        // call (`button(props)`), not via JSX — a component using hooks
+        // directly here would attach them to the wrong fiber and crash. The
+        // wrapper below makes React see `<TabBarButton {...props} />` as its
+        // own element, so TabBarButton's hooks get a proper, stable home.
+        tabBarButton: (props) => <TabBarButton {...props} />,
         tabBarStyle: {
           backgroundColor: Colors.cream50,
           borderTopColor: Colors.border,
