@@ -52,6 +52,17 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.2.1 — 2026-07-06
+- Build 2, OTA 1.
+- Implemented the true Guest App states from APP_FLOW.md (G1/G2/G4), which
+  were never built — Home, Subscribe, and Account only ever handled the
+  logged-in-no-subscription case, so an anonymous guest saw a broken blank
+  profile instead of a Login/Sign Up prompt, and "Build your plan" pushed
+  guests straight into the health wizard with no session.
+- Home/Subscribe/Account now all wait for the auth store to finish resolving
+  before deciding what to render, fixing a startup race that could briefly
+  misrender the wrong state on cold launch.
+
 ### 1.2.0 — 2026-07-06
 - Build 2, OTA 0.
 - New native build. Embeds all fixes from 1.1.0–1.1.2 directly (nav bar

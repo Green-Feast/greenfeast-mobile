@@ -72,7 +72,7 @@ function getGreeting(name: string) {
 export default function Home() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { user } = useAuthStore()
+  const { user, loading: authLoading } = useAuthStore()
   const [userName, setUserName] = useState('')
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [todayOrder, setTodayOrder] = useState<Order | null>(null)
@@ -114,9 +114,10 @@ export default function Home() {
   }
 
   useEffect(() => {
+    if (authLoading) return
     setLoading(true)
     fetchData().finally(() => setLoading(false))
-  }, [user])
+  }, [user, authLoading])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -188,7 +189,11 @@ export default function Home() {
 
           <Pressable
             style={({ pressed }) => [styles.heroCta, pressed && { opacity: 0.85 }]}
-            onPress={() => router.push(hasSubscription ? '/(app)/(tabs)/subscription' : '/(onboarding)/health')}
+            onPress={() => router.push(
+              !user ? '/(auth)/login' as any
+                : hasSubscription ? '/(app)/(tabs)/subscription'
+                : '/(onboarding)/health'
+            )}
           >
             <Text style={styles.heroCtaText}>{hasSubscription ? 'My plan →' : 'Build your plan →'}</Text>
           </Pressable>

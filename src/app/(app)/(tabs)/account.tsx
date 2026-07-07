@@ -16,6 +16,7 @@ import {
   MessageCircle,
   HelpCircle,
   LogOut,
+  LogIn,
   ChevronDown,
   ChevronUp,
   RefreshCw,
@@ -40,7 +41,7 @@ const FAQS = [
 export default function AccountScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
-  const { user, signOut } = useAuthStore()
+  const { user, signOut, loading: authLoading } = useAuthStore()
   const { currentlyRunning } = useUpdates()
 
   async function handleLogout() {
@@ -100,10 +101,11 @@ export default function AccountScreen() {
   }
 
   useEffect(() => {
+    if (authLoading) return
     if (!user) { setLoading(false); return }
     setLoading(true)
     fetchData().finally(() => setLoading(false))
-  }, [user])
+  }, [user, authLoading])
 
   const initial = (name || 'G').charAt(0).toUpperCase()
 
@@ -181,18 +183,32 @@ export default function AccountScreen() {
       >
         <Text style={styles.eyebrow}>ACCOUNT</Text>
 
-        {/* Profile card */}
-        <View style={styles.card}>
-          <View style={styles.profileRow}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initial}</Text>
-            </View>
-            <View>
-              <Text style={styles.profileName}>{name || '—'}</Text>
-              <Text style={styles.profilePhone}>{phone || '—'}</Text>
+        {/* Profile card — G4 (guest) vs LG4/S4 (signed in) */}
+        {user ? (
+          <View style={styles.card}>
+            <View style={styles.profileRow}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{initial}</Text>
+              </View>
+              <View>
+                <Text style={styles.profileName}>{name || '—'}</Text>
+                <Text style={styles.profilePhone}>{phone || '—'}</Text>
+              </View>
             </View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.guestTitle}>You're browsing as a guest</Text>
+            <Text style={styles.guestDesc}>Sign in to build a plan, track orders, and save your details.</Text>
+            <Pressable
+              style={({ pressed }) => [styles.guestCta, pressed && { opacity: 0.85 }]}
+              onPress={() => router.push('/(auth)/login' as any)}
+            >
+              <LogIn size={16} color="#fff" />
+              <Text style={styles.guestCtaText}>Login / Sign up</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Support + FAQ */}
         <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
@@ -227,15 +243,17 @@ export default function AccountScreen() {
             </View>
           )}
 
-          <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            onPress={() => setLogoutConfirm(true)}
-          >
-            <LogOut size={18} color={Colors.danger} />
-            <Text style={[styles.rowLabel, { color: Colors.danger }]}>Logout</Text>
-          </Pressable>
+          {user && (
+            <Pressable
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              onPress={() => setLogoutConfirm(true)}
+            >
+              <LogOut size={18} color={Colors.danger} />
+              <Text style={[styles.rowLabel, { color: Colors.danger }]}>Logout</Text>
+            </Pressable>
+          )}
 
-          {SHOW_DEV_SKIP && (
+          {user && SHOW_DEV_SKIP && (
             <Pressable
               style={({ pressed }) => [styles.row, styles.rowDanger, pressed && styles.rowPressed]}
               onPress={() => setResetConfirm(true)}
@@ -342,6 +360,14 @@ const styles = StyleSheet.create({
   avatarText: { fontFamily: Fonts.bodyBold, fontSize: 18, color: '#fff' },
   profileName: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.ink900 },
   profilePhone: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, marginTop: 2 },
+
+  guestTitle: { fontFamily: Fonts.headingSemi, fontSize: 16, color: Colors.ink900, marginBottom: 4 },
+  guestDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, lineHeight: 18, marginBottom: 16 },
+  guestCta: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: Colors.green700, borderRadius: 999, paddingVertical: 13, minHeight: 48,
+  },
+  guestCtaText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
 
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 16, minHeight: 56 },
   rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.ink100 },

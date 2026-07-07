@@ -133,7 +133,7 @@ function isLocked(dateStr: string): boolean {
 export default function SubscriptionScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
-  const { user, hasSubscription } = useAuthStore()
+  const { user, hasSubscription, loading: authLoading } = useAuthStore()
   const [sub, setSub] = useState<SubData | null>(null)
   const [firstMeal, setFirstMeal] = useState<FirstMeal | null>(null)
   const [weekOrders, setWeekOrders] = useState<OrderItem[]>([])
@@ -253,9 +253,10 @@ export default function SubscriptionScreen() {
   }, [])
 
   useEffect(() => {
+    if (authLoading) return
     setLoading(true)
     fetchAll().finally(() => setLoading(false))
-  }, [fetchAll])
+  }, [fetchAll, authLoading])
 
   // Auto-sync: if the sub is active but no orders exist (e.g. instantiate-orders
   // failed silently during payment), retry it once so the week strip isn't empty.
@@ -467,10 +468,10 @@ export default function SubscriptionScreen() {
     return (
       <View style={s.container}>
         <View style={[s.titleWrap, { paddingTop: insets.top + 16 }]}>
-          <Text style={s.title}>My Plan</Text>
+          <Text style={s.title}>{hasSubscription ? 'My Plan' : 'Subscribe'}</Text>
         </View>
         <SubscribeGate
-          onSubscribe={() => router.push('/(onboarding)/health')}
+          onSubscribe={() => router.push(user ? '/(onboarding)/health' : '/(auth)/login' as any)}
           onExplore={() => router.push('/(app)/(tabs)/menu')}
         />
       </View>
