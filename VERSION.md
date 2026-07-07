@@ -52,6 +52,19 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.2.2 — 2026-07-06
+- Build 2, OTA 2.
+- Added a bell icon on Home with a local notification history (AsyncStorage),
+  fed by real expo-updates lifecycle events: "Update downloaded — reopen to
+  install" and "Update installed" (both OTA and native builds).
+- Added placeholder Terms & Conditions / Privacy Policy documents, reachable
+  from anywhere (required an AuthGate exemption for the new `legal` route
+  group). Required consent checkbox added to the universal new-account gate
+  (name.tsx); permanent view-only links added to the Account page.
+- **Requires migration 026_terms_consent.sql to be run before this ships** —
+  it adds `users.terms_accepted_at` / `users.terms_version`, which the
+  signup flow now writes to.
+
 ### 1.2.1 — 2026-07-06
 - Build 2, OTA 1.
 - Implemented the true Guest App states from APP_FLOW.md (G1/G2/G4), which

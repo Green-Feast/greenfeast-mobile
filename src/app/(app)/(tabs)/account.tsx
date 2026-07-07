@@ -17,8 +17,11 @@ import {
   HelpCircle,
   LogOut,
   LogIn,
+  FileText,
+  Shield,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   RefreshCw,
 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
@@ -242,6 +245,24 @@ export default function AccountScreen() {
               ))}
             </View>
           )}
+
+          <Pressable
+            style={({ pressed }) => [styles.row, styles.rowBorder, pressed && styles.rowPressed]}
+            onPress={() => router.push('/legal/terms' as any)}
+          >
+            <FileText size={18} color={Colors.ink500} />
+            <Text style={[styles.rowLabel, { flex: 1 }]}>Terms & Conditions</Text>
+            <ChevronRight size={16} color={Colors.ink400} />
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.row, user && styles.rowBorder, pressed && styles.rowPressed]}
+            onPress={() => router.push('/legal/privacy' as any)}
+          >
+            <Shield size={18} color={Colors.ink500} />
+            <Text style={[styles.rowLabel, { flex: 1 }]}>Privacy Policy</Text>
+            <ChevronRight size={16} color={Colors.ink400} />
+          </Pressable>
 
           {user && (
             <Pressable

@@ -23,6 +23,7 @@ import {
 } from '@expo-google-fonts/inter'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import { useOtaNotifications } from '@/hooks/useOtaNotifications'
 import { Colors } from '@/constants/colors'
 
 SplashScreen.preventAutoHideAsync()
@@ -65,6 +66,10 @@ function AuthGate() {
     const inAuthGroup = segments[0] === '(auth)'
     const inOnboardingGroup = segments[0] === '(onboarding)'
     const inAppGroup = segments[0] === '(app)'
+    // Terms/Privacy must be reachable from any auth state (guest, mid-signup,
+    // mid-onboarding) — exempt it from every redirect below.
+    const inLegalGroup = (segments[0] as string) === 'legal'
+    if (inLegalGroup) return
 
     if (!session) {
       // Guests can browse /(app)/ and authenticate via /(auth)/.
@@ -99,6 +104,8 @@ function AuthGate() {
 }
 
 export default function RootLayout() {
+  useOtaNotifications()
+
   // Handle OAuth redirect at root level so it survives Expo Router navigation.
   // greenfeast:///?code=... triggers Expo Router to navigate to "/" which
   // unmounts the login screen — this listener is always alive.

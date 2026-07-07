@@ -7,13 +7,15 @@ import {
   StyleSheet,
   TouchableOpacity,
   RefreshControl,
+  Modal,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ArrowRight, Leaf, RefreshCw } from 'lucide-react-native'
+import { ArrowRight, Leaf, RefreshCw, Bell, X } from 'lucide-react-native'
 import MacroRow from '@/components/MacroRow'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import { useNotificationStore } from '@/store/notifications'
 import { Colors, Fonts } from '@/constants/colors'
 import Logo from '@/components/Logo'
 import Skeleton from '@/components/Skeleton'
@@ -69,6 +71,17 @@ function getGreeting(name: string) {
   return `Good evening, ${first}.`
 }
 
+function formatRelativeTime(iso: string) {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
 export default function Home() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
@@ -79,6 +92,10 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [fetchError, setFetchError] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const notifications = useNotificationStore((s) => s.notifications)
+  const markAllRead = useNotificationStore((s) => s.markAllRead)
+  const unreadCount = notifications.filter((n) => !n.read).length
 
   async function fetchData() {
     if (!user) return
@@ -174,8 +191,18 @@ export default function Home() {
         {/* Editorial header (cream canvas) */}
         <View style={[styles.hero, { paddingTop: insets.top + 20 }]}>
           <View style={styles.logoRow}>
-            <Logo size={28} />
-            <Text style={styles.wordmark}>greenfeast</Text>
+            <View style={styles.logoRowLeft}>
+              <Logo size={28} />
+              <Text style={styles.wordmark}>greenfeast</Text>
+            </View>
+            <Pressable
+              style={({ pressed }) => [styles.bellBtn, pressed && { opacity: 0.7 }]}
+              onPress={() => { setShowNotifications(true); markAllRead() }}
+              hitSlop={8}
+            >
+              <Bell size={20} color={Colors.text} strokeWidth={1.8} />
+              {unreadCount > 0 && <View style={styles.bellBadge} />}
+            </Pressable>
           </View>
 
           {userName ? (
@@ -269,6 +296,40 @@ export default function Home() {
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* Notification history */}
+      <Modal visible={showNotifications} transparent animationType="slide" onRequestClose={() => setShowNotifications(false)}>
+        <Pressable style={styles.notifOverlay} onPress={() => setShowNotifications(false)}>
+          <Pressable style={styles.notifSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.notifHandle} />
+            <View style={styles.notifHeader}>
+              <Text style={styles.notifTitle}>Notifications</Text>
+              <Pressable onPress={() => setShowNotifications(false)} hitSlop={10}>
+                <X size={20} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+              {notifications.length === 0 ? (
+                <View style={styles.notifEmpty}>
+                  <Bell size={28} color={Colors.textLight} strokeWidth={1.5} />
+                  <Text style={styles.notifEmptyText}>No notifications yet</Text>
+                </View>
+              ) : (
+                notifications.map((n) => (
+                  <View key={n.id} style={styles.notifRow}>
+                    <View style={[styles.notifDot, n.read && { opacity: 0 }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.notifRowTitle}>{n.title}</Text>
+                      <Text style={styles.notifRowBody}>{n.body}</Text>
+                      <Text style={styles.notifRowTime}>{formatRelativeTime(n.createdAt)}</Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   )
 }
@@ -317,14 +378,25 @@ const styles = StyleSheet.create({
   logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     marginBottom: 24,
+  },
+  logoRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   wordmark: {
     fontFamily: Fonts.headingSemi,
     fontSize: 17,
     color: Colors.green700,
     letterSpacing: -0.3,
+  },
+  bellBtn: { padding: 4 },
+  bellBadge: {
+    position: 'absolute', top: 2, right: 2,
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: Colors.danger, borderWidth: 1.5, borderColor: Colors.background,
   },
   greeting: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.ink400, marginBottom: 6 },
   heroTitle: { fontFamily: Fonts.heading, fontSize: 40, color: Colors.ink900, lineHeight: 46, marginBottom: 12 },
@@ -390,4 +462,21 @@ const styles = StyleSheet.create({
   },
   menuNudgeTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: '#fff' },
   menuNudgeSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.green200, marginTop: 2 },
+
+  // Notification history
+  notifOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  notifSheet: {
+    backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    maxHeight: '75%', paddingHorizontal: 20, paddingTop: 12, flex: 1,
+  },
+  notifHandle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 12 },
+  notifHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  notifTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
+  notifEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48, gap: 10 },
+  notifEmptyText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textLight },
+  notifRow: { flexDirection: 'row', gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
+  notifDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.primary, marginTop: 6 },
+  notifRowTitle: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+  notifRowBody: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginTop: 2, lineHeight: 18 },
+  notifRowTime: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, marginTop: 4 },
 })
