@@ -52,6 +52,21 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.0 — 2026-07-07
+- Build 3, OTA 0.
+- "Update downloaded" notification is now actionable: tapping it calls
+  `Updates.reloadAsync()` to apply the pending update immediately instead of
+  waiting for a cold-start relaunch.
+- Added before/after `console.log` around every reload (updateId/channel/
+  runtimeVersion/isEmbeddedLaunch) so `adb logcat` shows definitively whether
+  a reload actually switched updates.
+- Added a "Check update logs" diagnostic (dev-only) that calls
+  `Updates.readLogEntriesAsync()` and displays expo-updates' own internal
+  log entries (including error codes like `UpdateFailedToLoad`,
+  `AssetsFailedToLoad`) directly in the Account screen.
+- New build (not just OTA) so this ships regardless of the still-open OTA
+  delivery investigation — see AGENTS.md known gotchas once resolved.
+
 ### 1.2.2 — 2026-07-06
 - Build 2, OTA 2.
 - Added a bell icon on Home with a local notification history (AsyncStorage),

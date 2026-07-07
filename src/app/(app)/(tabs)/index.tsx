@@ -8,10 +8,12 @@ import {
   TouchableOpacity,
   RefreshControl,
   Modal,
+  ActivityIndicator,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ArrowRight, Leaf, RefreshCw, Bell, X } from 'lucide-react-native'
+import * as Updates from 'expo-updates'
+import { ArrowRight, Leaf, RefreshCw, Bell, X, ChevronRight } from 'lucide-react-native'
 import MacroRow from '@/components/MacroRow'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
@@ -93,9 +95,34 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false)
   const [fetchError, setFetchError] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [reloading, setReloading] = useState(false)
   const notifications = useNotificationStore((s) => s.notifications)
   const markAllRead = useNotificationStore((s) => s.markAllRead)
   const unreadCount = notifications.filter((n) => !n.read).length
+
+  async function handleReloadNow() {
+    if (reloading) return
+    setReloading(true)
+    // Logged right before the reload tears down this JS context. The
+    // corresponding "after" state is logged by useOtaNotifications on the
+    // next app start (see src/hooks/useOtaNotifications.ts) — diff the two
+    // in logcat to see definitively whether the reload actually switched
+    // updateId, or silently stayed on the same (likely embedded) one.
+    console.log('[OTA] Before reloadAsync():', {
+      updateId: Updates.updateId,
+      channel: Updates.channel,
+      runtimeVersion: Updates.runtimeVersion,
+      isEmbeddedLaunch: Updates.isEmbeddedLaunch,
+    })
+    try {
+      await Updates.reloadAsync()
+    } catch (e) {
+      console.error('[OTA] reloadAsync() failed:', e)
+      // If this fails (e.g. no pending update after all), just stop the
+      // spinner — nothing else to recover, the user can try again later.
+      setReloading(false)
+    }
+  }
 
   async function fetchData() {
     if (!user) return
@@ -315,16 +342,37 @@ export default function Home() {
                   <Text style={styles.notifEmptyText}>No notifications yet</Text>
                 </View>
               ) : (
-                notifications.map((n) => (
-                  <View key={n.id} style={styles.notifRow}>
-                    <View style={[styles.notifDot, n.read && { opacity: 0 }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.notifRowTitle}>{n.title}</Text>
-                      <Text style={styles.notifRowBody}>{n.body}</Text>
-                      <Text style={styles.notifRowTime}>{formatRelativeTime(n.createdAt)}</Text>
+                notifications.map((n) => {
+                  const row = (
+                    <View style={styles.notifRow}>
+                      <View style={[styles.notifDot, n.read && { opacity: 0 }]} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.notifRowTitle}>{n.title}</Text>
+                        <Text style={styles.notifRowBody}>{n.body}</Text>
+                        <Text style={styles.notifRowTime}>{formatRelativeTime(n.createdAt)}</Text>
+                      </View>
+                      {n.action === 'reload' && (
+                        reloading ? (
+                          <ActivityIndicator size="small" color={Colors.primary} />
+                        ) : (
+                          <ChevronRight size={18} color={Colors.primary} />
+                        )
+                      )}
                     </View>
-                  </View>
-                ))
+                  )
+                  return n.action === 'reload' ? (
+                    <Pressable
+                      key={n.id}
+                      onPress={handleReloadNow}
+                      disabled={reloading}
+                      style={({ pressed }) => pressed && { opacity: 0.7 }}
+                    >
+                      {row}
+                    </Pressable>
+                  ) : (
+                    <View key={n.id}>{row}</View>
+                  )
+                })
               )}
             </ScrollView>
           </Pressable>
