@@ -52,6 +52,21 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.1 — 2026-07-08
+- Build 3, OTA 1.
+- Home: fixed "No delivery today" showing incorrectly on days with both a
+  lunch and dinner order; fixed hero-to-section spacing.
+- My Plan: fixed "View details" button text overflow; removed duplicate
+  Skip/Pause tiles and Wallet/Address/Settings cards (consolidated into the
+  hero card, Add Money modal, and Plan Settings); extra dishes are now
+  removable before the cutoff; hero Skip button now skips only the viewed
+  slot (lunch or dinner) instead of the whole day; week strip now
+  auto-scrolls to today; fixed date-strip-to-hero-card spacing; fixed a
+  dashed-border-sticking bug when switching between empty and populated days.
+- Backend: new `remove-dish` edge function; `manage-subscription`'s skip
+  handler now accepts an optional `meal_slot` (backward-compatible — Plan
+  Settings' whole-day skip flow is unaffected).
+
 ### 1.3.0 — 2026-07-07
 - Build 3, OTA 0.
 - "Update downloaded" notification is now actionable: tapping it calls

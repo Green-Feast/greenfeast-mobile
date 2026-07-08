@@ -21,7 +21,7 @@ Deno.serve(async (req) => {
     })
 
   try {
-    const { action, subscription_id, pause_from, pause_until, delivery_date } = await req.json()
+    const { action, subscription_id, pause_from, pause_until, delivery_date, meal_slot } = await req.json()
 
     if (!action || !subscription_id) {
       return json({ error: 'action and subscription_id are required' }, 400)
@@ -114,16 +114,20 @@ Deno.serve(async (req) => {
       if (delivery_date < today()) return json({ error: 'Cannot skip a past delivery' }, 400)
       if (sub.status === 'cancelled') return json({ error: 'Subscription is cancelled' }, 400)
 
-      const { error: skipErr } = await supabase
+      // meal_slot is optional: omitted = whole-day skip (Plan Settings' "Skip a
+      // specific day" flow), present = skip just that slot (My Plan hero card).
+      let skipQuery = supabase
         .from('orders')
         .update({ status: 'skipped' })
         .eq('subscription_id', subscription_id)
         .eq('delivery_date', delivery_date)
         .in('status', ['scheduled', 'confirmed'])
+      if (meal_slot) skipQuery = skipQuery.eq('meal_slot', meal_slot)
+      const { error: skipErr } = await skipQuery
 
       if (skipErr) throw skipErr
 
-      return json({ ok: true, action: 'skipped', delivery_date })
+      return json({ ok: true, action: 'skipped', delivery_date, meal_slot: meal_slot ?? null })
     }
 
     // ── cancel ───────────────────────────────────────────────────────────────

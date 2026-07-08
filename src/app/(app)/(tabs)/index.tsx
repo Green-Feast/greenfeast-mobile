@@ -16,6 +16,7 @@ import * as Updates from 'expo-updates'
 import { ArrowRight, Leaf, RefreshCw, Bell, X, ChevronRight } from 'lucide-react-native'
 import MacroRow from '@/components/MacroRow'
 import { supabase } from '@/lib/supabase'
+import { istToday, istHour } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import { Colors, Fonts } from '@/constants/colors'
@@ -127,7 +128,7 @@ export default function Home() {
   async function fetchData() {
     if (!user) return
     setFetchError(false)
-    const today = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const today = istToday()
 
     try {
       const [userRes, subRes, orderRes] = await Promise.all([
@@ -145,13 +146,20 @@ export default function Home() {
           .select('id, delivery_date, status, meal_slot, meal_template_id, meal_templates ( name, category, kcal, protein )')
           .eq('user_id', user.id)
           .eq('delivery_date', today)
-          .not('status', 'in', '(cancelled,skipped)')
-          .maybeSingle(),
+          .not('status', 'in', '(cancelled,skipped)'),
       ])
 
       if (userRes.data?.name) setUserName(userRes.data.name)
       setSubscription((subRes.data as Subscription) ?? null)
-      setTodayOrder((orderRes.data as unknown as Order) ?? null)
+
+      // A day can have both a lunch and a dinner order — pick whichever slot
+      // is "current" right now (matches the same lunch-before-2pm-IST
+      // convention subscription.tsx uses for its slot toggle), falling back
+      // to whatever exists so the card never blanks out unnecessarily.
+      if (orderRes.error) console.warn('[Home] today order fetch error:', orderRes.error.message)
+      const rows = (orderRes.data as unknown as Order[]) ?? []
+      const preferredSlot = istHour() < 14 ? 'lunch' : 'dinner'
+      setTodayOrder(rows.find((r) => r.meal_slot === preferredSlot) ?? rows[0] ?? null)
     } catch {
       setFetchError(true)
     }
@@ -421,7 +429,7 @@ const styles = StyleSheet.create({
 
   hero: {
     paddingHorizontal: 20,
-    paddingBottom: 28,
+    paddingBottom: 0,
   },
   logoRow: {
     flexDirection: 'row',

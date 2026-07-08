@@ -13,11 +13,12 @@ import {
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Pause, Play, SkipForward, ArrowRight, Wallet, MapPin, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight } from 'lucide-react-native'
+import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
+import { istToday, istHour, addDaysISO, dowMon0 } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
 import RazorpayWebView from '@/components/RazorpayWebView'
 import MacroRow from '@/components/MacroRow'
@@ -89,6 +90,12 @@ type WalletTransaction = {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// Single source of truth for the date-strip cell sizing, referenced by both
+// the styles below and the scroll-to-today offset math.
+const DAY_CELL_WIDTH = 56
+const DAY_CELL_GAP = 8
+const DAY_CELL_PITCH = DAY_CELL_WIDTH + DAY_CELL_GAP
+
 function fmt(paise: number) { return (paise / 100).toLocaleString('en-IN') }
 function fmtDate(dateStr: string | null) {
   if (!dateStr) return '—'
@@ -99,16 +106,6 @@ function fmtDateLong(dateStr: string) {
 }
 function toISO(d: Date) { return d.toISOString().split('T')[0] }
 
-// All calendar math is done in IST (UTC+5:30) so the week strip and the day a
-// tap opens never disagree around midnight, regardless of the device timezone.
-const IST_MS = 5.5 * 60 * 60 * 1000
-function istToday(): string { return new Date(Date.now() + IST_MS).toISOString().split('T')[0] }
-function istHour(): number { return new Date(Date.now() + IST_MS).getUTCHours() }
-function addDaysISO(iso: string, n: number): string {
-  const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().split('T')[0]
-}
-// Mon=0 … Sun=6
-function dowMon0(iso: string): number { return (new Date(iso + 'T00:00:00Z').getUTCDay() + 6) % 7 }
 function dowShort(iso: string): string {
   return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'UTC' })
 }
@@ -147,7 +144,7 @@ export default function SubscriptionScreen() {
   const [cartBusy, setCartBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [skipConfirm, setSkipConfirm] = useState<string | null>(null)
+  const [skipConfirm, setSkipConfirm] = useState<{ date: string; slot: 'lunch' | 'dinner' } | null>(null)
   const [skipping, setSkipping] = useState(false)
   const [selectedDay, setSelectedDay] = useState<string>(istToday())
   const [selectedSlot, setSelectedSlot] = useState<'lunch' | 'dinner'>(istHour() < 14 ? 'lunch' : 'dinner')
@@ -309,7 +306,7 @@ export default function SubscriptionScreen() {
     setSkipping(true)
     try {
       await supabase.functions.invoke('manage-subscription', {
-        body: { action: 'skip', subscription_id: sub.id, delivery_date: skipConfirm },
+        body: { action: 'skip', subscription_id: sub.id, delivery_date: skipConfirm.date, meal_slot: skipConfirm.slot },
       })
       setSkipConfirm(null)
       await fetchAll()
@@ -365,6 +362,27 @@ export default function SubscriptionScreen() {
       setSwapError(e?.message ?? 'Could not add dish. Try again.')
     } finally {
       setSwapping(false)
+    }
+  }
+
+  async function handleRemoveDish(orderId: string) {
+    if (cartBusy) return
+    setCartBusy(true)
+    setSwapError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+      const { data, error } = await supabase.functions.invoke('remove-dish', {
+        body: { order_id: orderId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      await fetchAll()
+    } catch (e: any) {
+      setSwapError(e?.message ?? 'Could not remove this dish. Try again.')
+    } finally {
+      setCartBusy(false)
     }
   }
 
@@ -541,7 +559,6 @@ export default function SubscriptionScreen() {
     arr.push(o)
     orderMap.set(o.delivery_date, arr)
   }
-  const nextOrder = weekOrders.find(o => o.delivery_date >= todayStr) ?? null
 
   // Week-strip timeline: from subscription start through end of this week.
   const startStr = sub.start_date && sub.start_date < todayStr ? sub.start_date : todayStr
@@ -605,7 +622,10 @@ export default function SubscriptionScreen() {
           contentContainerStyle={s.weekStripContent}
           style={s.weekStrip}
           ref={(r) => { stripRef.current = r }}
-          onContentSizeChange={() => stripRef.current?.scrollToEnd({ animated: false })}
+          onContentSizeChange={() => {
+            const idx = stripDates.indexOf(todayStr)
+            if (idx >= 0) stripRef.current?.scrollTo({ x: idx * DAY_CELL_PITCH, animated: false })
+          }}
         >
           {stripDates.map((d) => {
             const isToday = d === todayStr
@@ -637,7 +657,7 @@ export default function SubscriptionScreen() {
 
         {/* HERO DAY CARD */}
         {heroBase ? (
-          <View style={s.heroCard}>
+          <View key="hero-card" style={s.heroCard}>
             <View style={s.heroHeader}>
               <View style={s.heroTopRow}>
                 <View>
@@ -688,6 +708,15 @@ export default function SubscriptionScreen() {
                   <MacroRow protein={heroProtein} carbs={heroCarbs} fat={heroFat} size="md" />
                 </View>
               )}
+
+              {/* Add-ons — subscription-level, applies to every meal */}
+              {subAddons.length > 0 && (
+                <View style={s.heroAddonsRow}>
+                  <Text style={s.heroAddonsText}>
+                    + {subAddons.map((a) => a.addons?.name ?? a.addon_id).join(', ')}
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* Action buttons */}
@@ -695,14 +724,14 @@ export default function SubscriptionScreen() {
               {!heroLocked && (
                 <Pressable
                   style={({ pressed }) => [s.heroSkipBtn, pressed && { opacity: 0.7 }]}
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSkipConfirm(selectedDay) }}
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSkipConfirm({ date: selectedDay, slot: selectedSlot }) }}
                 >
                   <SkipForward size={15} color={Colors.text} strokeWidth={2} />
                   <Text style={s.heroSkipText}>Skip</Text>
                 </Pressable>
               )}
               <Pressable
-                style={({ pressed }) => [s.heroCustomizeBtn, !heroLocked && { flex: 1.4 }, pressed && { opacity: 0.85 }]}
+                style={({ pressed }) => [s.heroCustomizeBtn, { flex: heroLocked ? 1 : 1.4 }, pressed && { opacity: 0.85 }]}
                 onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setAddMode(false); setShowDayModal(true) }}
               >
                 <SlidersHorizontal size={15} color="#fff" strokeWidth={2} />
@@ -711,7 +740,7 @@ export default function SubscriptionScreen() {
             </View>
           </View>
         ) : (
-          <View style={s.heroEmpty}>
+          <View key="hero-empty" style={s.heroEmpty}>
             <Text style={s.heroEmptyText}>No {selectedSlot} on {dowShort(selectedDay)} {dayNum(selectedDay)}</Text>
             {!heroLocked && (
               <Pressable
@@ -771,39 +800,6 @@ export default function SubscriptionScreen() {
           </Pressable>
         </View>
 
-        {/* PAUSE / RESUME ACTION */}
-        <View style={s.quickActions}>
-          <Pressable
-            style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
-            onPress={() => { if (nextOrder) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSkipConfirm(nextOrder.delivery_date) } }}
-          >
-            <SkipForward size={22} color={nextOrder ? Colors.primary : Colors.textLight} />
-            <Text style={[s.actionBoxLabel, !nextOrder && { color: Colors.textLight }]}>Skip next</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [s.actionBox, pressed && { opacity: 0.75 }]}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); router.push('/(app)/plan-settings') }}
-          >
-            {sub.status === 'paused'
-              ? <Play size={22} color={Colors.primary} />
-              : <Pause size={22} color={Colors.primary} />}
-            <Text style={s.actionBoxLabel}>{sub.status === 'paused' ? 'Resume' : 'Pause'}</Text>
-          </Pressable>
-        </View>
-
-        {/* ADD-ONS */}
-        {subAddons.length > 0 && (
-          <View style={s.addonsCard}>
-            <Text style={s.addonsTitle}>Your add-ons</Text>
-            {subAddons.map((a) => (
-              <View key={a.addon_id} style={s.addonsRow}>
-                <Text style={s.addonsName}>{a.addons?.name ?? a.addon_id}</Text>
-                <Text style={s.addonsPrice}>₹{fmt(a.addons?.price_per_meal ?? 0)}/meal</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
         {/* DELIVERIES REMAINING */}
         <View style={s.progressCard}>
           <View style={s.progressRow}>
@@ -845,59 +841,6 @@ export default function SubscriptionScreen() {
           </View>
         )}
 
-        {/* WALLET */}
-        {walletBalance !== null && (
-          <View style={s.walletCard}>
-            <View style={s.walletRow}>
-              <Wallet size={16} color={Colors.accent} />
-              <Text style={s.walletTitle}>Wallet</Text>
-            </View>
-            <View style={s.walletBody}>
-              <View>
-                <Text style={s.walletBalance}>₹{(walletBalance / 100).toLocaleString('en-IN')}</Text>
-                <Text style={s.walletSub}>Available balance</Text>
-              </View>
-              <Pressable
-                style={({ pressed }) => [s.walletBtn, pressed && { opacity: 0.85 }]}
-                onPress={() => setShowAddMoney(true)}
-              >
-                <Text style={s.walletBtnText}>Add money</Text>
-              </Pressable>
-            </View>
-            <Pressable onPress={() => { fetchTransactions(); setShowTransactions(true) }}>
-              <Text style={s.walletLink}>View transactions</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* DELIVERY ADDRESS */}
-        {addresses.length > 0 && (() => {
-          const defaultAddr = addresses.find(a => a.is_default) ?? addresses[0]
-          return (
-            <View style={s.addressCard}>
-              <View style={s.addressHeader}>
-                <MapPin size={14} color={Colors.primary} />
-                <Text style={s.addressLabel}>{defaultAddr.label || 'Delivery address'}</Text>
-                {addresses.length > 1 && (
-                  <Text style={s.addressCountBadge}>{addresses.length} addresses</Text>
-                )}
-              </View>
-              <Text style={s.addressLine} numberOfLines={2}>{defaultAddr.line1}</Text>
-              <Pressable onPress={() => router.push('/(app)/addresses')}>
-                <Text style={s.addressEdit}>Manage addresses →</Text>
-              </Pressable>
-            </View>
-          )
-        })()}
-
-        {/* VIEW PLAN & SETTINGS */}
-        <Pressable
-          style={({ pressed }) => [s.settingsRow, pressed && { opacity: 0.8 }]}
-          onPress={() => router.push('/(app)/plan-settings')}
-        >
-          <Text style={s.settingsRowText}>View plan & settings</Text>
-          <ArrowRight size={16} color={Colors.primary} />
-        </Pressable>
       </ScrollView>
 
       {/* Skip confirm dialog */}
@@ -909,9 +852,9 @@ export default function SubscriptionScreen() {
       >
         <View style={s.confirmOverlay}>
           <View style={s.confirmCard}>
-            <Text style={s.confirmTitle}>Skip this delivery?</Text>
+            <Text style={s.confirmTitle}>Skip {skipConfirm?.slot ?? 'this'}?</Text>
             <Text style={s.confirmBody}>
-              Delivery on {fmtDate(skipConfirm)}.{'\n'}This meal will be removed from your week.
+              {skipConfirm?.slot === 'lunch' ? 'Lunch' : 'Dinner'} on {fmtDate(skipConfirm?.date ?? null)}.{'\n'}This meal will be removed from your week.
             </Text>
             <View style={s.confirmBtns}>
               <Pressable
@@ -1027,6 +970,15 @@ export default function SubscriptionScreen() {
                       <Plus size={14} color={Colors.primary} />
                       <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
                       <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
+                      {!dayLocked && (
+                        <Pressable
+                          style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
+                          onPress={() => handleRemoveDish(ex.id)}
+                          disabled={cartBusy}
+                        >
+                          <Text style={s.addonRemoveText}>Remove</Text>
+                        </Pressable>
+                      )}
                     </View>
                   ))}
 
@@ -1376,6 +1328,13 @@ export default function SubscriptionScreen() {
                 </Pressable>
               )}
 
+              <Pressable
+                onPress={() => { setShowAddMoney(false); fetchTransactions(); setShowTransactions(true) }}
+                style={{ alignSelf: 'center', marginTop: 4 }}
+              >
+                <Text style={s.walletLink}>View transactions →</Text>
+              </Pressable>
+
               <View style={{ height: 20 }} />
             </ScrollView>
           </Pressable>
@@ -1439,11 +1398,11 @@ const s = StyleSheet.create({
   codPayDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19 },
 
   // Timeline strip — day + date
-  weekStrip: { marginBottom: 0 },
-  weekStripContent: { gap: 8, paddingBottom: 4, paddingTop: 2 },
+  weekStrip: { marginBottom: 16 },
+  weekStripContent: { gap: DAY_CELL_GAP, paddingBottom: 4, paddingTop: 2 },
   dayCell: {
     alignItems: 'center',
-    width: 56,
+    width: DAY_CELL_WIDTH,
     paddingVertical: 12,
     paddingHorizontal: 4,
     borderRadius: 14,
@@ -1455,25 +1414,6 @@ const s = StyleSheet.create({
   dayCellPast: { backgroundColor: Colors.borderFaint, borderColor: Colors.borderFaint, opacity: 0.55 },
   dayDow: { fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 },
   dayDate: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
-
-  // Quick actions
-  quickActions: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  actionBox: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 16, paddingVertical: 22, alignItems: 'center',
-    gap: 8, borderWidth: 1, borderColor: Colors.border,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1,
-  },
-  actionBoxLabel: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, textAlign: 'center' },
-
-  // Add-ons card
-  addonsCard: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  addonsTitle: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
-  addonsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
-  addonsName: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.text },
-  addonsPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
 
   // Day modal extras
   swapFeeTag: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.accentText, marginLeft: 10 },
@@ -1575,18 +1515,6 @@ const s = StyleSheet.create({
   renewalAlertBtnGhost: { backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.accent },
   renewalAlertBtnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.accent },
 
-  // Wallet
-  walletCard: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
-  },
-  walletRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-  walletTitle: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
-  walletBody: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  walletBalance: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.text },
-  walletSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
-  walletBtn: { backgroundColor: Colors.primary, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9 },
-  walletBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
   walletLink: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.primary },
 
   // Transactions
@@ -1641,17 +1569,6 @@ const s = StyleSheet.create({
   switchBadgeText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.textMuted },
   switchBadgeTextFree: { color: Colors.primary },
 
-  // Delivery address
-  addressCard: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
-  },
-  addressHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
-  addressLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
-  addressCountBadge: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.textLight, marginLeft: 4 },
-  addressLine: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.text, marginBottom: 10 },
-  addressEdit: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
-
   // Per-order address picker in day modal
   addrPickSection: { paddingHorizontal: 20, paddingBottom: 16 },
   addrPickCurrent: {
@@ -1681,7 +1598,7 @@ const s = StyleSheet.create({
   heroCard: {
     marginHorizontal: 0, marginBottom: 16,
     backgroundColor: '#fff', borderRadius: 20,
-    borderWidth: 2, borderColor: Colors.primary,
+    borderWidth: 2, borderColor: Colors.primary, borderStyle: 'solid',
     shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.10, shadowRadius: 16, elevation: 4,
     overflow: 'hidden',
   },
@@ -1716,6 +1633,8 @@ const s = StyleSheet.create({
 
   // Macro strip
   heroMacroStrip: { paddingTop: 2 },
+  heroAddonsRow: { marginTop: 10 },
+  heroAddonsText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
 
   // Hero action buttons
   heroCardBtns: { flexDirection: 'row', gap: 10, paddingHorizontal: 18, paddingBottom: 18 },
@@ -1725,7 +1644,7 @@ const s = StyleSheet.create({
   },
   heroSkipText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
   heroCustomizeBtn: {
-    height: 48, backgroundColor: Colors.primary, borderRadius: 999,
+    height: 48, backgroundColor: Colors.primary, borderRadius: 999, paddingHorizontal: 20,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
   },
   heroCustomizeText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
@@ -1771,14 +1690,6 @@ const s = StyleSheet.create({
   infoTileCaption: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textMuted, marginBottom: 4 },
   infoTileValue: { fontFamily: Fonts.heading, fontSize: 17, color: Colors.text },
   infoTileLabel: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text, lineHeight: 17 },
-
-  // Settings link
-  settingsRow: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 8,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
-  },
-  settingsRowText: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.primary },
 
   // Skip confirm dialog
   confirmOverlay: {

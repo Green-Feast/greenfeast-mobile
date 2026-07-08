@@ -1,0 +1,22 @@
+// All calendar math is done in IST (UTC+5:30) so the week strip and "today"
+// never disagree around midnight, regardless of the device timezone.
+const IST_MS = 5.5 * 60 * 60 * 1000
+
+export function istToday(): string {
+  return new Date(Date.now() + IST_MS).toISOString().split('T')[0]
+}
+
+export function istHour(): number {
+  return new Date(Date.now() + IST_MS).getUTCHours()
+}
+
+export function addDaysISO(iso: string, n: number): string {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().split('T')[0]
+}
+
+// Mon=0 … Sun=6
+export function dowMon0(iso: string): number {
+  return (new Date(iso + 'T00:00:00Z').getUTCDay() + 6) % 7
+}
