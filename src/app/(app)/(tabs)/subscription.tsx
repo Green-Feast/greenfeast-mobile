@@ -18,7 +18,7 @@ import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
-import { istToday, istHour, addDaysISO, dowMon0 } from '@/lib/ist'
+import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
 import RazorpayWebView from '@/components/RazorpayWebView'
 import MacroRow from '@/components/MacroRow'
@@ -125,6 +125,15 @@ function isLocked(dateStr: string): boolean {
   return dateStr === addDaysISO(today, 1) && istHour() >= 20
 }
 
+// Calendar strip covers today through the end of this month, extending into
+// next month when fewer than 14 days of the current month remain (so the
+// visible range always covers at least the order-instantiation horizon).
+function stripEndISO(todayIso: string): string {
+  const endOfThisMonth = endOfMonthISO(todayIso)
+  if (endOfThisMonth >= addDaysISO(todayIso, 14)) return endOfThisMonth
+  return endOfMonthISO(addDaysISO(endOfThisMonth, 1))
+}
+
 // ── Main screen ────────────────────────────────────────────────────────────
 
 export default function SubscriptionScreen() {
@@ -198,9 +207,8 @@ export default function SubscriptionScreen() {
       return
     }
 
-    // Active / paused: fetch upcoming orders through the end of the current week.
-    const endOffset = ((5 - dowMon0(today)) + 7) % 7 // days until Saturday (Mon=0..Sat=5)
-    const endStr = addDaysISO(today, endOffset)
+    // Active / paused: fetch upcoming orders through the calendar strip's end.
+    const endStr = stripEndISO(today)
 
     const [ordersRes, walletRes, addrRes, addonRes] = await Promise.all([
       supabase
@@ -339,14 +347,14 @@ export default function SubscriptionScreen() {
     }
   }
 
-  async function handleAddDish(refOrderId: string, newMealId: string) {
+  async function handleAddDish(refOrderId: string, newMealId: string, slot: 'lunch' | 'dinner') {
     setSwapping(true)
     setSwapError('')
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not authenticated')
       const { data, error } = await supabase.functions.invoke('add-dish', {
-        body: { order_id: refOrderId, meal_template_id: newMealId },
+        body: { order_id: refOrderId, meal_template_id: newMealId, meal_slot: slot },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
       if (error) throw error
@@ -560,10 +568,10 @@ export default function SubscriptionScreen() {
     orderMap.set(o.delivery_date, arr)
   }
 
-  // Week-strip timeline: from subscription start through end of this week.
+  // Calendar strip: from subscription start through the end of this month
+  // (or next month, near month-end — see stripEndISO).
   const startStr = sub.start_date && sub.start_date < todayStr ? sub.start_date : todayStr
-  const endOffset = ((5 - dowMon0(todayStr)) + 7) % 7
-  const endStr = addDaysISO(todayStr, endOffset)
+  const endStr = stripEndISO(todayStr)
   const stripDates: string[] = []
   for (let d = startStr; d <= endStr; d = addDaysISO(d, 1)) stripDates.push(d)
 
@@ -583,6 +591,17 @@ export default function SubscriptionScreen() {
   const dayOrder = daySlotOrders.find(o => !o.extra_dish) ?? null
   const dayExtras = daySlotOrders.filter(o => o.extra_dish)
   const dayLocked = heroLocked
+
+  // Any non-extra order on this day, in ANY slot — used (a) to decide whether
+  // the "Add {slot}" button should appear at all (the day is within the
+  // active/instantiated window) and (b) as the reference order for add-dish
+  // when the selected slot itself has no base order yet.
+  const dayAnyBase = (orderMap.get(selectedDay) ?? []).find(o => !o.extra_dish) ?? null
+  const dayHasNothing = !dayOrder && dayExtras.length === 0 && !dayAnyBase
+  const addRefOrder = dayOrder ?? dayExtras[0] ?? dayAnyBase ?? null
+  // When there's no base order for this slot, adding is the only possible
+  // action — force it rather than trusting addMode (which resets on open).
+  const effectiveAddMode = !dayOrder || addMode
 
   const baseRate = sub.plans ? Math.round(sub.plans.base_price / Math.max(sub.plans.meals_total, 1)) : 0
   const dayAllOrders = daySlotOrders
@@ -739,10 +758,59 @@ export default function SubscriptionScreen() {
               </Pressable>
             </View>
           </View>
+        ) : heroOrders.length > 0 ? (
+          // Extras-only slot: dishes were added here but there's no base
+          // order (e.g. a dinner dish added on a lunch-only plan).
+          <View key="hero-extras" style={s.heroCard}>
+            <View style={s.heroHeader}>
+              <View style={s.heroTopRow}>
+                <View>
+                  <Text style={s.heroEyebrow}>{heroEyebrow}</Text>
+                  <Text style={s.heroTitle}>{selectedSlot === 'lunch' ? 'Lunch' : 'Dinner'}</Text>
+                  <Text style={s.heroSubtitle}>
+                    {heroTotalQty} extra {heroTotalQty === 1 ? 'item' : 'items'}
+                  </Text>
+                </View>
+              </View>
+              <View style={s.heroCartList}>
+                {heroOrders.map(o => (
+                  <View key={o.id} style={s.heroCartRow}>
+                    {o.meal_templates?.image_url ? (
+                      <Image source={{ uri: o.meal_templates.image_url }} style={s.heroFoodThumb} contentFit="cover" cachePolicy="memory-disk" />
+                    ) : (
+                      <View style={[s.heroFoodThumb, { backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center' }]}>
+                        <Text style={{ fontSize: 18 }}>🍽️</Text>
+                      </View>
+                    )}
+                    <View style={s.heroCartRowInfo}>
+                      <Text style={s.heroCartName} numberOfLines={1}>{o.meal_templates?.name ?? 'Your meal'}</Text>
+                      {(o.meal_templates?.kcal ?? 0) > 0 && (
+                        <Text style={s.heroCartKcal}>
+                          {o.meal_templates!.kcal} kcal{(o.quantity ?? 1) > 1 ? ' each' : ''}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={s.heroQtyPill}>
+                      <Text style={s.heroQtyPillText}>{o.quantity ?? 1}×</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+            <View style={s.heroCardBtns}>
+              <Pressable
+                style={({ pressed }) => [s.heroCustomizeBtn, { flex: 1 }, pressed && { opacity: 0.85 }]}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setAddMode(false); setShowDayModal(true) }}
+              >
+                <SlidersHorizontal size={15} color="#fff" strokeWidth={2} />
+                <Text style={s.heroCustomizeText}>Customize →</Text>
+              </Pressable>
+            </View>
+          </View>
         ) : (
           <View key="hero-empty" style={s.heroEmpty}>
             <Text style={s.heroEmptyText}>No {selectedSlot} on {dowShort(selectedDay)} {dayNum(selectedDay)}</Text>
-            {!heroLocked && (
+            {!heroLocked && dayAnyBase && (
               <Pressable
                 style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }]}
                 onPress={() => { setAddMode(true); setShowDayModal(true) }}
@@ -1054,13 +1122,35 @@ export default function SubscriptionScreen() {
                   </View>
                 </View>
               ) : (
-                <View style={s.dayModalNoOrder}>
-                  <Text style={s.dayModalNoOrderText}>No delivery scheduled for this day</Text>
+                <View style={s.dayModalCurrentSection}>
+                  <View style={s.dayModalNoOrder}>
+                    <Text style={s.dayModalNoOrderText}>
+                      {dayHasNothing ? 'No delivery scheduled for this day' : `No ${selectedSlot} scheduled — add a dish below`}
+                    </Text>
+                  </View>
+
+                  {/* Extra dishes already added to this slot (extras-only — no base order) */}
+                  {dayExtras.map((ex) => (
+                    <View key={ex.id} style={s.extraRow}>
+                      <Plus size={14} color={Colors.primary} />
+                      <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
+                      <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
+                      {!dayLocked && (
+                        <Pressable
+                          style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
+                          onPress={() => handleRemoveDish(ex.id)}
+                          disabled={cartBusy}
+                        >
+                          <Text style={s.addonRemoveText}>Remove</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  ))}
                 </View>
               )}
 
               {/* Swap / Add section */}
-              {dayOrder && (
+              {(dayOrder || addRefOrder) && (
                 <View style={s.dayModalSwapSection}>
                   {dayLocked ? (
                     <View style={s.dayModalLockBanner}>
@@ -1073,23 +1163,25 @@ export default function SubscriptionScreen() {
                     </View>
                   ) : (
                     <>
-                      {/* Swap / Add toggle */}
-                      <View style={s.modeToggle}>
-                        <Pressable
-                          style={[s.modeBtn, !addMode && s.modeBtnActive]}
-                          onPress={() => { setAddMode(false); setSwapError('') }}
-                        >
-                          <Text style={[s.modeBtnText, !addMode && s.modeBtnTextActive]}>Swap meal</Text>
-                        </Pressable>
-                        <Pressable
-                          style={[s.modeBtn, addMode && s.modeBtnActive]}
-                          onPress={() => { setAddMode(true); setSwapError('') }}
-                        >
-                          <Text style={[s.modeBtnText, addMode && s.modeBtnTextActive]}>Add a dish</Text>
-                        </Pressable>
-                      </View>
+                      {/* Swap / Add toggle — only meaningful when there's a base meal to swap */}
+                      {dayOrder && (
+                        <View style={s.modeToggle}>
+                          <Pressable
+                            style={[s.modeBtn, !addMode && s.modeBtnActive]}
+                            onPress={() => { setAddMode(false); setSwapError('') }}
+                          >
+                            <Text style={[s.modeBtnText, !addMode && s.modeBtnTextActive]}>Swap meal</Text>
+                          </Pressable>
+                          <Pressable
+                            style={[s.modeBtn, addMode && s.modeBtnActive]}
+                            onPress={() => { setAddMode(true); setSwapError('') }}
+                          >
+                            <Text style={[s.modeBtnText, addMode && s.modeBtnTextActive]}>Add a dish</Text>
+                          </Pressable>
+                        </View>
+                      )}
                       <Text style={s.dayModalSectionLabel}>
-                        {addMode ? 'Add another dish to this slot' : 'Swap for something else'}
+                        {effectiveAddMode ? (dayOrder ? 'Add another dish to this slot' : `Add a ${selectedSlot} dish`) : 'Swap for something else'}
                       </Text>
                       {swapError ? (
                         <View style={s.swapErrorRow}>
@@ -1102,8 +1194,8 @@ export default function SubscriptionScreen() {
                         </View>
                       ) : null}
                       {allMeals.map((meal) => {
-                        const isCurrent = !addMode && meal.id === dayOrder.meal_templates?.id
-                        const isFree = !addMode && !isCurrent && freeMealIds.has(meal.id)
+                        const isCurrent = !effectiveAddMode && !!dayOrder && meal.id === dayOrder.meal_templates?.id
+                        const isFree = !effectiveAddMode && !isCurrent && freeMealIds.has(meal.id)
                         return (
                           <Pressable
                             key={meal.id}
@@ -1113,9 +1205,9 @@ export default function SubscriptionScreen() {
                               pressed && !isCurrent && { opacity: 0.7 },
                             ]}
                             onPress={() => {
-                              if (swapping || isCurrent) return
-                              if (addMode) handleAddDish(dayOrder.id, meal.id)
-                              else handleSwapMeal(dayOrder.id, meal.id)
+                              if (swapping || isCurrent || !addRefOrder) return
+                              if (effectiveAddMode) handleAddDish(addRefOrder.id, meal.id, selectedSlot)
+                              else if (dayOrder) handleSwapMeal(dayOrder.id, meal.id)
                             }}
                             disabled={swapping || isCurrent}
                           >
@@ -1139,9 +1231,9 @@ export default function SubscriptionScreen() {
                               </View>
                             )}
                             {!isCurrent && !swapping && (
-                              <View style={[s.switchBadge, (isFree || addMode) && s.switchBadgeFree]}>
-                                <Text style={[s.switchBadgeText, (isFree || addMode) && s.switchBadgeTextFree]}>
-                                  {addMode ? 'Add' : isFree ? 'Free' : '+₹20'}
+                              <View style={[s.switchBadge, (isFree || effectiveAddMode) && s.switchBadgeFree]}>
+                                <Text style={[s.switchBadgeText, (isFree || effectiveAddMode) && s.switchBadgeTextFree]}>
+                                  {effectiveAddMode ? 'Add' : isFree ? 'Free' : '+₹20'}
                                 </Text>
                               </View>
                             )}
@@ -1311,7 +1403,7 @@ export default function SubscriptionScreen() {
               >
                 {creatingTopup
                   ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={s.addMoneyBtnText}>Pay with Razorpay</Text>}
+                  : <Text style={s.addMoneyBtnText}>Add money</Text>}
               </Pressable>
 
               {__DEV__ && (
@@ -1329,10 +1421,10 @@ export default function SubscriptionScreen() {
               )}
 
               <Pressable
+                style={({ pressed }) => [s.viewTransactionsBtn, pressed && { opacity: 0.75 }]}
                 onPress={() => { setShowAddMoney(false); fetchTransactions(); setShowTransactions(true) }}
-                style={{ alignSelf: 'center', marginTop: 4 }}
               >
-                <Text style={s.walletLink}>View transactions →</Text>
+                <Text style={s.viewTransactionsBtnText}>View transactions</Text>
               </Pressable>
 
               <View style={{ height: 20 }} />
@@ -1515,8 +1607,6 @@ const s = StyleSheet.create({
   renewalAlertBtnGhost: { backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.accent },
   renewalAlertBtnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.accent },
 
-  walletLink: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.primary },
-
   // Transactions
   transactionRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20,
@@ -1542,6 +1632,11 @@ const s = StyleSheet.create({
   addMoneyBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: '#fff' },
   addMoneyBtnDev: { backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primary },
   addMoneyBtnDevText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
+  viewTransactionsBtn: {
+    borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 4,
+    borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: 'transparent',
+  },
+  viewTransactionsBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
   topupChips: { flexDirection: 'row', gap: 10, marginBottom: 4 },
   topupChip: {
     flex: 1, borderRadius: 12, paddingVertical: 12, borderWidth: 1.5,

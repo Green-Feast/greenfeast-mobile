@@ -20,3 +20,10 @@ export function addDaysISO(iso: string, n: number): string {
 export function dowMon0(iso: string): number {
   return (new Date(iso + 'T00:00:00Z').getUTCDay() + 6) % 7
 }
+
+// Last day of iso's month, as an ISO date string.
+export function endOfMonthISO(iso: string): string {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCMonth(d.getUTCMonth() + 1, 0)
+  return d.toISOString().split('T')[0]
+}

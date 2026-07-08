@@ -22,11 +22,18 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    // order_id: any existing order in the target (date, slot) — used to derive
-    // subscription / date / slot / batch / address. meal_template_id: dish to add.
-    const { order_id, meal_template_id } = await req.json()
+    // order_id: any existing order for the same day (any slot) — used to derive
+    // subscription / date / batch / address. meal_template_id: dish to add.
+    // meal_slot: optional — defaults to the reference order's own slot; pass
+    // it explicitly to add a dish into a slot that has no order yet (e.g.
+    // adding a dinner dish on a lunch-only plan), using a same-day order in
+    // another slot as the reference.
+    const { order_id, meal_template_id, meal_slot } = await req.json()
     if (!order_id || !meal_template_id) {
       return json({ error: 'order_id and meal_template_id are required' }, 400)
+    }
+    if (meal_slot && !['lunch', 'dinner'].includes(meal_slot)) {
+      return json({ error: 'meal_slot must be lunch or dinner' }, 400)
     }
 
     const supabase = createClient(
@@ -68,13 +75,15 @@ Deno.serve(async (req) => {
     if (!plan) return json({ error: 'Plan not found' }, 404)
     const rate = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
 
+    const effectiveSlot = meal_slot ?? ref.meal_slot
+
     // Next slot_seq for this (subscription, date, slot).
     const { data: existing } = await supabase
       .from('orders')
       .select('slot_seq')
       .eq('subscription_id', ref.subscription_id)
       .eq('delivery_date', ref.delivery_date)
-      .eq('meal_slot', ref.meal_slot)
+      .eq('meal_slot', effectiveSlot)
       .order('slot_seq', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -90,7 +99,7 @@ Deno.serve(async (req) => {
         batch_id: ref.batch_id ?? null,
         address_id: ref.address_id ?? null,
         delivery_date: ref.delivery_date,
-        meal_slot: ref.meal_slot,
+        meal_slot: effectiveSlot,
         status: 'scheduled',
         is_customized: true,
         extra_dish: true,

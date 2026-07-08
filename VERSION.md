@@ -52,6 +52,24 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.3 — 2026-07-09
+- Build 3, OTA 3.
+- My Plan: calendar strip now runs from subscription start through end of
+  month (extending into next month near month-end) instead of stopping at
+  Saturday of the current week.
+- My Plan: adding a dish to a slot with no scheduled base order (e.g. "Add
+  dinner" on a lunch-only plan) now works — it used to dead-end on "No
+  delivery scheduled for this day."
+- Plan Settings: removed "Change plan"; renamed "Edit delivery address" to
+  "Address book"; Pause and Skip now use a full month-grid calendar
+  (hotel-booking style) instead of scrollable date chips — pause has no
+  length limit and can be resumed early anytime.
+- My Plan: wallet modal button relabelled "Pay with Razorpay" → "Add money";
+  "View transactions" is now a visible outlined button instead of a small
+  text link.
+- Backend: `add-dish` accepts an optional `meal_slot` so a dish can be added
+  to a slot with no existing order (deployed ahead of this release).
+
 ### 1.3.2 — 2026-07-08
 - Build 3, OTA 2.
 - Republish of 1.3.1 — same app code, fixed update bundle. **Root cause of the

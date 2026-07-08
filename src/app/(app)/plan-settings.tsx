@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+﻿import { useEffect, useState, useCallback } from 'react'
 import {
   View,
   Text,
@@ -16,12 +16,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import {
   ChevronLeft,
-  Pause, Play, SkipForward, ArrowUpDown, X, ArrowRight, UtensilsCrossed, MapPin,
+  Pause, Play, SkipForward, X, ArrowRight, UtensilsCrossed, MapPin,
 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
-import RazorpayWebView from '@/components/RazorpayWebView'
+import { istToday, addDaysISO } from '@/lib/ist'
+import BookingCalendar from '@/components/BookingCalendar'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -38,7 +39,6 @@ type SubData = {
   subscription_addons: { addons: { price_per_meal: number } | null }[]
 }
 
-type Plan = { id: string; name: string; meals_total: number; days_per_week: number; base_price: number }
 type UpcomingOrder = { id: string; delivery_date: string; meal_templates: { name: string } | null }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -60,14 +60,6 @@ function fmtDate(dateStr: string | null) {
   if (!dateStr) return '—'
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
-function fmtShort(d: Date) { return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
-function fmtDow(d: Date) { return d.toLocaleDateString('en-IN', { weekday: 'short' }) }
-function toISO(d: Date) { return d.toISOString().split('T')[0] }
-function generateDates(count: number, offsetDays = 1): Date[] {
-  return Array.from({ length: count }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() + offsetDays + i); return d
-  })
-}
 
 // ── Main screen ────────────────────────────────────────────────────────────
 
@@ -81,7 +73,6 @@ export default function PlanSettingsScreen() {
 
   const [pauseOpen, setPauseOpen] = useState(false)
   const [skipOpen, setSkipOpen] = useState(false)
-  const [changePlanOpen, setChangePlanOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [dietaryOpen, setDietaryOpen] = useState(false)
 
@@ -148,9 +139,8 @@ export default function PlanSettingsScreen() {
 
   const sharedActions = [
     { label: 'Skip a specific day',   Icon: SkipForward,     onPress: () => setSkipOpen(true) },
-    { label: 'Change plan',           Icon: ArrowUpDown,     onPress: () => setChangePlanOpen(true) },
     { label: 'Edit dietary profile',  Icon: UtensilsCrossed, onPress: () => setDietaryOpen(true) },
-    { label: 'Edit delivery address', Icon: MapPin,          onPress: () => router.push('/(app)/addresses') },
+    { label: 'Address book',          Icon: MapPin,          onPress: () => router.push('/(app)/addresses') },
   ]
 
   const actions = sub.status === 'paused'
@@ -193,10 +183,13 @@ export default function PlanSettingsScreen() {
               <Text style={s.metaValue}>{fmtDate(sub.end_date)}</Text>
             </View>
             {sub.status === 'paused' && sub.pause_until && (
-              <View style={s.metaRow}>
-                <Text style={s.metaLabel}>Paused until</Text>
-                <Text style={s.metaValue}>{fmtDate(sub.pause_until)}</Text>
-              </View>
+              <>
+                <View style={s.metaRow}>
+                  <Text style={s.metaLabel}>Paused</Text>
+                  <Text style={s.metaValue}>{fmtDate(sub.pause_from)} – {fmtDate(sub.pause_until)}</Text>
+                </View>
+                <Text style={s.pauseNote}>You can resume anytime before then — see below.</Text>
+              </>
             )}
             <View>
               <View style={s.metaRow}>
@@ -235,7 +228,6 @@ export default function PlanSettingsScreen() {
 
       <PauseModal      visible={pauseOpen}       subId={sub.id} onClose={() => setPauseOpen(false)}       onDone={() => { setPauseOpen(false);      fetchSub() }} />
       <SkipModal       visible={skipOpen}        subId={sub.id} userId={user!.id} onClose={() => setSkipOpen(false)}        onDone={() => { setSkipOpen(false);       fetchSub() }} />
-      <ChangePlanModal visible={changePlanOpen}  subId={sub.id} currentPlanName={planName} onClose={() => setChangePlanOpen(false)} onDone={() => { setChangePlanOpen(false); fetchSub() }} />
       <CancelModal     visible={cancelOpen}      subId={sub.id} onClose={() => setCancelOpen(false)}      onDone={() => { setCancelOpen(false);     fetchSub() }} />
       <DietaryModal    visible={dietaryOpen}     userId={user!.id} onClose={() => setDietaryOpen(false)}  onDone={() => setDietaryOpen(false)} />
     </View>
@@ -248,23 +240,22 @@ function PauseModal({ visible, subId, onClose, onDone }: {
   visible: boolean; subId: string; onClose: () => void; onDone: () => void
 }) {
   const insets = useSafeAreaInsets()
-  const [step, setStep] = useState<'from' | 'until'>('from')
-  const [fromDate, setFromDate] = useState<string | null>(null)
-  const [untilDate, setUntilDate] = useState<string | null>(null)
+  const [start, setStart] = useState<string | null>(null)
+  const [end, setEnd] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const fromDates = generateDates(30, 1)
-  const untilDates = fromDate
-    ? generateDates(14, Math.ceil((new Date(fromDate + 'T00:00:00').getTime() - Date.now()) / 86400000) + 1)
-    : []
+  const minDate = addDaysISO(istToday(), 1)
+  const dayCount = start && end
+    ? Math.round((new Date(end + 'T00:00:00Z').getTime() - new Date(start + 'T00:00:00Z').getTime()) / 86400000) + 1
+    : 0
 
   async function handlePause() {
-    if (!fromDate || !untilDate) return
+    if (!start || !end) return
     setSaving(true); setError('')
     try {
       const { error } = await supabase.functions.invoke('manage-subscription', {
-        body: { action: 'pause', subscription_id: subId, pause_from: fromDate, pause_until: untilDate },
+        body: { action: 'pause', subscription_id: subId, pause_from: start, pause_until: end },
       })
       if (error) throw error
       onDone()
@@ -272,7 +263,7 @@ function PauseModal({ visible, subId, onClose, onDone }: {
     finally { setSaving(false) }
   }
 
-  function reset() { setStep('from'); setFromDate(null); setUntilDate(null); setError(''); onClose() }
+  function reset() { setStart(null); setEnd(null); setError(''); onClose() }
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={reset}>
@@ -280,53 +271,31 @@ function PauseModal({ visible, subId, onClose, onDone }: {
         <View style={[m.sheet, { paddingBottom: 32 + insets.bottom }]}>
           <View style={m.handle} />
           <SheetHeader title="Pause subscription" onClose={reset} />
+          <Text style={m.stepLabel}>Select your pause start and end dates</Text>
 
-          {step === 'from' ? (
-            <>
-              <Text style={m.stepLabel}>Select pause start date</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={m.dateRow}>
-                {fromDates.map((d) => {
-                  const iso = toISO(d); const active = iso === fromDate
-                  return (
-                    <Pressable key={iso} style={[m.dateChip, active && m.dateChipActive]} onPress={() => setFromDate(iso)}>
-                      <Text style={[m.dateDow, active && m.dateDowActive]}>{fmtDow(d)}</Text>
-                      <Text style={[m.dateNum, active && m.dateNumActive]}>{fmtShort(d)}</Text>
-                    </Pressable>
-                  )
-                })}
-              </ScrollView>
-              <Pressable style={[m.btn, !fromDate && m.btnDisabled]} disabled={!fromDate} onPress={() => setStep('until')}>
-                <Text style={m.btnText}>Next: pick end date</Text>
-              </Pressable>
-            </>
-          ) : (
-            <>
-              <Text style={m.stepLabel}>Select pause end date</Text>
-              <Text style={m.stepSub}>From {fmtDate(fromDate)}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={m.dateRow}>
-                {untilDates.map((d) => {
-                  const iso = toISO(d)
-                  if (fromDate && iso <= fromDate) return null
-                  const active = iso === untilDate
-                  return (
-                    <Pressable key={iso} style={[m.dateChip, active && m.dateChipActive]} onPress={() => setUntilDate(iso)}>
-                      <Text style={[m.dateDow, active && m.dateDowActive]}>{fmtDow(d)}</Text>
-                      <Text style={[m.dateNum, active && m.dateNumActive]}>{fmtShort(d)}</Text>
-                    </Pressable>
-                  )
-                })}
-              </ScrollView>
-              {error ? <Text style={m.errorText}>{error}</Text> : null}
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <Pressable style={[m.btn, m.btnGhost, { flex: 1 }]} onPress={() => setStep('from')}>
-                  <Text style={m.btnGhostText}>Back</Text>
-                </Pressable>
-                <Pressable style={[m.btn, (!untilDate || saving) && m.btnDisabled, { flex: 1 }]} disabled={!untilDate || saving} onPress={handlePause}>
-                  {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Confirm pause</Text>}
-                </Pressable>
-              </View>
-            </>
+          {visible && (
+            <BookingCalendar
+              mode="range"
+              minDate={minDate}
+              start={start}
+              end={end}
+              onChange={(s, e) => { setStart(s); setEnd(e) }}
+            />
           )}
+
+          {start && end ? (
+            <Text style={m.stepSub}>
+              Pause {fmtDate(start)} → {fmtDate(end)} · {dayCount} {dayCount === 1 ? 'day' : 'days'}
+            </Text>
+          ) : (
+            <Text style={m.calendarNote}>Tap a start date, then an end date. No limit — pause as long as you need.</Text>
+          )}
+          <Text style={m.calendarNote}>You can resume early anytime from Plan Settings.</Text>
+
+          {error ? <Text style={m.errorText}>{error}</Text> : null}
+          <Pressable style={[m.btn, { marginTop: 8 }, (!start || !end || saving) && m.btnDisabled]} disabled={!start || !end || saving} onPress={handlePause}>
+            {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Confirm pause</Text>}
+          </Pressable>
         </View>
       </View>
     </Modal>
@@ -345,19 +314,24 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  const todayStr = istToday()
+  const maxDate = addDaysISO(todayStr, 14)
+
   useEffect(() => {
     if (!visible) return
     setLoadingOrders(true)
-    const todayStr = new Date().toISOString().split('T')[0]
-    const future = new Date(); future.setDate(future.getDate() + 14)
+    setSelectedDate(null)
     supabase.from('orders')
       .select('id, delivery_date, meal_templates ( name )')
       .eq('subscription_id', subId)
-      .gte('delivery_date', todayStr).lte('delivery_date', future.toISOString().split('T')[0])
+      .gte('delivery_date', todayStr).lte('delivery_date', maxDate)
       .in('status', ['scheduled', 'confirmed'])
       .order('delivery_date')
       .then(({ data }) => { setOrders((data as unknown as UpcomingOrder[]) ?? []); setLoadingOrders(false) })
   }, [visible, subId])
+
+  const orderDates = new Set(orders.map((o) => o.delivery_date))
+  const selectedOrder = orders.find((o) => o.delivery_date === selectedDate) ?? null
 
   async function handleSkip() {
     if (!selectedDate) return
@@ -386,319 +360,25 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
           ) : orders.length === 0 ? (
             <Text style={m.emptyText}>No upcoming deliveries in the next 14 days.</Text>
           ) : (
-            <View style={{ gap: 10, marginBottom: 20 }}>
-              {[...new Map(orders.map(o => [o.delivery_date, o])).values()].map((o) => {
-                const active = o.delivery_date === selectedDate
-                return (
-                  <Pressable key={o.delivery_date} style={[m.selectRow, active && m.selectRowActive]} onPress={() => setSelectedDate(o.delivery_date)}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[m.selectRowTitle, active && { color: Colors.primary }]}>{fmtDate(o.delivery_date)}</Text>
-                      <Text style={m.selectRowSub}>{o.meal_templates?.name ?? '—'}</Text>
-                    </View>
-                    <View style={[m.radio, active && m.radioActive]}>{active && <View style={m.radioDot} />}</View>
-                  </Pressable>
-                )
-              })}
-            </View>
+            <>
+              {visible && (
+                <BookingCalendar
+                  mode="single"
+                  minDate={todayStr}
+                  maxDate={maxDate}
+                  isDayEnabled={(iso) => orderDates.has(iso)}
+                  value={selectedDate}
+                  onChange={setSelectedDate}
+                />
+              )}
+              <Text style={m.calendarNote}>
+                {selectedOrder ? `${fmtDate(selectedOrder.delivery_date)} · ${selectedOrder.meal_templates?.name ?? '—'}` : 'Only days with a scheduled delivery are selectable.'}
+              </Text>
+            </>
           )}
           {error ? <Text style={m.errorText}>{error}</Text> : null}
-          <Pressable style={[m.btn, (!selectedDate || saving) && m.btnDisabled]} disabled={!selectedDate || saving} onPress={handleSkip}>
+          <Pressable style={[m.btn, { marginTop: 8 }, (!selectedDate || saving) && m.btnDisabled]} disabled={!selectedDate || saving} onPress={handleSkip}>
             {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.btnText}>Skip this delivery</Text>}
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  )
-}
-
-// ── ChangePlanModal ────────────────────────────────────────────────────────
-
-function ChangePlanModal({ visible, subId, currentPlanName, onClose, onDone }: {
-  visible: boolean; subId: string; currentPlanName: string; onClose: () => void; onDone: () => void
-}) {
-  const insets = useSafeAreaInsets()
-  const { user } = useAuthStore()
-  const [plans, setPlans] = useState<Plan[]>([])
-  const [loadingPlans, setLoadingPlans] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [timing, setTiming] = useState<'now' | 'queue' | null>(null)
-  const [walletBalance, setWalletBalance] = useState(0)
-  const [addonPerMeal, setAddonPerMeal] = useState(0)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [razorpayOrderId, setRazorpayOrderId] = useState<string | null>(null)
-  const [razorpayAmountPaise, setRazorpayAmountPaise] = useState(0)
-
-  useEffect(() => {
-    if (!visible || !user) return
-    setSelectedId(null); setTiming(null); setError('')
-    setLoadingPlans(true)
-    Promise.all([
-      supabase.from('plans').select('id, name, meals_total, days_per_week, base_price')
-        .eq('is_active', true).order('base_price'),
-      supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle(),
-      supabase.from('subscription_addons').select('addons(price_per_meal)').eq('subscription_id', subId),
-    ]).then(([{ data: plansData }, { data: walletData }, { data: addonsData }]) => {
-      setPlans((plansData as Plan[]) ?? [])
-      setWalletBalance(walletData?.balance ?? 0)
-      const perMeal = ((addonsData ?? []) as any[]).reduce(
-        (sum: number, row: any) => sum + (row.addons?.price_per_meal ?? 0), 0
-      )
-      setAddonPerMeal(perMeal)
-      setLoadingPlans(false)
-    })
-  }, [visible, user, subId])
-
-  const selectedPlan = plans.find((p) => p.id === selectedId) ?? null
-
-  function newPlanTotal(plan: Plan) {
-    return plan.base_price + addonPerMeal * plan.meals_total
-  }
-
-  function chargeNow(plan: Plan) {
-    return Math.max(0, newPlanTotal(plan) - walletBalance)
-  }
-
-  async function applyNow(plan: Plan, charge: number) {
-    // Optimistic: update subscription immediately. Wallet credit happens via webhook.
-    const { error: err } = await supabase.from('subscriptions')
-      .update({ plan_id: plan.id, plan_name: plan.name, deliveries_remaining: plan.meals_total })
-      .eq('id', subId)
-    if (err) throw err
-
-    // Cancel future un-customized orders so they get re-instantiated with new plan
-    const today = new Date().toISOString().split('T')[0]
-    await supabase.from('orders').delete()
-      .eq('subscription_id', subId)
-      .gte('delivery_date', today)
-      .eq('is_customized', false)
-      .in('status', ['scheduled', 'confirmed'])
-
-    // Kick off order creation
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session) {
-      supabase.functions.invoke('instantiate-orders', {
-        body: { subscription_id: subId },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      }).catch(() => {})
-    }
-  }
-
-  async function applyQueue(plan: Plan) {
-    // Create a new pending subscription; it activates when the current one ends.
-    const { data: currentSub } = await supabase.from('subscriptions')
-      .select('end_date, menu_type, meals_lunch, meals_dinner')
-      .eq('id', subId).single()
-
-    const { error: err } = await supabase.from('subscriptions').insert({
-      user_id: user!.id,
-      plan_id: plan.id,
-      plan_name: plan.name,
-      status: 'pending',
-      payment_method: 'online',
-      deliveries_remaining: plan.meals_total,
-      menu_type: currentSub?.menu_type ?? 'M1',
-      meals_lunch: currentSub?.meals_lunch ?? 1,
-      meals_dinner: currentSub?.meals_dinner ?? 0,
-      start_date: currentSub?.end_date ?? null,
-    })
-    if (err) throw err
-  }
-
-  async function handleConfirm() {
-    if (!selectedPlan || !timing) return
-    setSaving(true); setError('')
-    try {
-      if (timing === 'now') {
-        const charge = chargeNow(selectedPlan)
-        if (charge > 0) {
-          // Create a wallet top-up Razorpay order for the charge amount
-          const { data: { session } } = await supabase.auth.getSession()
-          if (!session) throw new Error('Not authenticated')
-          const { data, error: fnErr } = await supabase.functions.invoke('wallet-topup', {
-            body: { amount_paise: charge },
-            headers: { Authorization: `Bearer ${session.access_token}` },
-          })
-          if (fnErr || data?.error) throw new Error(data?.error ?? 'Payment order failed')
-          setRazorpayOrderId(data.order_id)
-          setRazorpayAmountPaise(charge)
-          setSaving(false)
-          return // Razorpay will call onPaymentSuccess
-        }
-        await applyNow(selectedPlan, 0)
-      } else {
-        const total = newPlanTotal(selectedPlan)
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session) throw new Error('Not authenticated')
-        const { data, error: fnErr } = await supabase.functions.invoke('wallet-topup', {
-          body: { amount_paise: total },
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        })
-        if (fnErr || data?.error) throw new Error(data?.error ?? 'Payment order failed')
-        setRazorpayOrderId(data.order_id)
-        setRazorpayAmountPaise(total)
-        setSaving(false)
-        return // Razorpay will call onPaymentSuccess
-      }
-      onDone()
-    } catch (e: any) {
-      setError(e?.message ?? 'Something went wrong. Please try again.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function onPaymentSuccess(_paymentId: string) {
-    if (!selectedPlan || !timing) return
-    setSaving(true); setError('')
-    try {
-      if (timing === 'now') {
-        await applyNow(selectedPlan, razorpayAmountPaise)
-      } else {
-        await applyQueue(selectedPlan)
-      }
-      setRazorpayOrderId(null)
-      onDone()
-    } catch (e: any) {
-      setRazorpayOrderId(null)
-      setError(e?.message ?? 'Payment succeeded but plan update failed. Contact support.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (razorpayOrderId) {
-    return (
-      <RazorpayWebView
-        orderId={razorpayOrderId}
-        amount={razorpayAmountPaise}
-        keyId={process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID ?? ''}
-        userName={user?.user_metadata?.name ?? user?.email ?? 'User'}
-        userPhone={user?.phone ?? ''}
-        onSuccess={onPaymentSuccess}
-        onFailure={() => { setRazorpayOrderId(null); setError('Payment failed. Please try again.') }}
-        onDismiss={() => setRazorpayOrderId(null)}
-      />
-    )
-  }
-
-  const showTiming = !!selectedId && !loadingPlans
-  const charge = selectedPlan && timing === 'now' ? chargeNow(selectedPlan) : null
-  const queueTotal = selectedPlan && timing === 'queue' ? newPlanTotal(selectedPlan) : null
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={m.overlay}>
-        <View style={[m.sheet, { flex: 1, maxHeight: '92%', paddingBottom: 32 + insets.bottom }]}>
-          <View style={m.handle} />
-          <SheetHeader title="Change plan" onClose={onClose} />
-          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-            <Text style={m.stepLabel}>Currently on: {currentPlanName}</Text>
-            {loadingPlans ? (
-              <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
-            ) : (
-              <View style={{ gap: 10, marginBottom: 16 }}>
-                {plans.map((plan) => {
-                  const active = plan.id === selectedId
-                  const isCurrent = plan.name === currentPlanName
-                  return (
-                    <Pressable
-                      key={plan.id}
-                      style={[m.selectRow, active && m.selectRowActive, isCurrent && m.selectRowCurrent]}
-                      onPress={() => { if (!isCurrent) { setSelectedId(plan.id); setTiming(null) } }}
-                      disabled={isCurrent}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={[m.selectRowTitle, active && { color: Colors.primary }]}>{plan.name}</Text>
-                        <Text style={m.selectRowSub}>{plan.meals_total} meals · {plan.days_per_week} days/week</Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                        <Text style={[m.planPrice, active && { color: Colors.primary }]}>₹{fmt(plan.base_price)}</Text>
-                        {isCurrent && <Text style={m.currentBadge}>Current</Text>}
-                      </View>
-                    </Pressable>
-                  )
-                })}
-              </View>
-            )}
-
-            {showTiming && (
-              <>
-                <Text style={[m.stepLabel, { marginTop: 8 }]}>When should this take effect?</Text>
-                <View style={{ gap: 10, marginBottom: 16 }}>
-                  <Pressable
-                    style={[m.selectRow, timing === 'now' && m.selectRowActive]}
-                    onPress={() => setTiming('now')}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[m.selectRowTitle, timing === 'now' && { color: Colors.primary }]}>Switch now</Text>
-                      <Text style={m.selectRowSub}>Start immediately, reset deliveries</Text>
-                    </View>
-                    <View style={[m.radio, timing === 'now' && m.radioActive]}>
-                      {timing === 'now' && <View style={m.radioDot} />}
-                    </View>
-                  </Pressable>
-                  <Pressable
-                    style={[m.selectRow, timing === 'queue' && m.selectRowActive]}
-                    onPress={() => setTiming('queue')}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[m.selectRowTitle, timing === 'queue' && { color: Colors.primary }]}>Start after current ends</Text>
-                      <Text style={m.selectRowSub}>Continues when current plan's deliveries run out</Text>
-                    </View>
-                    <View style={[m.radio, timing === 'queue' && m.radioActive]}>
-                      {timing === 'queue' && <View style={m.radioDot} />}
-                    </View>
-                  </Pressable>
-                </View>
-              </>
-            )}
-
-            {timing === 'now' && selectedPlan && (
-              <View style={m.chargeBreakdown}>
-                <Text style={m.chargeLabel}>Payment breakdown</Text>
-                <View style={m.chargeRow}>
-                  <Text style={m.chargeItem}>New plan total</Text>
-                  <Text style={m.chargeValue}>₹{fmt(newPlanTotal(selectedPlan))}</Text>
-                </View>
-                <View style={m.chargeRow}>
-                  <Text style={m.chargeItem}>Wallet balance</Text>
-                  <Text style={m.chargeValue}>−₹{fmt(walletBalance)}</Text>
-                </View>
-                <View style={[m.chargeRow, m.chargeTotalRow]}>
-                  <Text style={m.chargeTotalLabel}>You pay now</Text>
-                  <Text style={m.chargeTotalValue}>₹{fmt(charge ?? 0)}</Text>
-                </View>
-              </View>
-            )}
-
-            {timing === 'queue' && selectedPlan && (
-              <View style={m.chargeBreakdown}>
-                <Text style={m.chargeLabel}>Payment</Text>
-                <View style={[m.chargeRow, m.chargeTotalRow]}>
-                  <Text style={m.chargeTotalLabel}>Full plan amount</Text>
-                  <Text style={m.chargeTotalValue}>₹{fmt(queueTotal ?? 0)}</Text>
-                </View>
-                <Text style={m.chargeNote}>Activates automatically when your current plan ends</Text>
-              </View>
-            )}
-
-            {error ? <Text style={m.errorText}>{error}</Text> : null}
-            <View style={{ height: 16 }} />
-          </ScrollView>
-
-          <Pressable
-            style={[m.btn, m.btnSaveRow, (!selectedId || !timing || saving) && m.btnDisabled]}
-            disabled={!selectedId || !timing || saving}
-            onPress={handleConfirm}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={m.btnText}>
-                {timing === 'now' && charge === 0 ? 'Switch now (no charge)' : 'Pay & confirm'}
-              </Text>
-            )}
           </Pressable>
         </View>
       </View>
@@ -943,6 +623,7 @@ const s = StyleSheet.create({
   metaLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
   metaValue: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.text },
   metaValueGreen: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.primary },
+  pauseNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: -2, marginBottom: 6 },
   progressTrack: { height: 10, backgroundColor: Colors.border, borderRadius: 999, overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 999 },
 
@@ -965,18 +646,9 @@ const m = StyleSheet.create({
   sheetTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
   stepLabel: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.text, marginBottom: 12 },
   stepSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 12 },
+  calendarNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textLight, marginTop: 4, marginBottom: 12 },
   emptyText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, textAlign: 'center', marginVertical: 24 },
   errorText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger, marginBottom: 12 },
-  dateRow: { paddingBottom: 16, gap: 8 },
-  dateChip: {
-    alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12,
-    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: '#fff', minWidth: 64,
-  },
-  dateChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  dateDow: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  dateDowActive: { color: Colors.primaryMid },
-  dateNum: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginTop: 2 },
-  dateNumActive: { color: '#fff' },
   btn: {
     backgroundColor: Colors.primary, borderRadius: 999, paddingVertical: 15,
     alignItems: 'center', justifyContent: 'center', minHeight: 52,
