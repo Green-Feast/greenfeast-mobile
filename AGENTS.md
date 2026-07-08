@@ -57,6 +57,22 @@ reflect the latest commits, that's expected, not a bug to fix.
   went nowhere. If an OTA update doesn't seem to be reaching a device, check
   `eas build:list --json` for a `channel` field on the installed build before assuming
   anything else — a missing channel means only a fresh build can fix it, not another update.
+- **OTA update bundles need the `EXPO_PUBLIC_*` env vars at publish time, and
+  `--environment <env>` sources them ONLY from the EAS server environment (expo.dev), ignoring
+  both local `.env` and `eas.json` `env` blocks.** This bit us for months (resolved
+  2026-07-08): the EAS "preview" environment had no Supabase vars, so every update published
+  with `--environment preview` shipped a bundle where `supabaseUrl` was `undefined`, crashed
+  at module init on first launch, and was then **permanently blacklisted by expo-updates'
+  anti-bricking error recovery** — the app silently fell back to the embedded bundle forever
+  and re-downloaded/re-notified the same update on every launch. From the outside this looks
+  identical to "updates download but never apply," with zero errors in
+  `Updates.readLogEntriesAsync()`; the giveaways are the Expo dashboard's "Known crashes"
+  count on the update, a brief grey flash on the first launch attempt, and
+  `UpdatesErrorRecovery: falling back to older update` in logcat. The six required vars now
+  live in the EAS **preview** environment (`eas env:list --environment preview` to verify);
+  the **production** environment must get the same vars (minus `EXPO_PUBLIC_DEV_SKIP`)
+  **before** the first production OTA is ever published. Note: a blacklisted update is dead
+  on that device — publish a new (fixed) update rather than expecting the old one to retry.
 - `tsconfig.json`'s `@/assets/*` path alias maps to the **project-root** `assets/` folder,
   not `src/assets/` — the more general `@/*` → `./src/*` alias does NOT cover it. Any asset
   `require()`d via `@/assets/...` must physically live in root `assets/`, or Metro fails to

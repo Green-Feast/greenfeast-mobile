@@ -52,6 +52,19 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.2 — 2026-07-08
+- Build 3, OTA 2.
+- Republish of 1.3.1 — same app code, fixed update bundle. **Root cause of the
+  entire "OTA updates never apply" saga found and fixed:** updates published
+  with `--environment preview` take env vars from the EAS server environment
+  (not local `.env` / `eas.json`), which was missing all `EXPO_PUBLIC_*` vars —
+  so every published bundle crashed on launch (`supabaseUrl is required`) and
+  was permanently blacklisted by expo-updates' anti-bricking recovery, leaving
+  the embedded build running forever. All six vars now live in the EAS preview
+  environment. Details in AGENTS.md "Known gotchas."
+- The 1.3.1 update group is abandoned (broken bundle, blacklisted on devices
+  that attempted it).
+
 ### 1.3.1 — 2026-07-08
 - Build 3, OTA 1.
 - Home: fixed "No delivery today" showing incorrectly on days with both a
