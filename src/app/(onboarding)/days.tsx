@@ -6,7 +6,7 @@ import * as Haptics from 'expo-haptics'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import OnboardingProgress from '@/components/OnboardingProgress'
+import SectionProgress from '@/components/SectionProgress'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -41,7 +41,7 @@ export default function DaysScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}>
-      <OnboardingProgress steps={4} current={3} />
+      <SectionProgress current={3} sectionStep={5} sectionTotalSteps={5} />
       <View style={styles.header}>
         <Text style={styles.title}>When do you want your meals?</Text>
         <Text style={styles.subtitle}>We deliver Monday to Saturday</Text>

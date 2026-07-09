@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native'
 import { Image } from 'expo-image'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
@@ -32,12 +33,19 @@ export default function GateScreen() {
   return (
     <View style={styles.container}>
       {/* Food photo — top half */}
-      <Image
-        source={FOOD_PHOTO}
-        style={styles.photo}
-        contentFit="cover"
-        cachePolicy="memory-disk"
-      />
+      <View style={styles.photoWrap}>
+        <Image
+          source={FOOD_PHOTO}
+          style={styles.photo}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+        <LinearGradient
+          colors={['transparent', Colors.cream50]}
+          style={styles.photoFade}
+          pointerEvents="none"
+        />
+      </View>
 
       {/* Bottom content */}
       <View style={[styles.bottom, { paddingBottom: insets.bottom + 32 }]}>
@@ -84,9 +92,20 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cream50,
   },
 
-  photo: {
+  photoWrap: {
     width: '100%',
     height: '45%',
+  },
+  photo: {
+    width: '100%',
+    height: '100%',
+  },
+  photoFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '35%',
   },
 
   bottom: {

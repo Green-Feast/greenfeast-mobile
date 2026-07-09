@@ -52,6 +52,34 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.4 — 2026-07-09
+- Build 3, OTA 4.
+- Fixed back navigation: root layout now uses a real `Stack` instead of a
+  headless `Slot`, and Terms/Privacy moved into their own `(legal)` route
+  group — swiping back from anywhere now returns to the actual previous
+  screen instead of an unrelated one.
+- Unified onboarding's 4 competing progress bars into a single "train track"
+  `SectionProgress` (current section's segment expands with fine sub-step
+  fill; others stay compact) — consistent from Height & Weight through
+  Payment. Name/Phone no longer show a progress bar.
+- Sign-in screen: added a hero photo and now owns the Terms/Privacy consent
+  checkbox (gating Google/Apple/email sign-in); removed from the Name screen.
+  Consent is recorded once, robustly, regardless of which auth path is used.
+- Fixed the height/weight ruler's off-by-one display and the arrow-button/
+  scroll desync; fixed the drag-to-rank goal card's shadow getting clipped by
+  neighboring cards mid-drag; renamed "Eat cleaner" → "Gut health".
+- Added protein + fibre daily target scales (replacing a plain text box) —
+  now actually persisted to `dietary_profiles` (previously collected but
+  never saved). Occupation's "Other" option now has a text field, plus 4 new
+  preset options.
+- Recommendation carousel cards are now evenly sized with no dead space;
+  added a menu-style photo. Gate screen's hero photo now fades into the page
+  background instead of cutting off sharply.
+- Delivery address entry now shows live Google Places autocomplete
+  suggestions while typing.
+- Backend: new `protein_target`/`fibre_target` columns on `dietary_profiles`
+  (migration 027, already run).
+
 ### 1.3.3 — 2026-07-09
 - Build 3, OTA 3.
 - My Plan: calendar strip now runs from subscription start through end of

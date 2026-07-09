@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   View,
   Text,
@@ -66,6 +66,56 @@ export default function AddressesScreen() {
   const [addrType, setAddrType] = useState<'home' | 'office' | 'other'>('home')
   const [pin, setPin] = useState<LatLng | null>(null)
 
+  // Address autocomplete (Google Places Autocomplete REST API — no client-only
+  // predictions library installed, and this avoids a new dependency).
+  const [predictions, setPredictions] = useState<{ place_id: string; description: string }[]>([])
+  const [showPredictions, setShowPredictions] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  async function fetchPredictions(text: string) {
+    if (text.trim().length < 3) { setPredictions([]); return }
+    try {
+      const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${key}&components=country:in&location=26.9124,75.7873&radius=50000`
+      const res = await fetch(url)
+      const data = await res.json()
+      setPredictions((data.predictions ?? []).map((p: any) => ({ place_id: p.place_id, description: p.description })))
+    } catch {
+      setPredictions([])
+    }
+  }
+
+  function onLine1Change(t: string) {
+    setLine1(t)
+    setFieldErrors((e) => ({ ...e, line1: '' }))
+    setShowPredictions(true)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => fetchPredictions(t), 300)
+  }
+
+  async function selectPrediction(p: { place_id: string; description: string }) {
+    setShowPredictions(false)
+    setPredictions([])
+    setLine1(p.description)
+    try {
+      const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${p.place_id}&fields=formatted_address,geometry,address_component&key=${key}`
+      const res = await fetch(url)
+      const data = await res.json()
+      const result = data.result
+      if (result?.geometry?.location) {
+        setPin({ lat: result.geometry.location.lat, lng: result.geometry.location.lng })
+      }
+      const postal = result?.address_components?.find((c: any) => c.types.includes('postal_code'))
+      if (postal) {
+        setPincode(postal.long_name)
+        setFieldErrors((e) => ({ ...e, pincode: '' }))
+      }
+    } catch {
+      // Keep the typed text — user can still fill pincode/pin manually.
+    }
+  }
+
   const fetchAddresses = useCallback(async () => {
     if (!user) return
     const { data } = await supabase
@@ -86,6 +136,7 @@ export default function AddressesScreen() {
     setEditingId(null)
     setLine1(''); setLandmark(''); setPincode(''); setLabel('Home'); setAddrType('home'); setPin(null)
     setError(''); setFieldErrors({})
+    setPredictions([]); setShowPredictions(false)
     setFormOpen(true)
   }
 
@@ -95,6 +146,7 @@ export default function AddressesScreen() {
     setLabel(addr.label); setAddrType(addr.type)
     setPin(addr.lat != null && addr.lng != null ? { lat: addr.lat, lng: addr.lng } : null)
     setError(''); setFieldErrors({})
+    setPredictions([]); setShowPredictions(false)
     setFormOpen(true)
   }
 
@@ -242,13 +294,30 @@ export default function AddressesScreen() {
                 keyboardShouldPersistTaps="handled"
               >
                 <FormField label="Street address" error={fieldErrors.line1}>
-                  <TextInput
-                    style={[f.input, fieldErrors.line1 && f.inputError]}
-                    placeholder="House/flat no., street name"
-                    value={line1}
-                    onChangeText={(t) => { setLine1(t); setFieldErrors(e => ({ ...e, line1: '' })) }}
-                    placeholderTextColor={Colors.textLight}
-                  />
+                  <View style={{ position: 'relative', zIndex: 20 }}>
+                    <TextInput
+                      style={[f.input, fieldErrors.line1 && f.inputError]}
+                      placeholder="House/flat no., street name"
+                      value={line1}
+                      onChangeText={onLine1Change}
+                      onFocus={() => setShowPredictions(true)}
+                      onBlur={() => setTimeout(() => setShowPredictions(false), 150)}
+                      placeholderTextColor={Colors.textLight}
+                    />
+                    {showPredictions && predictions.length > 0 && (
+                      <View style={f.predictionsDropdown}>
+                        {predictions.map((p) => (
+                          <Pressable
+                            key={p.place_id}
+                            style={f.predictionRow}
+                            onPress={() => selectPrediction(p)}
+                          >
+                            <Text style={f.predictionText} numberOfLines={2}>{p.description}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+                  </View>
                 </FormField>
 
                 <FormField label="Landmark (optional)">
@@ -398,6 +467,14 @@ const f = StyleSheet.create({
   },
   inputError: { borderColor: Colors.danger },
   fieldError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 4 },
+  predictionsDropdown: {
+    position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
+    backgroundColor: '#fff', borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border,
+    maxHeight: 260, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 6,
+  },
+  predictionRow: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
+  predictionText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text },
   typeBtn: {
     flex: 1, paddingVertical: 11, borderRadius: 999, borderWidth: 1.5,
     borderColor: Colors.border, backgroundColor: '#fff', alignItems: 'center',

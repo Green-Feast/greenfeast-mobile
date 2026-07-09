@@ -12,6 +12,7 @@ import {
 } from 'react-native'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Image } from 'expo-image'
 import { Check } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
@@ -19,7 +20,7 @@ import { useOnboardingStore, type AddOnSelection } from '@/store/onboarding'
 import { MENU_LABELS, M2_INFO, CONSTRAINT_LABELS } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import OnboardingProgress from '@/components/OnboardingProgress'
+import SectionProgress from '@/components/SectionProgress'
 import AllergenBadge from '@/components/AllergenBadge'
 import MacroRow from '@/components/MacroRow'
 
@@ -38,6 +39,12 @@ type Addon = {
 const { width } = Dimensions.get('window')
 const PAGE_W = width
 
+// Representative photo for the "Your menu style" card, picked by menu type.
+const MENU_STYLE_PHOTOS = {
+  M1: require('@/assets/food/quinoa-buddha.jpg'),
+  M2: require('@/assets/food/mediterranean-bliss.jpg'),
+} as const
+
 function fmt(paise: number) {
   return `₹${(paise / 100).toLocaleString('en-IN')}`
 }
@@ -45,7 +52,7 @@ function fmt(paise: number) {
 export default function RecommendationScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { recommendation, allergens, proteinTarget, dietaryFreeText, setPlan } = useOnboardingStore()
+  const { recommendation, allergens, proteinTarget, fibreTarget, dietaryFreeText, setPlan } = useOnboardingStore()
 
   const [plans, setPlans] = useState<Plan[]>([])
   const [addons, setAddons] = useState<Addon[]>([])
@@ -95,6 +102,8 @@ export default function RecommendationScreen() {
 
   const proteinNum = parseInt(proteinTarget)
   const showProtein = !isNaN(proteinNum) && proteinNum > 0
+  const fibreNum = parseInt(fibreTarget)
+  const showFibre = !isNaN(fibreNum) && fibreNum > 0
   const hasExtraProtein = derivedAddons.includes('extra-protein')
   const proteinPerMeal = hasExtraProtein ? 35 : 25
 
@@ -153,7 +162,7 @@ export default function RecommendationScreen() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }} showsVerticalScrollIndicator={false}>
         <View style={styles.padded}>
-          <OnboardingProgress steps={4} current={3} />
+          <SectionProgress current={3} sectionStep={page + 1} sectionTotalSteps={5} />
         </View>
 
         {/* 4-card carousel */}
@@ -192,6 +201,12 @@ export default function RecommendationScreen() {
                 </Text>
               )}
 
+              {showFibre && (
+                <Text style={styles.proteinLine}>
+                  Aim for {fibreNum}g of fibre daily — we'll flag high-fibre dishes on the menu.
+                </Text>
+              )}
+
               <Text style={styles.social}>Members on the {planName} plan see the best results.</Text>
             </View>
           </Page>
@@ -199,6 +214,12 @@ export default function RecommendationScreen() {
           {/* Card 2 — Your menu style */}
           <Page>
             <View style={styles.card}>
+              <Image
+                source={MENU_STYLE_PHOTOS[menuType]}
+                style={styles.menuStylePhoto}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+              />
               <Text style={styles.eyebrow}>Your menu style</Text>
               <Text style={styles.cardTitle}>{menuStyle.title}</Text>
               <View style={styles.menuBadge}>
@@ -338,7 +359,14 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: Colors.green700,
     padding: 24,
-    minHeight: 380,
+    minHeight: 460,
+    justifyContent: 'center',
+  },
+  menuStylePhoto: {
+    width: '100%',
+    height: 140,
+    borderRadius: 14,
+    marginBottom: 18,
   },
   eyebrow: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.green700, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
   script: { fontFamily: Fonts.script, fontSize: 22, color: Colors.green700, marginBottom: 2 },

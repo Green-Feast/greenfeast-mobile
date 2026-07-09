@@ -19,7 +19,7 @@ import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
 import RazorpayWebView from '@/components/RazorpayWebView'
-import OnboardingProgress from '@/components/OnboardingProgress'
+import SectionProgress from '@/components/SectionProgress'
 
 type Method = 'razorpay' | 'cod'
 type Phase = 'summary' | 'creating' | 'checkout' | 'success'
@@ -143,6 +143,8 @@ export default function PaymentScreen() {
         exercise_type: store.exerciseType,
         exercise_frequency: store.exerciseFrequency || null,
         occupation: store.occupation || null,
+        protein_target: store.proteinTarget ? parseInt(store.proteinTarget) : null,
+        fibre_target: store.fibreTarget ? parseInt(store.fibreTarget) : null,
       }, { onConflict: 'user_id' })
     if (dietErr) throw dietErr
 
@@ -374,7 +376,7 @@ export default function PaymentScreen() {
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 120 }]}
       >
-        <OnboardingProgress steps={4} current={3} />
+        <SectionProgress current={4} sectionStep={3} sectionTotalSteps={3} />
         <Text style={styles.title}>Complete your order</Text>
 
         {/* Order recap */}

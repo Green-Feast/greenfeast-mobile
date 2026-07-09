@@ -263,7 +263,7 @@ export default function AccountScreen() {
 
           <Pressable
             style={({ pressed }) => [styles.row, styles.rowBorder, pressed && styles.rowPressed]}
-            onPress={() => router.push('/legal/terms' as any)}
+            onPress={() => router.push('/(legal)/terms' as any)}
           >
             <FileText size={18} color={Colors.ink500} />
             <Text style={[styles.rowLabel, { flex: 1 }]}>Terms & Conditions</Text>
@@ -272,7 +272,7 @@ export default function AccountScreen() {
 
           <Pressable
             style={({ pressed }) => [styles.row, user && styles.rowBorder, pressed && styles.rowPressed]}
-            onPress={() => router.push('/legal/privacy' as any)}
+            onPress={() => router.push('/(legal)/privacy' as any)}
           >
             <Shield size={18} color={Colors.ink500} />
             <Text style={[styles.rowLabel, { flex: 1 }]}>Privacy Policy</Text>

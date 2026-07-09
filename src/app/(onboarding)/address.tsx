@@ -14,7 +14,7 @@ import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import OnboardingProgress from '@/components/OnboardingProgress'
+import SectionProgress from '@/components/SectionProgress'
 import LocationPicker, { type LatLng } from '@/components/LocationPicker'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
@@ -103,7 +103,7 @@ export default function AddressScreen() {
       style={styles.container}
       contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}
     >
-      <OnboardingProgress steps={4} current={3} />
+      <SectionProgress current={4} sectionStep={1} sectionTotalSteps={3} />
       <View style={styles.header}>
         <Text style={styles.eyebrow}>DELIVERY</Text>
         <Text style={styles.title}>Where do we deliver?</Text>

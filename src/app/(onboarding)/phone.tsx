@@ -11,7 +11,6 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import OnboardingProgress from '@/components/OnboardingProgress'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 export default function OnboardingPhoneScreen() {
@@ -54,9 +53,6 @@ export default function OnboardingPhoneScreen() {
         </Button>
       }
     >
-      {/* Progress bar */}
-      <OnboardingProgress steps={4} current={0} />
-
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.eyebrow}>YOUR NUMBER</Text>

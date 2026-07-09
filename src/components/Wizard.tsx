@@ -12,6 +12,7 @@ import { ArrowLeft } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
+import SectionProgress from '@/components/SectionProgress'
 import { KeyboardStickyFooter } from '@/components/keyboard'
 
 export type WizardStep = {
@@ -31,9 +32,18 @@ type Props = {
   nextLabel?: string
   onComplete: () => void
   onExitFirst?: () => void
+  // Which of the 4 named onboarding sections this wizard belongs to, and
+  // (for sections spanning multiple screens) this screen's offset/total
+  // within that section — see SectionProgress.
+  section: 1 | 2 | 3 | 4
+  sectionStepOffset?: number
+  sectionTotalOverride?: number
 }
 
-export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, onExitFirst }: Props) {
+export default function Wizard({
+  steps, nextLabel = 'Finish →', onComplete, onExitFirst,
+  section, sectionStepOffset = 0, sectionTotalOverride,
+}: Props) {
   const insets = useSafeAreaInsets()
   const [index, setIndex] = useState(0)
   const [footerHeight, setFooterHeight] = useState(0)
@@ -42,7 +52,8 @@ export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, on
 
   const step = steps[index]
   const isLast = index === steps.length - 1
-  const pct = ((index + 1) / steps.length) * 100
+  const sectionStep = sectionStepOffset + index + 1
+  const sectionTotalSteps = sectionTotalOverride ?? steps.length
 
   function animateTo(nextIndex: number, dir: 1 | -1) {
     Animated.parallel([
@@ -77,10 +88,9 @@ export default function Wizard({ steps, nextLabel = 'Finish →', onComplete, on
         <Pressable onPress={back} hitSlop={12} style={styles.backBtn}>
           <ArrowLeft size={20} color={Colors.ink900} />
         </Pressable>
-        <View style={styles.track}>
-          <View style={[styles.fill, { width: `${pct}%` as any }]} />
+        <View style={{ flex: 1 }}>
+          <SectionProgress current={section} sectionStep={sectionStep} sectionTotalSteps={sectionTotalSteps} />
         </View>
-        <Text style={styles.count}>{index + 1}/{steps.length}</Text>
       </View>
 
       <Animated.View style={[styles.body, { opacity: fade, transform: [{ translateX: slide }] }]}>
@@ -127,27 +137,12 @@ const styles = StyleSheet.create({
 
   top: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
   backBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  track: {
-    flex: 1,
-    height: 3,
-    borderRadius: 999,
-    backgroundColor: Colors.border,
-    overflow: 'hidden',
-  },
-  fill: { height: '100%', borderRadius: 999, backgroundColor: Colors.green700 },
-  count: {
-    fontFamily: Fonts.bodyMed,
-    fontSize: 12,
-    color: Colors.ink400,
-    minWidth: 32,
-    textAlign: 'right',
-  },
 
   body: { flex: 1 },
   fillView: { flex: 1 },

@@ -28,7 +28,7 @@ const RANK_GOALS: GoalItem[] = [
   { id: 'lose-weight',      label: 'Weight loss'     },
   { id: 'boost-energy',     label: 'More energy'     },
   { id: 'build-muscle',     label: 'Muscle building' },
-  { id: 'improve-wellness', label: 'Eat cleaner'     },
+  { id: 'improve-wellness', label: 'Gut health'       },
 ]
 
 const EXERCISE_TYPES = [
@@ -42,7 +42,8 @@ const EXERCISE_TYPES = [
 const FREQUENCIES = ['Daily', '4–5 times a week', '2–3 times a week', 'Rarely']
 const OCCUPATIONS = [
   'Doctor', 'Student', 'Working Professional', 'Business Owner',
-  'Freelancer', 'Content Creator', 'Other',
+  'Freelancer', 'Content Creator', 'Homemaker', 'Teacher',
+  'Retired', 'Government Employee', 'Other',
 ]
 const NO_EXERCISE = 'No regular exercise'
 
@@ -56,11 +57,13 @@ export default function HealthScreen() {
   const [heightCm, setHeightCm] = useState(170)
   const [weightKg, setWeightKg] = useState(70)
 
-  const [proteinTarget, setProteinTarget] = useState('')
+  const [proteinTarget, setProteinTarget] = useState(120)
+  const [fibreTarget, setFibreTarget] = useState(25)
   const [ranked, setRanked] = useState<GoalItem[]>(RANK_GOALS)
   const [exerciseType, setExerciseType] = useState<string[]>([])
   const [frequency, setFrequency] = useState('')
   const [occupation, setOccupation] = useState('')
+  const [occupationOther, setOccupationOther] = useState('')
 
   function toggleExercise(type: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
@@ -84,15 +87,17 @@ export default function HealthScreen() {
   function handleComplete() {
     const order = ranked.map((g) => g.id)
     const goal = order[0]
+    const finalOccupation = occupation === 'Other' ? (occupationOther.trim() || 'Other') : occupation
     setHealthProfile({
       height: String(heightCm),
       weight: String(weightKg),
-      proteinTarget,
+      proteinTarget: String(proteinTarget),
+      fibreTarget: String(fibreTarget),
       healthGoal: goal,
       goalRanking: order,
       exerciseType,
       exerciseFrequency: frequency,
-      occupation,
+      occupation: finalOccupation,
     })
     if (user) {
       ;(async () => {
@@ -103,7 +108,9 @@ export default function HealthScreen() {
           height: heightCm,
           exercise_type: exerciseType,
           exercise_frequency: frequency || null,
-          occupation: occupation || null,
+          occupation: finalOccupation || null,
+          protein_target: proteinTarget,
+          fibre_target: fibreTarget,
         }, { onConflict: 'user_id' })
       })().catch(() => {})
     }
@@ -121,7 +128,7 @@ export default function HealthScreen() {
             drag()
           }}
           delayLongPress={120}
-          style={[styles.rankRow, isActive && styles.rankRowActive]}
+          style={[styles.rankRow, isActive && styles.rankRowActive, { zIndex: isActive ? 10 : 1 }]}
         >
           <GripVertical size={18} color={Colors.ink300} />
           <View style={styles.rankNum}>
@@ -225,25 +232,23 @@ export default function HealthScreen() {
       ),
     },
 
-    // SF5 — Protein Target
+    // SF5 — Protein + Fibre Target
     {
-      key: 'protein',
+      key: 'targets',
       eyebrow: 'YOUR GOALS',
-      title: 'Daily protein target',
-      subtitle: 'Optional — leave blank and we\'ll calculate it for you.',
+      title: 'Daily protein + fibre target',
+      subtitle: 'We\'ve set sensible defaults — adjust if you have specific targets.',
       canNext: true,
       render: () => (
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>DAILY PROTEIN TARGET (G)</Text>
-          <TextInput
-            style={styles.fieldInput}
-            placeholder="e.g. 120"
-            keyboardType="number-pad"
-            value={proteinTarget}
-            onChangeText={(t) => setProteinTarget(t.replace(/\D/g, ''))}
-            placeholderTextColor={Colors.ink300}
-            maxLength={3}
-          />
+        <View style={styles.rulersWrap}>
+          <View style={styles.rulerGroup}>
+            <Text style={styles.rulerLabel}>PROTEIN</Text>
+            <RulerPicker min={40} max={250} value={proteinTarget} onChange={setProteinTarget} unit="g" />
+          </View>
+          <View style={styles.rulerGroup}>
+            <Text style={styles.rulerLabel}>FIBRE</Text>
+            <RulerPicker min={10} max={60} value={fibreTarget} onChange={setFibreTarget} unit="g" />
+          </View>
         </View>
       ),
     },
@@ -256,19 +261,34 @@ export default function HealthScreen() {
       subtitle: 'Helps us understand your daily energy needs.',
       canNext: true,
       render: () => (
-        <View style={styles.pillWrap}>
-          {OCCUPATIONS.map((opt) => {
-            const on = occupation === opt
-            return (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.pill, on && styles.pillActive]}
-                onPress={() => toggleOccupation(opt)}
-              >
-                <Text style={[styles.pillText, on && styles.pillTextActive]}>{opt}</Text>
-              </TouchableOpacity>
-            )
-          })}
+        <View>
+          <View style={styles.pillWrap}>
+            {OCCUPATIONS.map((opt) => {
+              const on = occupation === opt
+              return (
+                <TouchableOpacity
+                  key={opt}
+                  style={[styles.pill, on && styles.pillActive]}
+                  onPress={() => toggleOccupation(opt)}
+                >
+                  <Text style={[styles.pillText, on && styles.pillTextActive]}>{opt}</Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+          {occupation === 'Other' && (
+            <View style={[styles.field, { marginTop: 20 }]}>
+              <Text style={styles.fieldLabel}>YOUR OCCUPATION</Text>
+              <TextInput
+                style={[styles.fieldInput, { textAlign: 'left', fontSize: 20 }]}
+                placeholder="e.g. Architect"
+                value={occupationOther}
+                onChangeText={setOccupationOther}
+                placeholderTextColor={Colors.ink300}
+                maxLength={40}
+              />
+            </View>
+          )}
         </View>
       ),
     },
@@ -280,6 +300,7 @@ export default function HealthScreen() {
       nextLabel="Next →"
       onComplete={handleComplete}
       onExitFirst={() => router.back()}
+      section={1}
     />
   )
 }

@@ -3,17 +3,13 @@ import {
   View,
   Text,
   TextInput,
-  Pressable,
   StyleSheet,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Check } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
-import { LEGAL_LAST_UPDATED } from '@/constants/legal'
 import Button from '@/components/Button'
-import OnboardingProgress from '@/components/OnboardingProgress'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 export default function OnboardingNameScreen() {
@@ -23,10 +19,9 @@ export default function OnboardingNameScreen() {
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [agreed, setAgreed] = useState(false)
   const inputRef = useAutoFocus()
 
-  const isValid = name.trim().length >= 2 && agreed
+  const isValid = name.trim().length >= 2
 
   // Pre-fill from OAuth profile on mount
   useEffect(() => {
@@ -50,11 +45,7 @@ export default function OnboardingNameScreen() {
     }
     const { error: updateError } = await supabase
       .from('users')
-      .update({
-        name: name.trim(),
-        terms_accepted_at: new Date().toISOString(),
-        terms_version: LEGAL_LAST_UPDATED,
-      })
+      .update({ name: name.trim() })
       .eq('id', user.id)
 
     if (updateError) {
@@ -76,9 +67,6 @@ export default function OnboardingNameScreen() {
         </Button>
       }
     >
-      {/* Progress bar */}
-      <OnboardingProgress steps={4} current={0} />
-
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.eyebrow}>YOU</Text>
@@ -110,27 +98,6 @@ export default function OnboardingNameScreen() {
           onSubmitEditing={handleContinue}
         />
         {error ? <Text style={styles.error}>{error}</Text> : null}
-      </View>
-
-      {/* Terms & Privacy consent */}
-      <View style={styles.consentRow}>
-        <Pressable
-          style={[styles.checkbox, agreed && styles.checkboxChecked]}
-          onPress={() => setAgreed((v) => !v)}
-          hitSlop={8}
-        >
-          {agreed && <Check size={14} color="#fff" strokeWidth={3} />}
-        </Pressable>
-        <Text style={styles.consentText} onPress={() => setAgreed((v) => !v)}>
-          I agree to the{' '}
-          <Text style={styles.consentLink} onPress={() => router.push('/legal/terms' as any)}>
-            Terms & Conditions
-          </Text>
-          {' '}and{' '}
-          <Text style={styles.consentLink} onPress={() => router.push('/legal/privacy' as any)}>
-            Privacy Policy
-          </Text>
-        </Text>
       </View>
     </KeyboardAwareScreen>
   )
@@ -195,39 +162,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.danger,
     marginTop: 8,
-  },
-
-  consentRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    paddingHorizontal: 20,
-    marginTop: 24,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  checkboxChecked: {
-    backgroundColor: Colors.green700,
-    borderColor: Colors.green700,
-  },
-  consentText: {
-    flex: 1,
-    fontFamily: Fonts.body,
-    fontSize: 13,
-    color: Colors.ink500,
-    lineHeight: 19,
-  },
-  consentLink: {
-    fontFamily: Fonts.bodyMed,
-    color: Colors.green700,
-    textDecorationLine: 'underline',
   },
 })

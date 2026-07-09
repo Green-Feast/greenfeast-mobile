@@ -62,6 +62,13 @@ const QUESTIONS: Record<string, QuestionSet> = {
   },
 }
 
+// Shared with dietary.tsx so both screens agree on Section 2's total step
+// count for the SectionProgress "train track" bar (1 or 2 dynamic questions
+// here, plus dietary.tsx's own single step).
+export function getQuestionCount(goal: string): number {
+  return QUESTIONS[goal]?.q2 ? 2 : 1
+}
+
 export default function QuestionnaireScreen() {
   const router = useRouter()
   const { healthGoal, exerciseFrequency, setQuestionnaire } = useOnboardingStore()
@@ -79,6 +86,7 @@ export default function QuestionnaireScreen() {
 
   const qs = QUESTIONS[healthGoal]
   const needsQ2 = !!qs.q2
+  const questionCount = getQuestionCount(healthGoal)
 
   function handleComplete() {
     const recommendation = computeRecommendation({
@@ -153,6 +161,8 @@ export default function QuestionnaireScreen() {
       nextLabel="See my plan →"
       onComplete={handleComplete}
       onExitFirst={() => router.back()}
+      section={2}
+      sectionTotalOverride={questionCount + 1}
     />
   )
 }

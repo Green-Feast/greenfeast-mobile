@@ -7,13 +7,15 @@ import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Wizard, { type WizardStep } from '@/components/Wizard'
+import { getQuestionCount } from '@/app/(onboarding)/questionnaire'
 
 const ALLERGENS = ['Peanuts', 'Dairy', 'Quinoa', 'Soy', 'Nuts', 'Gluten', 'Lactose']
 
 export default function DietaryScreen() {
   const router = useRouter()
-  const { setDietaryBasics } = useOnboardingStore()
+  const { setDietaryBasics, healthGoal } = useOnboardingStore()
   const { user } = useAuthStore()
+  const questionCount = getQuestionCount(healthGoal ?? '')
 
   const [allergens, setAllergens] = useState<string[]>([])
   const [freeText, setFreeText] = useState('')
@@ -87,6 +89,9 @@ export default function DietaryScreen() {
       nextLabel="Build my plan →"
       onComplete={handleComplete}
       onExitFirst={() => router.back()}
+      section={2}
+      sectionStepOffset={questionCount}
+      sectionTotalOverride={questionCount + 1}
     />
   )
 }

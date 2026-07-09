@@ -30,7 +30,13 @@ export default function RulerPicker({
   const [rulerWidth, setRulerWidth] = useState(0)
   const didInitialScroll = useRef(false)
 
-  const xForValue = (v: number) => (v - min) * TICK_SPACING
+  // Each tick's slot is TICK_SPACING wide with its line centered inside, so
+  // the scroll offset that puts tick v exactly under the fixed center
+  // indicator needs the extra half-tick — omitting it (as this used to)
+  // means the indicator always sits between two ticks, off by one after
+  // handleScrollEnd's rounding resolves the ambiguity.
+  const xForValue = (v: number) => (v - min) * TICK_SPACING + TICK_SPACING / 2
+  const valueForX = (x: number) => min + Math.round((x - TICK_SPACING / 2) / TICK_SPACING)
 
   function onRulerLayout(e: LayoutChangeEvent) {
     const w = e.nativeEvent.layout.width
@@ -43,10 +49,13 @@ export default function RulerPicker({
     }
   }
 
-  // Scroll to match when value changes via arrow buttons (not from scroll)
+  // Scroll to match when value changes via arrow buttons (not from scroll).
+  // lastScrollValue.current is updated here (not in nudge()) so this guard
+  // still sees the stale value and actually fires the scroll.
   useEffect(() => {
     if (!didInitialScroll.current || rulerWidth === 0) return
     if (value !== lastScrollValue.current) {
+      lastScrollValue.current = value
       scrollRef.current?.scrollTo({ x: xForValue(value), animated: true })
     }
   }, [value])
@@ -54,7 +63,7 @@ export default function RulerPicker({
   function handleScroll(event: any) {
     if (rulerWidth === 0) return
     const x = event.nativeEvent.contentOffset.x
-    const derived = Math.min(max, Math.max(min, min + Math.round(x / TICK_SPACING)))
+    const derived = Math.min(max, Math.max(min, valueForX(x)))
     if (derived !== lastHapticValue.current) {
       lastHapticValue.current = derived
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -63,7 +72,7 @@ export default function RulerPicker({
 
   function handleScrollEnd(event: any) {
     const x = event.nativeEvent.contentOffset.x
-    const derived = Math.min(max, Math.max(min, min + Math.round(x / TICK_SPACING)))
+    const derived = Math.min(max, Math.max(min, valueForX(x)))
     lastScrollValue.current = derived
     if (derived !== value) onChange(derived)
   }
@@ -71,7 +80,6 @@ export default function RulerPicker({
   function nudge(dir: 1 | -1) {
     const next = Math.min(max, Math.max(min, value + dir * step))
     if (next === value) return
-    lastScrollValue.current = next
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     onChange(next)
   }

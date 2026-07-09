@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   ActivityIndicator,
   Platform,
@@ -11,6 +12,10 @@ import {
 } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
+import { Image } from 'expo-image'
+import { LinearGradient } from 'expo-linear-gradient'
+import { Check } from 'lucide-react-native'
 import * as WebBrowser from 'expo-web-browser'
 import * as Linking from 'expo-linking'
 import { makeRedirectUri } from 'expo-auth-session'
@@ -19,15 +24,19 @@ import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Logo from '@/components/Logo'
 
+const HERO_PHOTO = require('@/assets/food/burrito-bowl.jpg')
+
 WebBrowser.maybeCompleteAuthSession()
 
 type EmailMode = 'signin' | 'signup'
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets()
+  const router = useRouter()
   const [googleLoading, setGoogleLoading] = useState(false)
   const [appleLoading, setAppleLoading] = useState(false)
   const [error, setError] = useState('')
+  const [agreed, setAgreed] = useState(false)
   const handledUrl = useRef<string | null>(null)
 
   const [emailMode, setEmailMode] = useState<EmailMode>('signin')
@@ -177,9 +186,15 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { paddingTop: insets.top + 24 }]}
+      style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      {/* Hero photo */}
+      <View style={styles.heroWrap}>
+        <Image source={HERO_PHOTO} style={styles.heroPhoto} contentFit="cover" cachePolicy="memory-disk" />
+        <LinearGradient colors={['transparent', Colors.cream50]} style={styles.heroFade} pointerEvents="none" />
+      </View>
+
       {/* Wordmark */}
       <View style={styles.wordmarkRow}>
         <Logo size={24} />
@@ -201,7 +216,7 @@ export default function LoginScreen() {
         <TouchableOpacity
           style={styles.oauthBtn}
           onPress={signInWithGoogle}
-          disabled={isLoading}
+          disabled={isLoading || !agreed}
         >
           {googleLoading ? (
             <ActivityIndicator color={Colors.ink900} />
@@ -218,7 +233,7 @@ export default function LoginScreen() {
           <TouchableOpacity
             style={styles.appleBtn}
             onPress={signInWithApple}
-            disabled={isLoading}
+            disabled={isLoading || !agreed}
           >
             {appleLoading ? (
               <ActivityIndicator color="#fff" />
@@ -297,7 +312,7 @@ export default function LoginScreen() {
           <TouchableOpacity
             style={styles.emailBtn}
             onPress={handleEmailAuth}
-            disabled={emailLoading}
+            disabled={emailLoading || !agreed}
           >
             {emailLoading ? (
               <ActivityIndicator color="#fff" />
@@ -309,9 +324,26 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.terms}>
-          By continuing you agree to our Terms of Service and Privacy Policy
-        </Text>
+        {/* Terms & Privacy consent */}
+        <View style={styles.consentRow}>
+          <Pressable
+            style={[styles.checkbox, agreed && styles.checkboxChecked]}
+            onPress={() => setAgreed((v) => !v)}
+            hitSlop={8}
+          >
+            {agreed && <Check size={14} color="#fff" strokeWidth={3} />}
+          </Pressable>
+          <Text style={styles.consentText} onPress={() => setAgreed((v) => !v)}>
+            I agree to the{' '}
+            <Text style={styles.consentLink} onPress={() => router.push('/(legal)/terms' as any)}>
+              Terms & Conditions
+            </Text>
+            {' '}and{' '}
+            <Text style={styles.consentLink} onPress={() => router.push('/(legal)/privacy' as any)}>
+              Privacy Policy
+            </Text>
+          </Text>
+        </View>
 
         {SHOW_DEV_SKIP && (
           <TouchableOpacity
@@ -334,11 +366,28 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cream50,
   },
 
+  heroWrap: {
+    width: '100%',
+    height: 200,
+  },
+  heroPhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  heroFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '60%',
+  },
+
   wordmarkRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 20,
+    marginTop: 4,
     marginBottom: 8,
   },
   wordmarkText: {
@@ -460,7 +509,38 @@ const styles = StyleSheet.create({
   successDesc: { fontFamily: Fonts.body, fontSize: 15, color: Colors.ink500, lineHeight: 22 },
   successEmail: { fontFamily: Fonts.bodyBold, color: Colors.ink900 },
 
-  terms: { fontFamily: Fonts.body, fontSize: 11, color: Colors.ink400, textAlign: 'center' },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 4,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: Colors.green700,
+    borderColor: Colors.green700,
+  },
+  consentText: {
+    flex: 1,
+    fontFamily: Fonts.body,
+    fontSize: 13,
+    color: Colors.ink500,
+    lineHeight: 19,
+  },
+  consentLink: {
+    fontFamily: Fonts.bodyMed,
+    color: Colors.green700,
+    textDecorationLine: 'underline',
+  },
   devBtn: { alignItems: 'center', padding: 10 },
   devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink300, textDecorationLine: 'underline' },
 })

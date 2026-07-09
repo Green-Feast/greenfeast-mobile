@@ -17,6 +17,7 @@ interface OnboardingState {
   height: string
   weight: string
   proteinTarget: string         // optional daily protein target (g)
+  fibreTarget: string           // optional daily fibre target (g)
   healthGoal: HealthGoal | null // = goalRanking[0]; drives questionnaire + engine
   goalRanking: HealthGoal[]     // full priority order (drag-to-rank)
   exerciseType: string[]
@@ -59,6 +60,7 @@ interface OnboardingState {
     height: string
     weight: string
     proteinTarget: string
+    fibreTarget: string
     healthGoal: HealthGoal
     goalRanking: HealthGoal[]
     exerciseType: string[]
@@ -98,6 +100,7 @@ const defaultState: Omit<OnboardingState, ActionKeys> = {
   height: '',
   weight: '',
   proteinTarget: '',
+  fibreTarget: '',
   healthGoal: null,
   goalRanking: [],
   exerciseType: [],

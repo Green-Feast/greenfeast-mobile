@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Slot, useRouter, useSegments } from 'expo-router'
+import { Stack, useRouter, useSegments } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { Platform, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
@@ -25,6 +25,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { useOtaNotifications } from '@/hooks/useOtaNotifications'
 import { Colors } from '@/constants/colors'
+import { LEGAL_LAST_UPDATED } from '@/constants/legal'
 
 SplashScreen.preventAutoHideAsync()
 
@@ -49,6 +50,19 @@ function AuthGate() {
         setPhone(data?.phone ?? null)
         setOnboarded(data?.onboarded ?? false)
         setHasSubscription((count ?? 0) > 0)
+
+        // Record Terms/Privacy consent exactly once per account, the moment
+        // any session is first established. Safe to run unconditionally on
+        // every auth event (Google/Apple/email, native or web redirect) —
+        // the login screen's checkbox gates every sign-in/sign-up action, so
+        // reaching a session at all implies consent was given; the .is(...)
+        // guard means a returning user's original timestamp is never
+        // overwritten by a later login.
+        supabase.from('users')
+          .update({ terms_accepted_at: new Date().toISOString(), terms_version: LEGAL_LAST_UPDATED })
+          .eq('id', session.user.id)
+          .is('terms_accepted_at', null)
+          .then(() => {})
       } else {
         setPhone(null)
         setOnboarded(false)
@@ -68,7 +82,7 @@ function AuthGate() {
     const inAppGroup = segments[0] === '(app)'
     // Terms/Privacy must be reachable from any auth state (guest, mid-signup,
     // mid-onboarding) — exempt it from every redirect below.
-    const inLegalGroup = (segments[0] as string) === 'legal'
+    const inLegalGroup = (segments[0] as string) === '(legal)'
     if (inLegalGroup) return
 
     if (!session) {
@@ -100,7 +114,10 @@ function AuthGate() {
     }
   }, [session, phone, onboarded, loading, segments])
 
-  return <Slot />
+  // Stack instead of Slot so the whole app has one real navigation history —
+  // back/swipe-back always returns to the literal previous screen, matching
+  // the fix already applied to (app)/_layout.tsx for the same reason.
+  return <Stack screenOptions={{ headerShown: false }} />
 }
 
 export default function RootLayout() {

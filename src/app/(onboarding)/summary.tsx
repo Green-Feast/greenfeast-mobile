@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
-import OnboardingProgress from '@/components/OnboardingProgress'
+import SectionProgress from '@/components/SectionProgress'
 import AllergenBadge from '@/components/AllergenBadge'
 
 type Plan = { id: string; name: string; meals_total: number; base_price: number }
@@ -68,7 +68,7 @@ export default function SummaryScreen() {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]} showsVerticalScrollIndicator={false}>
-        <OnboardingProgress steps={4} current={3} />
+        <SectionProgress current={4} sectionStep={2} sectionTotalSteps={3} />
         <View style={styles.header}>
           <Text style={styles.title}>Your subscription</Text>
         </View>
