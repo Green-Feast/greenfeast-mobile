@@ -16,6 +16,7 @@ import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 import LocationPicker, { type LatLng } from '@/components/LocationPicker'
+import { usePlacesAutocomplete, PredictionsDropdown } from '@/components/PlacesAutocomplete'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 const ADDRESS_TYPES = [
@@ -39,6 +40,16 @@ export default function AddressScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [focused, setFocused] = useState<string | null>(null)
   const line1Ref = useAutoFocus()
+
+  const autocomplete = usePlacesAutocomplete((sel) => {
+    setLine1(sel.description)
+    setErrors((e) => ({ ...e, line1: '' }))
+    if (sel.pincode && /^\d{6}$/.test(sel.pincode)) {
+      setPincode(sel.pincode)
+      setErrors((e) => ({ ...e, pincode: '' }))
+    }
+    if (sel.lat != null && sel.lng != null) setPin({ lat: sel.lat, lng: sel.lng })
+  })
 
   function validate() {
     const e: Record<string, string> = {}
@@ -121,10 +132,19 @@ export default function AddressScreen() {
           ]}
           placeholder="Enter your street address"
           value={line1}
-          onChangeText={(t) => { setLine1(t); setErrors((e) => ({ ...e, line1: '' })) }}
-          onFocus={() => setFocused('line1')}
-          onBlur={() => setFocused(null)}
+          onChangeText={(t) => {
+            setLine1(t)
+            setErrors((e) => ({ ...e, line1: '' }))
+            autocomplete.onChangeText(t)
+          }}
+          onFocus={() => { setFocused('line1'); autocomplete.onFocus() }}
+          onBlur={() => { setFocused(null); autocomplete.onBlur() }}
           placeholderTextColor={Colors.ink300}
+        />
+        <PredictionsDropdown
+          predictions={autocomplete.predictions}
+          visible={autocomplete.visible}
+          onPick={autocomplete.selectPrediction}
         />
         {errors.line1 ? <Text style={styles.error}>{errors.line1}</Text> : null}
       </View>

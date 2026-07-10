@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.6 — 2026-07-11
+- Build 3, OTA 6.
+- Address autocomplete now actually appears where the user reported it
+  missing: it had only been wired into the Address book screen, not the
+  **onboarding** Delivery Address screen (SF11) they were testing. Root
+  cause confirmed live via adb: on 1.3.5, typing in SF11's street field
+  produced zero network calls — the screen simply had no autocomplete code.
+  The key + API were verified working via a direct curl (status OK).
+- Extracted the logic into a shared `PlacesAutocomplete` component
+  (`usePlacesAutocomplete` hook + `PredictionsDropdown`), now used by BOTH
+  address forms, replacing the inline copy in the Address book screen.
+
 ### 1.3.5 — 2026-07-09
 - Build 3, OTA 5.
 - Recommendation carousel: all 4 cards are now a true fixed equal height
