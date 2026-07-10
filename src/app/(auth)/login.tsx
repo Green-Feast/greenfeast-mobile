@@ -58,7 +58,16 @@ export default function LoginScreen() {
     })
   }, [incomingUrl])
 
+  const CONSENT_MSG = 'Please tick the box below to agree to the Terms & Conditions and Privacy Policy first.'
+
+  function toggleAgreed() {
+    const next = !agreed
+    setAgreed(next)
+    if (next && error === CONSENT_MSG) setError('')
+  }
+
   async function signInWithGoogle() {
+    if (!agreed) { setError(CONSENT_MSG); return }
     setGoogleLoading(true)
     setError('')
     try {
@@ -92,6 +101,7 @@ export default function LoginScreen() {
   }
 
   async function signInWithApple() {
+    if (!agreed) { setError(CONSENT_MSG); return }
     setAppleLoading(true)
     setError('')
     try {
@@ -119,6 +129,7 @@ export default function LoginScreen() {
   }
 
   async function handleEmailAuth() {
+    if (!agreed) { setError(CONSENT_MSG); return }
     const trimmedEmail = email.trim()
     const trimmedPassword = password.trim()
     if (!trimmedEmail || !trimmedPassword) {
@@ -216,7 +227,7 @@ export default function LoginScreen() {
         <TouchableOpacity
           style={styles.oauthBtn}
           onPress={signInWithGoogle}
-          disabled={isLoading || !agreed}
+          disabled={isLoading}
         >
           {googleLoading ? (
             <ActivityIndicator color={Colors.ink900} />
@@ -233,7 +244,7 @@ export default function LoginScreen() {
           <TouchableOpacity
             style={styles.appleBtn}
             onPress={signInWithApple}
-            disabled={isLoading || !agreed}
+            disabled={isLoading}
           >
             {appleLoading ? (
               <ActivityIndicator color="#fff" />
@@ -312,7 +323,7 @@ export default function LoginScreen() {
           <TouchableOpacity
             style={styles.emailBtn}
             onPress={handleEmailAuth}
-            disabled={emailLoading || !agreed}
+            disabled={emailLoading}
           >
             {emailLoading ? (
               <ActivityIndicator color="#fff" />
@@ -328,12 +339,12 @@ export default function LoginScreen() {
         <View style={styles.consentRow}>
           <Pressable
             style={[styles.checkbox, agreed && styles.checkboxChecked]}
-            onPress={() => setAgreed((v) => !v)}
+            onPress={toggleAgreed}
             hitSlop={8}
           >
             {agreed && <Check size={14} color="#fff" strokeWidth={3} />}
           </Pressable>
-          <Text style={styles.consentText} onPress={() => setAgreed((v) => !v)}>
+          <Text style={styles.consentText} onPress={toggleAgreed}>
             I agree to the{' '}
             <Text style={styles.consentLink} onPress={() => router.push('/(legal)/terms' as any)}>
               Terms & Conditions

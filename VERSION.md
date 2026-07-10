@@ -52,6 +52,13 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.7 — 2026-07-11
+- Build 3, OTA 7.
+- Sign-in: tapping Google/Apple/email sign-in without the Terms & Conditions
+  box ticked now shows "Please tick the box below…" instead of the button
+  silently doing nothing (buttons were disabled before, with no feedback).
+  The message clears automatically when the box is ticked.
+
 ### 1.3.6 — 2026-07-11
 - Build 3, OTA 6.
 - Address autocomplete now actually appears where the user reported it
