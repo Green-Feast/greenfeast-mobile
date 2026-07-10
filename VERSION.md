@@ -52,6 +52,23 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.5 — 2026-07-09
+- Build 3, OTA 5.
+- Recommendation carousel: all 4 cards are now a true fixed equal height
+  (was only a `minHeight` before, so longer cards were still taller);
+  each card scrolls internally if its content ever grows past that height.
+- "Your menu style" card: bigger photo (140 → 220) to fill the extra space.
+- Macro breakdown card: added an Apple-Health-style ring showing each
+  macro's share of calories, colored per macro (protein/carbs/fat).
+- Price breakdown card: added a matching ring showing base-plan cost's
+  share of the total, in a single accent-green color (not per-macro colors).
+- Address autocomplete: fixed predictions not appearing — added status/error
+  logging to the Places API calls (silent failures are now visible via
+  `adb logcat` if the key/API config is the issue) and switched the dropdown
+  from absolute positioning to normal in-flow rendering, since an
+  absolutely-positioned dropdown inside a ScrollView is unreliable on
+  Android regardless of the API response.
+
 ### 1.3.4 — 2026-07-09
 - Build 3, OTA 4.
 - Fixed back navigation: root layout now uses a real `Stack` instead of a

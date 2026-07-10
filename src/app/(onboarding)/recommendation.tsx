@@ -23,6 +23,7 @@ import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 import AllergenBadge from '@/components/AllergenBadge'
 import MacroRow from '@/components/MacroRow'
+import MacroRing from '@/components/MacroRing'
 
 type Plan = { id: string; name: string; meals_total: number; base_price: number }
 type Addon = {
@@ -175,7 +176,7 @@ export default function RecommendationScreen() {
         >
           {/* Card 1 — Recommendation */}
           <Page>
-            <View style={styles.card}>
+            <CardShell>
               <Text style={styles.eyebrow}>Built for you</Text>
               <Text style={styles.script}>made for you</Text>
               <Text style={styles.planName}>{planName}</Text>
@@ -208,12 +209,12 @@ export default function RecommendationScreen() {
               )}
 
               <Text style={styles.social}>Members on the {planName} plan see the best results.</Text>
-            </View>
+            </CardShell>
           </Page>
 
           {/* Card 2 — Your menu style */}
           <Page>
-            <View style={styles.card}>
+            <CardShell>
               <Image
                 source={MENU_STYLE_PHOTOS[menuType]}
                 style={styles.menuStylePhoto}
@@ -226,14 +227,29 @@ export default function RecommendationScreen() {
                 <Text style={styles.menuBadgeText}>{MENU_LABELS[menuType]}</Text>
               </View>
               <Text style={styles.menuBody}>{menuStyle.body}</Text>
-            </View>
+            </CardShell>
           </Page>
 
           {/* Card 3 — Macro breakdown */}
           <Page>
-            <View style={styles.card}>
+            <CardShell>
               <Text style={styles.eyebrow}>Macro breakdown</Text>
               <Text style={styles.cardTitle}>What's in each meal</Text>
+
+              {/* Apple-Health-style ring: share of calories from each macro */}
+              <View style={styles.ringWrap}>
+                <MacroRing
+                  size={110}
+                  strokeWidth={12}
+                  centerValue={String(mealMacros.kcal)}
+                  centerLabel="kcal"
+                  segments={[
+                    { value: mealMacros.protein * 4, color: Colors.macroProtein },
+                    { value: mealMacros.carbs * 4, color: Colors.macroCarbs },
+                    { value: mealMacros.fat * 9, color: Colors.macroFat },
+                  ]}
+                />
+              </View>
 
               {/* Full approx macros per meal (base meal + your add-ons) */}
               <View style={styles.macroRowWrap}>
@@ -268,14 +284,29 @@ export default function RecommendationScreen() {
               )}
 
               <Text style={styles.macroNote}>Exact macros vary by dish across the rotating menu.</Text>
-            </View>
+            </CardShell>
           </Page>
 
           {/* Card 4 — Price breakdown */}
           <Page>
-            <View style={styles.card}>
+            <CardShell>
               <Text style={styles.eyebrow}>Price breakdown</Text>
               <Text style={styles.cardTitle}>{mealsTotal} meals</Text>
+
+              {/* Ring: base plan's share of the total — single accent color,
+                  unlike the macro ring's per-macro colors */}
+              <View style={styles.ringWrap}>
+                <MacroRing
+                  size={110}
+                  strokeWidth={12}
+                  centerValue={fmt(total)}
+                  centerLabel="total"
+                  segments={[
+                    { value: plan?.base_price ?? 0, color: Colors.green700 },
+                    { value: addonPerMeal * mealsTotal, color: Colors.border },
+                  ]}
+                />
+              </View>
 
               <View style={styles.priceList}>
                 <View style={styles.priceLine}>
@@ -299,7 +330,7 @@ export default function RecommendationScreen() {
                 <Text style={styles.totalLabel}>Total</Text>
                 <Text style={styles.totalValue}>{fmt(total)}</Text>
               </View>
-            </View>
+            </CardShell>
           </Page>
         </ScrollView>
 
@@ -337,6 +368,21 @@ function Page({ children }: { children: React.ReactNode }) {
   return <View style={{ width: PAGE_W, paddingHorizontal: 24 }}>{children}</View>
 }
 
+// Fixed height so all 4 carousel cards read as the same size regardless of
+// content length; an inner ScrollView is a safety net if any card's content
+// (e.g. many allergens/add-ons) ever exceeds it, rather than clipping.
+const CARD_HEIGHT = 520
+
+function CardShell({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={styles.card}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.cardScrollContent}>
+        {children}
+      </ScrollView>
+    </View>
+  )
+}
+
 function ChecklistItem({ label }: { label: string }) {
   return (
     <View style={styles.checkItem}>
@@ -358,13 +404,18 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 2,
     borderColor: Colors.green700,
+    height: CARD_HEIGHT,
+    overflow: 'hidden',
+  },
+  cardScrollContent: {
     padding: 24,
-    minHeight: 460,
+    flexGrow: 1,
     justifyContent: 'center',
   },
+  ringWrap: { alignItems: 'center', marginBottom: 18 },
   menuStylePhoto: {
     width: '100%',
-    height: 140,
+    height: 220,
     borderRadius: 14,
     marginBottom: 18,
   },

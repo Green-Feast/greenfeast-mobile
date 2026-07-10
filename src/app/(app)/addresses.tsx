@@ -79,8 +79,19 @@ export default function AddressesScreen() {
       const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${key}&components=country:in&location=26.9124,75.7873&radius=50000`
       const res = await fetch(url)
       const data = await res.json()
+      if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+        // Most common cause: the API key used here needs the "Places API"
+        // enabled and no Android/iOS app restriction — a key restricted to
+        // the native Maps SDK will be rejected for a plain HTTPS call like
+        // this. Logged (not thrown) so the field still degrades to manual
+        // entry instead of breaking the form.
+        console.error('Places Autocomplete error:', data.status, data.error_message)
+        setPredictions([])
+        return
+      }
       setPredictions((data.predictions ?? []).map((p: any) => ({ place_id: p.place_id, description: p.description })))
-    } catch {
+    } catch (e) {
+      console.error('Places Autocomplete request failed:', e)
       setPredictions([])
     }
   }
@@ -102,6 +113,10 @@ export default function AddressesScreen() {
       const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${p.place_id}&fields=formatted_address,geometry,address_component&key=${key}`
       const res = await fetch(url)
       const data = await res.json()
+      if (data.status !== 'OK') {
+        console.error('Places Details error:', data.status, data.error_message)
+        return
+      }
       const result = data.result
       if (result?.geometry?.location) {
         setPin({ lat: result.geometry.location.lat, lng: result.geometry.location.lng })
@@ -111,8 +126,9 @@ export default function AddressesScreen() {
         setPincode(postal.long_name)
         setFieldErrors((e) => ({ ...e, pincode: '' }))
       }
-    } catch {
+    } catch (e) {
       // Keep the typed text — user can still fill pincode/pin manually.
+      console.error('Places Details request failed:', e)
     }
   }
 
@@ -294,30 +310,33 @@ export default function AddressesScreen() {
                 keyboardShouldPersistTaps="handled"
               >
                 <FormField label="Street address" error={fieldErrors.line1}>
-                  <View style={{ position: 'relative', zIndex: 20 }}>
-                    <TextInput
-                      style={[f.input, fieldErrors.line1 && f.inputError]}
-                      placeholder="House/flat no., street name"
-                      value={line1}
-                      onChangeText={onLine1Change}
-                      onFocus={() => setShowPredictions(true)}
-                      onBlur={() => setTimeout(() => setShowPredictions(false), 150)}
-                      placeholderTextColor={Colors.textLight}
-                    />
-                    {showPredictions && predictions.length > 0 && (
-                      <View style={f.predictionsDropdown}>
-                        {predictions.map((p) => (
-                          <Pressable
-                            key={p.place_id}
-                            style={f.predictionRow}
-                            onPress={() => selectPrediction(p)}
-                          >
-                            <Text style={f.predictionText} numberOfLines={2}>{p.description}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    )}
-                  </View>
+                  <TextInput
+                    style={[f.input, fieldErrors.line1 && f.inputError]}
+                    placeholder="House/flat no., street name"
+                    value={line1}
+                    onChangeText={onLine1Change}
+                    onFocus={() => setShowPredictions(true)}
+                    onBlur={() => setTimeout(() => setShowPredictions(false), 150)}
+                    placeholderTextColor={Colors.textLight}
+                  />
+                  {/* Rendered in normal flow (not position:absolute) — an
+                      absolutely-positioned dropdown here would need to escape
+                      this ScrollView's stacking order, which is unreliable on
+                      Android; in-flow just pushes the fields below down while
+                      suggestions are showing. */}
+                  {showPredictions && predictions.length > 0 && (
+                    <View style={f.predictionsDropdown}>
+                      {predictions.map((p) => (
+                        <Pressable
+                          key={p.place_id}
+                          style={f.predictionRow}
+                          onPress={() => selectPrediction(p)}
+                        >
+                          <Text style={f.predictionText} numberOfLines={2}>{p.description}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
                 </FormField>
 
                 <FormField label="Landmark (optional)">
@@ -468,10 +487,10 @@ const f = StyleSheet.create({
   inputError: { borderColor: Colors.danger },
   fieldError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 4 },
   predictionsDropdown: {
-    position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
+    marginTop: 8,
     backgroundColor: '#fff', borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border,
-    maxHeight: 260, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 6,
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 3,
   },
   predictionRow: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
   predictionText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text },
