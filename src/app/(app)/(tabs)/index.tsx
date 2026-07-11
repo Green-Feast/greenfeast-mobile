@@ -9,17 +9,26 @@ import {
   RefreshControl,
   Modal,
   ActivityIndicator,
+  Linking,
 } from 'react-native'
+import { Image } from 'expo-image'
+import Animated, { FadeInDown } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import * as Updates from 'expo-updates'
+import * as Haptics from 'expo-haptics'
 import { ArrowRight, Leaf, RefreshCw, Bell, X, ChevronRight } from 'lucide-react-native'
 import MacroRow from '@/components/MacroRow'
+import MacroRing from '@/components/MacroRing'
+import StoryCarousel from '@/components/StoryCarousel'
 import { supabase } from '@/lib/supabase'
-import { istToday, istHour } from '@/lib/ist'
+import { istToday, istHour, addDaysISO, isDeliveryLocked } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import { Colors, Fonts } from '@/constants/colors'
+import { STORY_SLIDES, CHEF_NOTES } from '@/constants/homeContent'
+import { REFERRAL_MESSAGE } from '@/constants/links'
+import { CATEGORIES, CATEGORY_EMOJIS } from './menu'
 import Logo from '@/components/Logo'
 import Skeleton from '@/components/Skeleton'
 
@@ -28,7 +37,13 @@ type Order = {
   delivery_date: string
   status: string
   meal_slot: string
-  meal_templates: { name: string; category: string; kcal: number | null; protein: number | null }
+  meal_templates: {
+    name: string
+    category: string
+    kcal: number | null
+    protein: number | null
+    image_url: string | null
+  }
 }
 
 type Subscription = {
@@ -36,30 +51,28 @@ type Subscription = {
   status: string
   deliveries_remaining: number
   plan_name: string | null
+  plans: { meals_total: number } | null
 }
 
-const STORY_CARDS = [
-  {
-    emoji: '🌿',
-    headline: 'Made this morning.',
-    body: "Every meal is prepared fresh in our Jaipur kitchen — no cold storage, no shortcuts. By the time it reaches you, it's been in the world for less than 4 hours.",
-  },
-  {
-    emoji: '⚖️',
-    headline: 'Nutrition, considered.',
-    body: "We obsess over macro balance so you don't have to. Each bowl is crafted to fuel your goals — whether that's more energy, a leaner build, or simply eating cleaner.",
-  },
-  {
-    emoji: '📅',
-    headline: 'Consistency is the meal.',
-    body: 'One great day of eating is luck. 20 days in a row is a habit. A GreenFeast subscription makes the healthy choice the effortless one — day after day.',
-  },
-  {
-    emoji: '🫙',
-    headline: 'Nothing hidden inside.',
-    body: 'No preservatives. No artificial colour. No mystery ingredients. Real vegetables, real grains, real protein — tasted and tracked by people who care.',
-  },
-]
+type Meal = {
+  id: string
+  name: string
+  category: string
+  price: number | null
+  kcal: number | null
+  protein: number | null
+  image_url: string | null
+}
+
+type UpcomingOrder = {
+  id: string
+  delivery_date: string
+  meal_slot: string
+  extra_dish: boolean | null
+  status: string
+}
+
+type AddTarget = { refOrderId: string; date: string; slot: 'lunch' | 'dinner' }
 
 const STATUS_LABELS: Record<string, string> = {
   scheduled: 'Scheduled', confirmed: 'Confirmed', preparing: 'Being prepared',
@@ -85,6 +98,38 @@ function formatRelativeTime(iso: string) {
   return `${days}d ago`
 }
 
+function fmtDayLabel(iso: string): string {
+  return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'UTC' })
+}
+
+// Deterministic "random" seed from today's date, used to rotate the daily
+// picks + chef's note without any backend — same seed all day, changes at
+// midnight IST.
+function seedFromDate(dateStr: string): number {
+  return Number(dateStr.replace(/-/g, ''))
+}
+
+// First upcoming, unlocked (not today/past, not tomorrow-after-8pm) day with
+// an existing non-extra order — reused as the reference order for a
+// one-tap "add this dish to my next delivery" flow, exactly like
+// subscription.tsx's own addRefOrder derivation.
+function findNextAddTarget(orders: UpcomingOrder[]): AddTarget | null {
+  const byDate = new Map<string, UpcomingOrder[]>()
+  for (const o of orders) {
+    if (o.extra_dish) continue
+    const arr = byDate.get(o.delivery_date) ?? []
+    arr.push(o)
+    byDate.set(o.delivery_date, arr)
+  }
+  const dates = [...byDate.keys()].sort()
+  for (const d of dates) {
+    if (isDeliveryLocked(d)) continue
+    const base = byDate.get(d)![0]
+    return { refOrderId: base.id, date: d, slot: base.meal_slot as 'lunch' | 'dinner' }
+  }
+  return null
+}
+
 export default function Home() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
@@ -92,6 +137,12 @@ export default function Home() {
   const [userName, setUserName] = useState('')
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [todayOrder, setTodayOrder] = useState<Order | null>(null)
+  const [meals, setMeals] = useState<Meal[]>([])
+  const [addTarget, setAddTarget] = useState<AddTarget | null>(null)
+  const [confirmMeal, setConfirmMeal] = useState<Meal | null>(null)
+  const [addedMealIds, setAddedMealIds] = useState<Set<string>>(new Set())
+  const [adding, setAdding] = useState(false)
+  const [addError, setAddError] = useState('')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [fetchError, setFetchError] = useState(false)
@@ -131,11 +182,11 @@ export default function Home() {
     const today = istToday()
 
     try {
-      const [userRes, subRes, orderRes] = await Promise.all([
+      const [userRes, subRes, orderRes, upcomingRes] = await Promise.all([
         supabase.from('users').select('name').eq('id', user.id).single(),
         supabase
           .from('subscriptions')
-          .select('id, status, deliveries_remaining, plan_name')
+          .select('id, status, deliveries_remaining, plan_name, plans ( meals_total )')
           .eq('user_id', user.id)
           .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
           .order('created_at', { ascending: false })
@@ -143,14 +194,22 @@ export default function Home() {
           .maybeSingle(),
         supabase
           .from('orders')
-          .select('id, delivery_date, status, meal_slot, meal_template_id, meal_templates ( name, category, kcal, protein )')
+          .select('id, delivery_date, status, meal_slot, meal_template_id, meal_templates ( name, category, kcal, protein, image_url )')
           .eq('user_id', user.id)
           .eq('delivery_date', today)
           .not('status', 'in', '(cancelled,skipped)'),
+        supabase
+          .from('orders')
+          .select('id, delivery_date, meal_slot, extra_dish, status')
+          .eq('user_id', user.id)
+          .gte('delivery_date', today)
+          .lte('delivery_date', addDaysISO(today, 7))
+          .in('status', ['scheduled', 'confirmed'])
+          .order('delivery_date'),
       ])
 
       if (userRes.data?.name) setUserName(userRes.data.name)
-      setSubscription((subRes.data as Subscription) ?? null)
+      setSubscription((subRes.data as unknown as Subscription) ?? null)
 
       // A day can have both a lunch and a dinner order — pick whichever slot
       // is "current" right now (matches the same lunch-before-2pm-IST
@@ -160,6 +219,8 @@ export default function Home() {
       const rows = (orderRes.data as unknown as Order[]) ?? []
       const preferredSlot = istHour() < 14 ? 'lunch' : 'dinner'
       setTodayOrder(rows.find((r) => r.meal_slot === preferredSlot) ?? rows[0] ?? null)
+
+      setAddTarget(findNextAddTarget((upcomingRes.data as unknown as UpcomingOrder[]) ?? []))
     } catch {
       setFetchError(true)
     }
@@ -171,13 +232,60 @@ export default function Home() {
     fetchData().finally(() => setLoading(false))
   }, [user, authLoading])
 
+  // Menu catalogue — public data, fetched once regardless of auth state so
+  // guests see category chips + daily picks too.
+  useEffect(() => {
+    supabase
+      .from('meal_templates')
+      .select('id, name, category, price, kcal, protein, image_url')
+      .eq('is_active', true)
+      .then(({ data }) => setMeals((data as Meal[]) ?? []))
+  }, [])
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     await fetchData()
     setRefreshing(false)
   }, [user])
 
+  async function handleQuickAdd() {
+    if (!confirmMeal || !addTarget) return
+    setAdding(true)
+    setAddError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+      const { data, error } = await supabase.functions.invoke('add-dish', {
+        body: { order_id: addTarget.refOrderId, meal_template_id: confirmMeal.id, meal_slot: addTarget.slot },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (error) throw error
+      if (data?.error === 'insufficient_balance') {
+        setAddError('Insufficient wallet balance. Add money from My Plan first.')
+        return
+      }
+      if (data?.error) throw new Error(data.error)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+      setAddedMealIds((prev) => new Set(prev).add(confirmMeal.id))
+      setConfirmMeal(null)
+    } catch (e: any) {
+      setAddError(e?.message ?? 'Could not add dish. Try again.')
+    } finally {
+      setAdding(false)
+    }
+  }
+
   const hasSubscription = !!subscription
+
+  const todayStr = istToday()
+  const seed = seedFromDate(todayStr)
+  const picks: Meal[] = []
+  if (meals.length > 0) {
+    const i0 = seed % meals.length
+    picks.push(meals[i0])
+    if (meals.length > 1) picks.push(meals[(i0 + 1) % meals.length])
+  }
+  const chefNote = CHEF_NOTES[seed % CHEF_NOTES.length]
 
   if (loading) {
     return (
@@ -224,7 +332,7 @@ export default function Home() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
         {/* Editorial header (cream canvas) */}
-        <View style={[styles.hero, { paddingTop: insets.top + 20 }]}>
+        <Animated.View entering={FadeInDown.duration(400)} style={[styles.hero, { paddingTop: insets.top + 20 }]}>
           <View style={styles.logoRow}>
             <View style={styles.logoRowLeft}>
               <Logo size={28} />
@@ -259,26 +367,41 @@ export default function Home() {
           >
             <Text style={styles.heroCtaText}>{hasSubscription ? 'My plan →' : 'Build your plan →'}</Text>
           </Pressable>
-        </View>
+        </Animated.View>
 
-        {/* Today's delivery (subscribers only) */}
+        {/* Today's delivery (subscribers only) — tap through to My Plan */}
         {hasSubscription && (
-          <View style={styles.section}>
+          <Animated.View entering={FadeInDown.delay(80).duration(400)} style={styles.section}>
             <View style={styles.sectionLabelRow}>
               <Leaf size={13} color={Colors.primary} />
               <Text style={styles.sectionLabel}>Today's delivery</Text>
             </View>
             {todayOrder ? (
-              <View style={styles.todayCard}>
-                <View style={styles.todayBadge}>
-                  <Text style={styles.todayBadgeText}>{STATUS_LABELS[todayOrder.status] ?? todayOrder.status}</Text>
+              <Pressable
+                style={({ pressed }) => [styles.todayCard, pressed && { opacity: 0.9 }]}
+                onPress={() => router.push('/(app)/(tabs)/subscription')}
+              >
+                {todayOrder.meal_templates.image_url ? (
+                  <Image
+                    source={{ uri: todayOrder.meal_templates.image_url }}
+                    style={styles.todayImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                  />
+                ) : (
+                  <View style={[styles.todayImage, styles.todayImageFallback]}>
+                    <Text style={{ fontSize: 26 }}>{CATEGORY_EMOJIS[todayOrder.meal_templates.category] ?? '🍽️'}</Text>
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <View style={styles.todayBadge}>
+                    <Text style={styles.todayBadgeText}>{STATUS_LABELS[todayOrder.status] ?? todayOrder.status}</Text>
+                  </View>
+                  <Text style={styles.todayMeal} numberOfLines={1}>{todayOrder.meal_templates.name}</Text>
+                  <MacroRow protein={todayOrder.meal_templates.protein} kcal={todayOrder.meal_templates.kcal} size="sm" />
                 </View>
-                <Text style={styles.todayMeal}>{todayOrder.meal_templates.name}</Text>
-                <MacroRow
-                  protein={todayOrder.meal_templates.protein}
-                  kcal={todayOrder.meal_templates.kcal}
-                  size="sm"
-                /></View>
+                <ChevronRight size={18} color={Colors.textMuted} />
+              </Pressable>
             ) : (
               <View style={styles.noDeliveryCard}>
                 <Text style={styles.noDeliveryEmoji}>🌿</Text>
@@ -294,31 +417,130 @@ export default function Home() {
                 </View>
               </View>
             )}
-          </View>
+          </Animated.View>
         )}
 
-        {/* Story strip */}
-        <View style={styles.section}>
+        {/* Deliveries progress ring (subscribers only) */}
+        {hasSubscription && !!subscription?.plans?.meals_total && (
+          <Animated.View entering={FadeInDown.delay(120).duration(400)} style={[styles.section, styles.ringCard]}>
+            <MacroRing
+              size={84}
+              strokeWidth={9}
+              centerValue={String(Math.max(0, subscription.plans.meals_total - subscription.deliveries_remaining))}
+              centerLabel={`of ${subscription.plans.meals_total}`}
+              segments={[
+                { value: Math.max(0, subscription.plans.meals_total - subscription.deliveries_remaining), color: Colors.green700 },
+                { value: subscription.deliveries_remaining, color: Colors.border },
+              ]}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.ringTitle}>
+                {Math.max(0, subscription.plans.meals_total - subscription.deliveries_remaining)} of {subscription.plans.meals_total} meals enjoyed
+              </Text>
+              <Text style={styles.ringSub}>{subscription.deliveries_remaining} left on your plan</Text>
+            </View>
+          </Animated.View>
+        )}
+
+        {/* Category deeplinks into Menu */}
+        <Animated.View entering={FadeInDown.delay(160).duration(400)} style={styles.section}>
           <View style={styles.sectionLabelRow}>
+            <Leaf size={13} color={Colors.primary} />
+            <Text style={styles.sectionLabel}>Browse by category</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
+            {CATEGORIES.filter((c) => c !== 'All').map((cat) => {
+              const catMeal = meals.find((m) => m.category === cat.toLowerCase())
+              return (
+                <Pressable
+                  key={cat}
+                  style={({ pressed }) => [styles.categoryItem, pressed && { opacity: 0.8 }]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    router.push(`/(app)/(tabs)/menu?category=${cat}` as any)
+                  }}
+                >
+                  <View style={styles.categoryCircle}>
+                    {catMeal?.image_url ? (
+                      <Image source={{ uri: catMeal.image_url }} style={styles.categoryImg} contentFit="cover" cachePolicy="memory-disk" />
+                    ) : (
+                      <Text style={styles.categoryEmoji}>{CATEGORY_EMOJIS[cat.toLowerCase()] ?? '🍽️'}</Text>
+                    )}
+                  </View>
+                  <Text style={styles.categoryLabel}>{cat}</Text>
+                </Pressable>
+              )
+            })}
+          </ScrollView>
+        </Animated.View>
+
+        {/* Daily picks — quick-add to next unlocked delivery */}
+        {picks.length > 0 && (
+          <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
+            <View style={styles.sectionLabelRow}>
+              <Leaf size={13} color={Colors.primary} />
+              <Text style={styles.sectionLabel}>Fresh from the kitchen</Text>
+            </View>
+            <View style={{ gap: 12 }}>
+              {picks.map((meal) => {
+                const added = addedMealIds.has(meal.id)
+                return (
+                  <View key={meal.id} style={styles.pickCard}>
+                    {meal.image_url ? (
+                      <Image source={{ uri: meal.image_url }} style={styles.pickImage} contentFit="cover" cachePolicy="memory-disk" />
+                    ) : (
+                      <View style={[styles.pickImage, styles.pickImageFallback]}>
+                        <Text style={{ fontSize: 26 }}>{CATEGORY_EMOJIS[meal.category] ?? '🍽️'}</Text>
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.pickName} numberOfLines={2}>{meal.name}</Text>
+                      {meal.price != null && <Text style={styles.pickPrice}>₹{(meal.price / 100).toFixed(0)}</Text>}
+                      <View style={{ marginTop: 4 }}>
+                        <MacroRow protein={meal.protein} kcal={meal.kcal} size="sm" />
+                      </View>
+                    </View>
+                    {hasSubscription ? (
+                      addTarget && (
+                        <Pressable
+                          style={[styles.pickAddBtn, added && styles.pickAddBtnDone]}
+                          disabled={added}
+                          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setConfirmMeal(meal) }}
+                        >
+                          <Text style={[styles.pickAddText, added && styles.pickAddTextDone]}>{added ? 'Added ✓' : 'Add'}</Text>
+                        </Pressable>
+                      )
+                    ) : (
+                      <Pressable style={styles.pickAddBtn} onPress={() => router.push('/(app)/(tabs)/menu')}>
+                        <Text style={styles.pickAddText}>See menu</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )
+              })}
+            </View>
+          </Animated.View>
+        )}
+
+        {/* Farm-to-fork story carousel — full bleed */}
+        <Animated.View entering={FadeInDown.delay(240).duration(400)}>
+          <View style={styles.sectionLabelRow2}>
             <Leaf size={13} color={Colors.primary} />
             <Text style={styles.sectionLabel}>The GreenFeast way</Text>
           </View>
+          <StoryCarousel slides={STORY_SLIDES} />
+        </Animated.View>
 
-          <View style={{ gap: 12 }}>
-            {STORY_CARDS.map((card, i) => (
-              <View key={i} style={styles.storyCard}>
-                <Text style={styles.storyEmoji}>{card.emoji}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.storyHeadline}>{card.headline}</Text>
-                  <Text style={styles.storyBody}>{card.body}</Text>
-                </View>
-              </View>
-            ))}
+        {/* Chef's note */}
+        <Animated.View entering={FadeInDown.delay(280).duration(400)} style={styles.section}>
+          <View style={styles.chefCard}>
+            <Text style={styles.chefEmoji}>🌱</Text>
+            <Text style={styles.chefNote}>{chefNote}</Text>
           </View>
-        </View>
+        </Animated.View>
 
         {/* Menu nudge */}
-        <View style={styles.menuNudgeWrap}>
+        <Animated.View entering={FadeInDown.delay(320).duration(400)} style={styles.menuNudgeWrap}>
           <Pressable
             style={({ pressed }) => [styles.menuNudge, pressed && { transform: [{ scale: 0.98 }] }]}
             onPress={() => router.push('/(app)/(tabs)/menu')}
@@ -329,7 +551,21 @@ export default function Home() {
             </View>
             <ArrowRight size={18} color={Colors.accent} />
           </Pressable>
-        </View>
+        </Animated.View>
+
+        {/* Refer a friend */}
+        <Animated.View entering={FadeInDown.delay(360).duration(400)} style={styles.section}>
+          <Pressable
+            style={({ pressed }) => [styles.referralCard, pressed && { opacity: 0.9 }]}
+            onPress={() => Linking.openURL('https://wa.me/?text=' + encodeURIComponent(REFERRAL_MESSAGE))}
+          >
+            <Text style={styles.referralEmoji}>🎁</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.referralTitle}>Give a friend their first GreenFeast</Text>
+              <Text style={styles.referralSub}>Share on WhatsApp →</Text>
+            </View>
+          </Pressable>
+        </Animated.View>
       </ScrollView>
 
       {/* Notification history */}
@@ -383,6 +619,40 @@ export default function Home() {
                 })
               )}
             </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Quick-add confirm sheet */}
+      <Modal
+        visible={!!confirmMeal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!adding) setConfirmMeal(null) }}
+      >
+        <Pressable style={styles.confirmOverlay} onPress={() => !adding && setConfirmMeal(null)}>
+          <Pressable style={styles.confirmCard} onPress={(e) => e.stopPropagation()}>
+            {confirmMeal && addTarget && (
+              <>
+                <Text style={styles.confirmTitle}>Add {confirmMeal.name}?</Text>
+                <Text style={styles.confirmBody}>
+                  To {fmtDayLabel(addTarget.date)}'s {addTarget.slot}
+                  {confirmMeal.price != null ? ` · ₹${(confirmMeal.price / 100).toFixed(0)}` : ''}
+                </Text>
+                <Text style={styles.confirmNote}>
+                  Billed from your wallet on delivery. Removable from My Plan until 8 PM the evening before.
+                </Text>
+                {addError ? <Text style={styles.confirmError}>{addError}</Text> : null}
+                <View style={styles.confirmBtnRow}>
+                  <Pressable style={[styles.confirmBtn, styles.confirmBtnGhost]} onPress={() => setConfirmMeal(null)} disabled={adding}>
+                    <Text style={styles.confirmBtnGhostText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable style={styles.confirmBtn} onPress={handleQuickAdd} disabled={adding}>
+                    {adding ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.confirmBtnText}>Add dish</Text>}
+                  </Pressable>
+                </View>
+              </>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -468,6 +738,7 @@ const styles = StyleSheet.create({
 
   section: { paddingHorizontal: 16, paddingTop: 24 },
   sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
+  sectionLabelRow2: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingTop: 24, marginBottom: 16 },
   sectionLabel: {
     fontFamily: Fonts.bodySemi,
     fontSize: 10,
@@ -479,33 +750,93 @@ const styles = StyleSheet.create({
   todayCard: {
     backgroundColor: Colors.cream100,
     borderRadius: 20,
-    padding: 18,
+    padding: 14,
     borderWidth: 2,
     borderColor: Colors.green700,
-    gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
+  todayImage: { width: 64, height: 64, borderRadius: 14, backgroundColor: Colors.cream300 },
+  todayImageFallback: { alignItems: 'center', justifyContent: 'center' },
   todayBadge: {
     alignSelf: 'flex-start',
     backgroundColor: Colors.green50,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
+    marginBottom: 6,
   },
   todayBadgeText: { fontFamily: Fonts.bodyMed, fontSize: 11, color: Colors.green700, textTransform: 'uppercase', letterSpacing: 0.8 },
-  todayMeal: { fontFamily: Fonts.heading, fontSize: 20, color: Colors.ink900 },
+  todayMeal: { fontFamily: Fonts.heading, fontSize: 17, color: Colors.ink900, marginBottom: 4 },
 
-  storyCard: {
+  ringCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  ringTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.ink900, lineHeight: 20, marginBottom: 4 },
+  ringSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500 },
+
+  categoryRow: { gap: 18, paddingRight: 16 },
+  categoryItem: { alignItems: 'center', width: 72 },
+  categoryCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.cream200,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  categoryImg: { width: '100%', height: '100%' },
+  categoryEmoji: { fontSize: 26 },
+  categoryLabel: { fontFamily: Fonts.bodyMed, fontSize: 12, color: Colors.ink600, marginTop: 6, textAlign: 'center' },
+
+  pickCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  pickImage: { width: 72, height: 72, borderRadius: 12, backgroundColor: Colors.cream300 },
+  pickImageFallback: { alignItems: 'center', justifyContent: 'center' },
+  pickName: { fontFamily: Fonts.heading, fontSize: 15, color: Colors.ink900, lineHeight: 19, marginBottom: 2 },
+  pickPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.green700 },
+  pickAddBtn: {
+    backgroundColor: Colors.green700,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  pickAddBtnDone: { backgroundColor: Colors.cream300 },
+  pickAddText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
+  pickAddTextDone: { color: Colors.ink500 },
+
+  chefCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
     backgroundColor: Colors.cream200,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
     padding: 16,
-    flexDirection: 'row',
-    gap: 14,
   },
-  storyEmoji: { fontSize: 22, marginTop: 2 },
-  storyHeadline: { fontFamily: Fonts.heading, fontSize: 16, color: Colors.ink900, marginBottom: 6 },
-  storyBody: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, lineHeight: 19 },
+  chefEmoji: { fontSize: 20, marginTop: 2 },
+  chefNote: { flex: 1, fontFamily: Fonts.script, fontSize: 19, color: Colors.ink600, lineHeight: 25 },
 
   menuNudgeWrap: { paddingHorizontal: 16, paddingTop: 16 },
   menuNudge: {
@@ -518,6 +849,20 @@ const styles = StyleSheet.create({
   },
   menuNudgeTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: '#fff' },
   menuNudgeSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.green200, marginTop: 2 },
+
+  referralCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: Colors.cream100,
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  referralEmoji: { fontSize: 28 },
+  referralTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.ink900, marginBottom: 2 },
+  referralSub: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.green700 },
 
   // Notification history
   notifOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -535,4 +880,20 @@ const styles = StyleSheet.create({
   notifRowTitle: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
   notifRowBody: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginTop: 2, lineHeight: 18 },
   notifRowTime: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, marginTop: 4 },
+
+  // Quick-add confirm sheet
+  confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  confirmCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%', maxWidth: 340 },
+  confirmTitle: { fontFamily: Fonts.heading, fontSize: 19, color: Colors.ink900, marginBottom: 8 },
+  confirmBody: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.ink600, marginBottom: 10 },
+  confirmNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, lineHeight: 17 },
+  confirmError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 8 },
+  confirmBtnRow: { flexDirection: 'row', gap: 12, marginTop: 18 },
+  confirmBtn: {
+    flex: 1, backgroundColor: Colors.green700, borderRadius: 999,
+    paddingVertical: 13, alignItems: 'center', justifyContent: 'center', minHeight: 46,
+  },
+  confirmBtnGhost: { backgroundColor: Colors.cream200 },
+  confirmBtnText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
+  confirmBtnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.ink600 },
 })

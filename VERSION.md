@@ -52,6 +52,29 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.8 — 2026-07-11
+- Build 3, OTA 8.
+- Home screen engagement overhaul:
+  - Replaced the 4 static "GreenFeast way" text cards with a full-bleed,
+    auto-advancing photo carousel telling the farm → kitchen → door → you
+    story (content in `src/constants/homeContent.ts` — swap in real
+    farm/kitchen photos there anytime).
+  - Today's delivery card now shows a photo, is tappable, and opens My Plan.
+  - New deliveries progress ring ("X of Y meals enjoyed") for subscribers.
+  - New category row — tap a category to deeplink straight into a
+    pre-filtered Menu (`?category=` param).
+  - New "Fresh from the kitchen" daily picks (2 dishes, rotate by date) with
+    a one-tap-to-confirm "add to my next delivery" flow, reusing the
+    existing `add-dish` function and the same 8 PM cutoff rule as My Plan
+    (now shared via `isDeliveryLocked` in `src/lib/ist.ts`).
+  - New rotating "chef's note" card and a refer-a-friend WhatsApp card.
+  - Sections fade/slide in on load (Reanimated) instead of appearing all at
+    once.
+- Menu screen: added a "Craving it right now?" footer with Swiggy/Zomato/
+  takeaway links (placeholders in `src/constants/links.ts` until real URLs
+  are added — each button hides itself until configured).
+- No new dependencies, no migrations, no edge-function changes — JS only.
+
 ### 1.3.7 — 2026-07-11
 - Build 3, OTA 7.
 - Sign-in: tapping Google/Apple/email sign-in without the Terms & Conditions

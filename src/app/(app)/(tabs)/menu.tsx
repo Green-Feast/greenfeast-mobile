@@ -11,13 +11,16 @@ import {
   Modal,
   ScrollView,
   Dimensions,
+  Linking,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { X } from 'lucide-react-native'
+import { useLocalSearchParams } from 'expo-router'
+import { X, ExternalLink, MapPin } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
+import { SWIGGY_URL, ZOMATO_URL, KITCHEN_MAPS_URL, isConfigured } from '@/constants/links'
 import Skeleton from '@/components/Skeleton'
 import MacroRow from '@/components/MacroRow'
 import * as Haptics from 'expo-haptics'
@@ -39,8 +42,10 @@ type Meal = {
   image_url: string | null
 }
 
-const CATEGORIES = ['All', 'Bowl', 'Wrap', 'Salad', 'Toast', 'Smoothie']
-const CATEGORY_EMOJIS: Record<string, string> = {
+// Exported so Home's category row (deeplinks into this screen) shares the
+// exact same category list/emoji fallback instead of a second copy drifting.
+export const CATEGORIES = ['All', 'Bowl', 'Wrap', 'Salad', 'Toast', 'Smoothie']
+export const CATEGORY_EMOJIS: Record<string, string> = {
   bowl: '🥗', wrap: '🌯', salad: '🥙', toast: '🍞', smoothie: '🥤',
 }
 
@@ -52,10 +57,18 @@ function formatPrice(paise: number | null) {
 export default function MenuScreen() {
   const insets = useSafeAreaInsets()
   const authLoading = useAuthStore((s) => s.loading)
+  const params = useLocalSearchParams<{ category?: string }>()
   const [meals, setMeals] = useState<Meal[]>([])
   const [loading, setLoading] = useState(true)
   const [activeCategory, setActiveCategory] = useState('All')
   const [selected, setSelected] = useState<Meal | null>(null)
+
+  // Category deeplink from Home (e.g. /(app)/(tabs)/menu?category=Bowl).
+  useEffect(() => {
+    if (!params.category) return
+    const match = CATEGORIES.find((c) => c.toLowerCase() === params.category!.toLowerCase())
+    if (match) setActiveCategory(match)
+  }, [params.category])
 
   useEffect(() => {
     if (authLoading) return
@@ -156,6 +169,33 @@ export default function MenuScreen() {
               <Text style={styles.emptyText}>No meals in this category yet.</Text>
             </View>
           }
+          ListFooterComponent={
+            (isConfigured(SWIGGY_URL) || isConfigured(ZOMATO_URL) || isConfigured(KITCHEN_MAPS_URL)) ? (
+              <View style={styles.craveWrap}>
+                <Text style={styles.craveTitle}>Craving it right now?</Text>
+                <View style={styles.craveRow}>
+                  {isConfigured(SWIGGY_URL) && (
+                    <Pressable style={[styles.craveBtn, { backgroundColor: '#FC8019' }]} onPress={() => Linking.openURL(SWIGGY_URL)}>
+                      <ExternalLink size={14} color="#fff" />
+                      <Text style={styles.craveBtnText}>Swiggy</Text>
+                    </Pressable>
+                  )}
+                  {isConfigured(ZOMATO_URL) && (
+                    <Pressable style={[styles.craveBtn, { backgroundColor: '#E23744' }]} onPress={() => Linking.openURL(ZOMATO_URL)}>
+                      <ExternalLink size={14} color="#fff" />
+                      <Text style={styles.craveBtnText}>Zomato</Text>
+                    </Pressable>
+                  )}
+                  {isConfigured(KITCHEN_MAPS_URL) && (
+                    <Pressable style={[styles.craveBtn, styles.craveBtnGhost]} onPress={() => Linking.openURL(KITCHEN_MAPS_URL)}>
+                      <MapPin size={14} color={Colors.green700} />
+                      <Text style={[styles.craveBtnText, styles.craveBtnGhostText]}>Takeaway</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            ) : null
+          }
         />
       )}
 
@@ -253,6 +293,17 @@ const styles = StyleSheet.create({
 
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyText: { fontFamily: Fonts.body, color: Colors.ink500, fontSize: 14 },
+
+  craveWrap: { marginTop: 8, marginBottom: 16, alignItems: 'center' },
+  craveTitle: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.ink500, marginBottom: 12 },
+  craveRow: { flexDirection: 'row', gap: 10 },
+  craveBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999,
+  },
+  craveBtnGhost: { backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.green700 },
+  craveBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
+  craveBtnGhostText: { color: Colors.green700 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: {

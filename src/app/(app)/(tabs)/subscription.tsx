@@ -18,7 +18,7 @@ import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
-import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO } from '@/lib/ist'
+import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isDeliveryLocked } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
 import RazorpayWebView from '@/components/RazorpayWebView'
 import MacroRow from '@/components/MacroRow'
@@ -116,13 +116,6 @@ function statusLabel(status: string) {
   if (status === 'out_for_delivery') return 'Out for delivery'
   if (status === 'delivered') return 'Delivered'
   return 'Scheduled'
-}
-
-// A delivery is locked if it's today/past, or tomorrow after 8 PM IST.
-function isLocked(dateStr: string): boolean {
-  const today = istToday()
-  if (dateStr <= today) return true
-  return dateStr === addDaysISO(today, 1) && istHour() >= 20
 }
 
 // Calendar strip covers today through the end of this month, extending into
@@ -583,7 +576,7 @@ export default function SubscriptionScreen() {
   const heroProtein = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.protein ?? 0) * (o.quantity ?? 1)), 0)
   const heroCarbs = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.carbs ?? 0) * (o.quantity ?? 1)), 0)
   const heroFat = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.fat ?? 0) * (o.quantity ?? 1)), 0)
-  const heroLocked = isLocked(selectedDay)
+  const heroLocked = isDeliveryLocked(selectedDay)
   const heroIsToday = selectedDay === todayStr
 
   // Day modal data (same slot).

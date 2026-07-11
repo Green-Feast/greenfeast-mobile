@@ -27,3 +27,12 @@ export function endOfMonthISO(iso: string): string {
   d.setUTCMonth(d.getUTCMonth() + 1, 0)
   return d.toISOString().split('T')[0]
 }
+
+// A delivery is locked (can't be swapped/added-to) if it's today/past, or
+// tomorrow after 8 PM IST. Shared by subscription.tsx's day cart and Home's
+// quick-add cards so both enforce the exact same cutoff.
+export function isDeliveryLocked(dateStr: string): boolean {
+  const today = istToday()
+  if (dateStr <= today) return true
+  return dateStr === addDaysISO(today, 1) && istHour() >= 20
+}
