@@ -13,8 +13,9 @@ import {
 } from 'react-native'
 import { Image } from 'expo-image'
 import Animated, { FadeInDown } from 'react-native-reanimated'
+import { setStatusBarStyle } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, useFocusEffect } from 'expo-router'
 import * as Updates from 'expo-updates'
 import * as Haptics from 'expo-haptics'
 import { ArrowRight, Leaf, RefreshCw, Bell, X, ChevronRight } from 'lucide-react-native'
@@ -151,6 +152,18 @@ export default function Home() {
   const notifications = useNotificationStore((s) => s.notifications)
   const markAllRead = useNotificationStore((s) => s.markAllRead)
   const unreadCount = notifications.filter((n) => !n.read).length
+
+  // Home has a green hero band under the status bar (every other screen is
+  // light-background — see _layout.tsx's global style="dark" default). Tabs
+  // stay mounted after their first visit, so a plain declarative
+  // <StatusBar> here would leak "light" onto other tabs once you switch
+  // away; useFocusEffect's cleanup reverts it the moment Home loses focus.
+  useFocusEffect(
+    useCallback(() => {
+      setStatusBarStyle('light')
+      return () => setStatusBarStyle('dark')
+    }, [])
+  )
 
   async function handleReloadNow() {
     if (reloading) return
@@ -331,7 +344,7 @@ export default function Home() {
         contentContainerStyle={{ paddingBottom: 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
-        {/* Editorial header (cream canvas) */}
+        {/* Editorial header (green hero) */}
         <Animated.View entering={FadeInDown.duration(400)} style={[styles.hero, { paddingTop: insets.top + 20 }]}>
           <View style={styles.logoRow}>
             <View style={styles.logoRowLeft}>
@@ -343,7 +356,7 @@ export default function Home() {
               onPress={() => { setShowNotifications(true); markAllRead() }}
               hitSlop={8}
             >
-              <Bell size={20} color={Colors.text} strokeWidth={1.8} />
+              <Bell size={20} color="#fff" strokeWidth={1.8} />
               {unreadCount > 0 && <View style={styles.bellBadge} />}
             </Pressable>
           </View>
@@ -699,7 +712,10 @@ const styles = StyleSheet.create({
 
   hero: {
     paddingHorizontal: 20,
-    paddingBottom: 0,
+    paddingBottom: 28,
+    backgroundColor: Colors.green700,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
   },
   logoRow: {
     flexDirection: 'row',
@@ -715,26 +731,26 @@ const styles = StyleSheet.create({
   wordmark: {
     fontFamily: Fonts.headingSemi,
     fontSize: 17,
-    color: Colors.green700,
+    color: '#fff',
     letterSpacing: -0.3,
   },
   bellBtn: { padding: 4 },
   bellBadge: {
     position: 'absolute', top: 2, right: 2,
     width: 8, height: 8, borderRadius: 4,
-    backgroundColor: Colors.danger, borderWidth: 1.5, borderColor: Colors.background,
+    backgroundColor: Colors.danger, borderWidth: 1.5, borderColor: Colors.green700,
   },
-  greeting: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.ink400, marginBottom: 6 },
-  heroTitle: { fontFamily: Fonts.heading, fontSize: 40, color: Colors.ink900, lineHeight: 46, marginBottom: 12 },
-  heroSubtitle: { fontFamily: Fonts.body, fontSize: 15, color: Colors.ink500, lineHeight: 22, marginBottom: 24 },
+  greeting: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.green100, marginBottom: 6 },
+  heroTitle: { fontFamily: Fonts.heading, fontSize: 40, color: '#fff', lineHeight: 46, marginBottom: 12 },
+  heroSubtitle: { fontFamily: Fonts.body, fontSize: 15, color: Colors.green100, lineHeight: 22, marginBottom: 24 },
   heroCta: {
     alignSelf: 'flex-start',
-    backgroundColor: Colors.green900,
+    backgroundColor: '#fff',
     paddingHorizontal: 20,
     paddingVertical: 13,
     borderRadius: 999,
   },
-  heroCtaText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
+  heroCtaText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.green900 },
 
   section: { paddingHorizontal: 16, paddingTop: 24 },
   sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
@@ -776,6 +792,7 @@ const styles = StyleSheet.create({
     gap: 16,
     backgroundColor: '#fff',
     marginHorizontal: 16,
+    marginTop: 12,
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,

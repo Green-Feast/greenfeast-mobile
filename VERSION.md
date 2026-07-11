@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.4.3 — 2026-07-11
+- Build 4, OTA 3.
+- Home screen: hero band (logo/greeting/headline/CTA above "Today's
+  delivery") now has a green background, making the screen dual-tone
+  instead of all-cream; text/icon colors flipped for contrast (white
+  headline, light-green subtitle, white CTA pill with green text, white
+  bell icon). Status bar icons switch to light while Home is focused (via
+  useFocusEffect, since tabs stay mounted — a plain per-screen override
+  would have leaked onto other tabs).
+- Added visible spacing between the "Today's delivery" card and the
+  "meals enjoyed" ring card (they read as one merged card before).
+
 ### 1.4.2 — 2026-07-11
 - Build 4, OTA 2.
 - Story carousel: real farm/kitchen/door/you photos, hosted in Supabase
