@@ -67,8 +67,11 @@ export default function SummaryScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]} showsVerticalScrollIndicator={false}>
+      {/* Fixed header — progress bar must not scroll with the page */}
+      <View style={{ paddingHorizontal: 24, paddingTop: insets.top + 24 }}>
         <SectionProgress current={4} sectionStep={2} sectionTotalSteps={3} />
+      </View>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.title}>Your subscription</Text>
         </View>

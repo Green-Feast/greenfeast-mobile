@@ -58,6 +58,10 @@ of what changed. Newest first.
   box ticked now shows "Please tick the box below…" instead of the button
   silently doing nothing (buttons were disabled before, with no feedback).
   The message clears automatically when the box is ticked.
+- Onboarding: the progress bar was scrolling away with the page on 7 screens
+  (recommendation, plan, addon-upsell, days, address, summary, payment) —
+  it's now a fixed header on all of them, matching how the Wizard-based
+  screens (height/weight through allergies) already behaved.
 
 ### 1.3.6 — 2026-07-11
 - Build 3, OTA 6.

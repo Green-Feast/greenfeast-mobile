@@ -126,8 +126,12 @@ export default function PlanScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}>
-      <SectionProgress current={3} sectionStep={4} sectionTotalSteps={5} />
+    <View style={styles.container}>
+      {/* Fixed header — progress bar must not scroll with the page */}
+      <View style={{ paddingHorizontal: 24, paddingTop: insets.top + 24 }}>
+        <SectionProgress current={3} sectionStep={4} sectionTotalSteps={5} />
+      </View>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 40 + insets.bottom }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ArrowLeft size={20} color={Colors.primary} />
@@ -293,6 +297,7 @@ export default function PlanScreen() {
         </View>
       </Modal>
     </ScrollView>
+    </View>
   )
 }
 

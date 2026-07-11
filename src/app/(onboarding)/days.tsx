@@ -40,8 +40,12 @@ export default function DaysScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}>
-      <SectionProgress current={3} sectionStep={5} sectionTotalSteps={5} />
+    <View style={styles.container}>
+      {/* Fixed header — progress bar must not scroll with the page */}
+      <View style={{ paddingHorizontal: 24, paddingTop: insets.top + 24 }}>
+        <SectionProgress current={3} sectionStep={5} sectionTotalSteps={5} />
+      </View>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 40 + insets.bottom }]}>
       <View style={styles.header}>
         <Text style={styles.title}>When do you want your meals?</Text>
         <Text style={styles.subtitle}>We deliver Monday to Saturday</Text>
@@ -101,6 +105,7 @@ export default function DaysScreen() {
 
       <Button onPress={handleNext} disabled={totalSlots === 0 || days.length === 0}>Next →</Button>
     </ScrollView>
+    </View>
   )
 }
 

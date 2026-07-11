@@ -110,11 +110,14 @@ export default function AddressScreen() {
   }
 
   return (
-    <KeyboardAwareScreen
-      style={styles.container}
-      contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}
-    >
-      <SectionProgress current={4} sectionStep={1} sectionTotalSteps={3} />
+    <View style={styles.container}>
+      {/* Fixed header — progress bar must not scroll with the page */}
+      <View style={{ paddingHorizontal: 24, paddingTop: insets.top + 24 }}>
+        <SectionProgress current={4} sectionStep={1} sectionTotalSteps={3} />
+      </View>
+      <KeyboardAwareScreen
+        contentContainerStyle={[styles.scroll, { paddingTop: 0, paddingBottom: 40 + insets.bottom }]}
+      >
       <View style={styles.header}>
         <Text style={styles.eyebrow}>DELIVERY</Text>
         <Text style={styles.title}>Where do we deliver?</Text>
@@ -228,7 +231,8 @@ export default function AddressScreen() {
       </View>
 
       <Button onPress={handleNext} style={{ marginTop: 8 }}>Review order →</Button>
-    </KeyboardAwareScreen>
+      </KeyboardAwareScreen>
+    </View>
   )
 }
 

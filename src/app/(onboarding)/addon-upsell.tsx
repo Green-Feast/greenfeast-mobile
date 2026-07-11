@@ -68,8 +68,12 @@ export default function AddonUpsellScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }]}>
-      <SectionProgress current={3} sectionStep={4} sectionTotalSteps={5} />
+    <View style={styles.container}>
+      {/* Fixed header — progress bar must not scroll with the page */}
+      <View style={{ paddingHorizontal: 24, paddingTop: insets.top + 24 }}>
+        <SectionProgress current={3} sectionStep={4} sectionTotalSteps={5} />
+      </View>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 40 + insets.bottom }]}>
       <Text style={styles.title}>Before you continue</Text>
       <Text style={styles.subtitle}>These add-ons were picked for your goal.</Text>
 
@@ -101,6 +105,7 @@ export default function AddonUpsellScreen() {
         <Text style={styles.skipText}>skip and continue →</Text>
       </TouchableOpacity>
     </ScrollView>
+    </View>
   )
 }
 

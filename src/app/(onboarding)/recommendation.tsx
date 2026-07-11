@@ -161,11 +161,11 @@ export default function RecommendationScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: 40 + insets.bottom }} showsVerticalScrollIndicator={false}>
-        <View style={styles.padded}>
-          <SectionProgress current={3} sectionStep={page + 1} sectionTotalSteps={5} />
-        </View>
-
+      {/* Fixed header — progress bar must not scroll with the page */}
+      <View style={[styles.padded, { paddingTop: insets.top + 24 }]}>
+        <SectionProgress current={3} sectionStep={page + 1} sectionTotalSteps={5} />
+      </View>
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 + insets.bottom }} showsVerticalScrollIndicator={false}>
         {/* 4-card carousel */}
         <ScrollView
           ref={scrollRef}

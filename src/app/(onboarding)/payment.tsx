@@ -373,10 +373,13 @@ export default function PaymentScreen() {
   // ── Main summary screen ──────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: 120 }]}
-      >
+      {/* Fixed header — progress bar must not scroll with the page */}
+      <View style={{ paddingHorizontal: 24, paddingTop: insets.top + 24 }}>
         <SectionProgress current={4} sectionStep={3} sectionTotalSteps={3} />
+      </View>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: 120 }]}
+      >
         <Text style={styles.title}>Complete your order</Text>
 
         {/* Order recap */}
