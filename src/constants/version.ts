@@ -16,8 +16,8 @@
  */
 export const APP_VERSION = {
   major: 1,
-  build: 3,
-  ota: 9,
+  build: 4,
+  ota: 0,
 } as const
 
 export const APP_VERSION_STRING = `${APP_VERSION.major}.${APP_VERSION.build}.${APP_VERSION.ota}`

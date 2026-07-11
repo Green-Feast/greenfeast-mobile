@@ -52,6 +52,17 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.4.0 — 2026-07-11
+- Build 4, OTA 0.
+- New native build. Embeds everything published as OTA updates since the
+  last build (1.3.1–1.3.9) directly, so it all lands regardless of OTA
+  state: month calendar strip, add-dish slot fixes, booking-style pause/skip
+  calendars, back-navigation fix (root Stack), unified onboarding progress
+  bar, sign-in redesign + consent flow, ruler/drag-card fixes, protein/fibre
+  targets, address autocomplete, Home screen engagement overhaul (story
+  carousel, progress ring, category deeplinks, daily picks, chef's note,
+  referral card), and the status bar icon-color fix.
+
 ### 1.3.9 — 2026-07-11
 - Build 3, OTA 9.
 - Fixed status bar icons being white on a white/cream background app-wide
