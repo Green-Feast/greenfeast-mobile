@@ -52,6 +52,16 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.3.9 — 2026-07-11
+- Build 3, OTA 9.
+- Fixed status bar icons being white on a white/cream background app-wide
+  (invisible/washed out). The global `<StatusBar style="light">` in
+  `_layout.tsx` was hardcoded and never adapted per screen — every screen in
+  the app has a light background, so it now defaults to `style="dark"`
+  globally. The two screens with a full-bleed hero photo under the status
+  bar (onboarding gate, sign-in) override it locally back to `style="light"`
+  since white icons are correct there.
+
 ### 1.3.8 — 2026-07-11
 - Build 3, OTA 8.
 - Home screen engagement overhaul:

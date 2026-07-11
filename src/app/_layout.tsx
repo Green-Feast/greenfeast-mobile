@@ -161,7 +161,12 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
-        <StatusBar style="light" />
+        {/* Every screen in the app is light-background (cream/white), so
+            dark icons is the correct global default — light was hardcoded
+            here and never adapted per screen. gate.tsx and login.tsx (the
+            two screens with a full-bleed hero photo under the status bar)
+            override this locally with their own <StatusBar style="light">. */}
+        <StatusBar style="dark" />
         <AuthGate />
       </KeyboardProvider>
     </GestureHandlerRootView>

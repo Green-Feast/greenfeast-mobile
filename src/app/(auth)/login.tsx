@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
+import { StatusBar } from 'expo-status-bar'
 import { Check } from 'lucide-react-native'
 import * as WebBrowser from 'expo-web-browser'
 import * as Linking from 'expo-linking'
@@ -200,6 +201,10 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      {/* The hero photo sits full-bleed under the status bar — override the
+          global dark-icon default while this screen is focused. */}
+      <StatusBar style="light" />
+
       {/* Hero photo */}
       <View style={styles.heroWrap}>
         <Image source={HERO_PHOTO} style={styles.heroPhoto} contentFit="cover" cachePolicy="memory-disk" />

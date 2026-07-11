@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
+import { StatusBar } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
@@ -32,6 +33,11 @@ export default function GateScreen() {
 
   return (
     <View style={styles.container}>
+      {/* The hero photo sits full-bleed under the status bar, unlike every
+          other screen — override the global dark-icon default while this
+          screen is focused. */}
+      <StatusBar style="light" />
+
       {/* Food photo — top half */}
       <View style={styles.photoWrap}>
         <Image
