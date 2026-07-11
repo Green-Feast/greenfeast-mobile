@@ -1,8 +1,14 @@
-// Editable Home-screen content. Swap in real farm/kitchen/delivery photography
-// here whenever it's available — nothing else needs to change.
+// Editable Home-screen content.
+//
+// STORY_SLIDES images are hosted in Supabase Storage (bucket `story-images`,
+// 1-year cache-control) rather than bundled locally — keeps them out of the
+// OTA payload entirely, and expo-image's disk cache makes repeat views
+// instant after the first load, same as every meal photo elsewhere in the
+// app. Upload/replace via scripts/upload-story-photos.ts.
+const STORY_IMAGE_BASE = 'https://amwwjcwoumhbdxaxvexj.supabase.co/storage/v1/object/public/story-images'
 
 export type StorySlide = {
-  image: any
+  image: string
   eyebrow: string
   title: string
   body: string
@@ -10,25 +16,25 @@ export type StorySlide = {
 
 export const STORY_SLIDES: StorySlide[] = [
   {
-    image: require('@/assets/food/italian-harvest.jpg'),
+    image: `${STORY_IMAGE_BASE}/farm.png`,
     eyebrow: 'FARM',
     title: 'It starts in the fields.',
     body: 'Vegetables and grains sourced from growers around Jaipur, picked for what\'s actually in season — not what\'s convenient.',
   },
   {
-    image: require('@/assets/food/mexican-fiesta.jpg'),
+    image: `${STORY_IMAGE_BASE}/kitchen.png`,
     eyebrow: 'KITCHEN',
     title: 'Cooked this morning.',
     body: "Every meal is prepared fresh in our Jaipur kitchen the same day it's delivered — no cold storage, no shortcuts.",
   },
   {
-    image: require('@/assets/food/thai-zen.jpg'),
+    image: `${STORY_IMAGE_BASE}/door.png`,
     eyebrow: 'DOOR',
     title: 'Straight to you, still warm.',
     body: 'Packed and out for delivery within hours of leaving the kitchen — before 1 PM for lunch, every weekday.',
   },
   {
-    image: require('@/assets/food/umami-soba.jpg'),
+    image: `${STORY_IMAGE_BASE}/you.png`,
     eyebrow: 'YOU',
     title: 'Nutrition, considered.',
     body: 'Every bowl is built around real macros — fuel for your goals, not just another meal to get through the day.',

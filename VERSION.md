@@ -52,6 +52,21 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.4.2 — 2026-07-11
+- Build 4, OTA 2.
+- Story carousel: real farm/kitchen/door/you photos, hosted in Supabase
+  Storage (bucket `story-images`, 1-year cache) instead of bundled with the
+  app — keeps them out of every future OTA payload and reuses the same
+  disk-cache behavior as every meal photo. Requires running
+  `scripts/upload-story-photos.ts` once to actually upload the 4 files.
+- Fixed a real bug behind "images take 3-4 seconds to load every time I open
+  the app": `scripts/upload-meal-photos.ts` never set `cacheControl` on
+  upload, so Supabase defaulted to a 1-hour cache lifetime — every session
+  more than an hour apart forced a full re-download regardless of the app's
+  own `cachePolicy="memory-disk"`. Now set to 1 year for both meal photos
+  and story photos going forward. Existing meal photos need re-uploading
+  once (same script, unchanged files) to pick up the new header.
+
 ### 1.4.1 — 2026-07-11
 - Build 4, OTA 1.
 - Menu screen: configured the real Swiggy and Zomato links in the "Craving

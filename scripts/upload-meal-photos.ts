@@ -82,6 +82,11 @@ async function main() {
       .upload(storageName, fileBuffer, {
         contentType,
         upsert: true,
+        // Default is 3600s (1 hour) — meal photos are effectively permanent,
+        // so a short TTL just means every app re-open past the first hour
+        // re-fetches the full image over the network instead of using the
+        // disk cache expo-image already keeps client-side.
+        cacheControl: '31536000',
       })
 
     if (uploadError) {
