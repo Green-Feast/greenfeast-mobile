@@ -31,7 +31,9 @@ import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
 import { APP_VERSION_STRING } from '@/constants/version'
+import { REFERRAL_MESSAGE } from '@/constants/links'
 import Skeleton from '@/components/Skeleton'
+import WhatsAppIcon from '@/components/WhatsAppIcon'
 
 const FAQS = [
   { q: 'Can I change my meals after subscribing?', a: 'Yes! You can swap meals up to 8 PM the night before delivery.' },
@@ -227,6 +229,20 @@ export default function AccountScreen() {
             </Pressable>
           </View>
         )}
+
+        {/* Refer a friend */}
+        <Pressable
+          style={({ pressed }) => [styles.referralCard, pressed && { opacity: 0.9 }]}
+          onPress={() => Linking.openURL('https://wa.me/?text=' + encodeURIComponent(REFERRAL_MESSAGE))}
+        >
+          <View style={styles.referralIconWrap}>
+            <WhatsAppIcon size={22} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.referralTitle}>Give a friend their first GreenFeast</Text>
+            <Text style={styles.referralSub}>Share on WhatsApp →</Text>
+          </View>
+        </Pressable>
 
         {/* Support + FAQ */}
         <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
@@ -427,6 +443,26 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.green700, borderRadius: 999, paddingVertical: 13, minHeight: 48,
   },
   guestCtaText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
+
+  referralCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: Colors.whatsapp,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  referralIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  referralTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: '#fff', marginBottom: 2 },
+  referralSub: { fontFamily: Fonts.bodySemi, fontSize: 12, color: 'rgba(255,255,255,0.85)' },
 
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 16, minHeight: 56 },
   rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.ink100 },

@@ -52,6 +52,32 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.4.4 — 2026-07-12
+- Build 4, OTA 4.
+- Refer-a-friend WhatsApp card: added to the Account tab (was Home-only
+  before); both the Home and Account cards are now WhatsApp-green
+  (`Colors.whatsapp`) with a real WhatsApp glyph (new `WhatsAppIcon`
+  component) instead of an emoji.
+- Menu tab: tapping a meal now opens a full-screen detail view (was a
+  partial bottom sheet) — full-bleed hero image, name, price, description,
+  and a macro ring (protein/carbs/fat by calorie share, same style as the
+  onboarding macro-breakdown card) with the exact-gram row underneath.
+- Meal detail now has 4 CTAs: **Add to day** (opens a new day/slot/quantity
+  picker — reuses the same `add-dish`/`update-day-cart` edge functions My
+  Plan already uses, so anything added here shows up there too), **Swiggy**
+  and **Zomato** (brand-colored buttons with real brand glyphs — new
+  `SwiggyIcon`/`ZomatoIcon` components — linking to the restaurant's page on
+  each), and **Takeaway** (placeholder, not wired up yet).
+- New `src/components/AddToDaySheet.tsx`: subscriber-only picker for the next
+  7 days, greys out locked days (past the 8 PM cutoff) or days with no
+  scheduled delivery; non-subscribers see a "Build your plan" prompt instead.
+- `supabase/migrations/028_meal_details_from_menu_csv.sql`: refreshes
+  description/kcal/protein on 9 existing meal_templates rows from the
+  kitchen's real POS menu export (only rows with a confident name+price
+  match — nothing added, nothing renamed). **Run this migration whenever
+  convenient — it only changes displayed copy/macros, the app doesn't
+  depend on it.**
+
 ### 1.4.3 — 2026-07-11
 - Build 4, OTA 3.
 - Home screen: hero band (logo/greeting/headline/CTA above "Today's

@@ -32,6 +32,7 @@ import { REFERRAL_MESSAGE } from '@/constants/links'
 import { CATEGORIES, CATEGORY_EMOJIS } from './menu'
 import Logo from '@/components/Logo'
 import Skeleton from '@/components/Skeleton'
+import WhatsAppIcon from '@/components/WhatsAppIcon'
 
 type Order = {
   id: string
@@ -572,7 +573,9 @@ export default function Home() {
             style={({ pressed }) => [styles.referralCard, pressed && { opacity: 0.9 }]}
             onPress={() => Linking.openURL('https://wa.me/?text=' + encodeURIComponent(REFERRAL_MESSAGE))}
           >
-            <Text style={styles.referralEmoji}>🎁</Text>
+            <View style={styles.referralIconWrap}>
+              <WhatsAppIcon size={22} color="#fff" />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.referralTitle}>Give a friend their first GreenFeast</Text>
               <Text style={styles.referralSub}>Share on WhatsApp →</Text>
@@ -871,15 +874,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    backgroundColor: Colors.cream100,
+    backgroundColor: Colors.whatsapp,
     borderRadius: 20,
     padding: 18,
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
-  referralEmoji: { fontSize: 28 },
-  referralTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.ink900, marginBottom: 2 },
-  referralSub: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.green700 },
+  referralIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  referralTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: '#fff', marginBottom: 2 },
+  referralSub: { fontFamily: Fonts.bodySemi, fontSize: 12, color: 'rgba(255,255,255,0.85)' },
 
   // Notification history
   notifOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
