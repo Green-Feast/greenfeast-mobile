@@ -52,6 +52,12 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.4.1 — 2026-07-11
+- Build 4, OTA 1.
+- Menu screen: configured the real Swiggy and Zomato links in the "Craving
+  it right now?" footer (previously hidden placeholders). Takeaway/Maps
+  link still pending.
+
 ### 1.4.0 — 2026-07-11
 - Build 4, OTA 0.
 - New native build. Embeds everything published as OTA updates since the
