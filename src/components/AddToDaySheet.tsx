@@ -76,7 +76,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
       for (let i = 0; i <= 6; i++) {
         const date = addDaysISO(today, i)
         const dayOrders = (orders ?? []).filter((o) => o.delivery_date === date)
-        const label = i === 0 ? 'Today' : i === 1 ? 'Tmrw' : WEEKDAY[dowMon0(date)]
+        const label = i === 0 ? 'Today' : i === 1 ? 'Tom' : WEEKDAY[dowMon0(date)]
         list.push({
           date,
           label,
