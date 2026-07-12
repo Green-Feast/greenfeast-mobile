@@ -76,7 +76,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
       for (let i = 0; i <= 6; i++) {
         const date = addDaysISO(today, i)
         const dayOrders = (orders ?? []).filter((o) => o.delivery_date === date)
-        const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : WEEKDAY[dowMon0(date)]
+        const label = i === 0 ? 'Today' : i === 1 ? 'Tmrw' : WEEKDAY[dowMon0(date)]
         list.push({
           date,
           label,
@@ -182,7 +182,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
                       onPress={() => setSelectedDate(d.date)}
                       style={[styles.dayCell, active && styles.dayCellActive, disabled && styles.dayCellDisabled]}
                     >
-                      <Text style={[styles.dayCellLabel, active && styles.dayCellLabelActive, disabled && styles.dayCellLabelDisabled]}>
+                      <Text numberOfLines={1} style={[styles.dayCellLabel, active && styles.dayCellLabelActive, disabled && styles.dayCellLabelDisabled]}>
                         {d.label}
                       </Text>
                       <Text style={[styles.dayCellDate, active && styles.dayCellLabelActive, disabled && styles.dayCellLabelDisabled]}>

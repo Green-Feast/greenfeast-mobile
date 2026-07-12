@@ -117,12 +117,23 @@ export default function BookingCalendar(props: BookingCalendarProps) {
             isSelected = iso === props.start || iso === props.end
             inRange = !!(props.start && props.end && iso > props.start && iso < props.end)
           }
+          // Connected pill band (not a per-day square): only once both ends are
+          // picked, tint the whole span including the start/end days themselves
+          // — otherwise the selected circle sits on a bare cell with a visible
+          // gap where it should merge into the band — and round off the true
+          // start/end and each row's first/last column so it reads as one
+          // continuous shape per row instead of a stack of hard-edged blocks.
+          const spanning = mode === 'range' && !!(props.start && props.end)
+          const inTint = spanning && (isSelected || inRange)
+          const col = dowMon0(iso)
+          const capLeft = inTint && (col === 0 || (mode === 'range' && iso === props.start))
+          const capRight = inTint && (col === 6 || (mode === 'range' && iso === props.end))
           return (
             <Pressable
               key={iso}
               onPress={() => handlePress(iso)}
               disabled={disabled}
-              style={[cs.cell, inRange && cs.cellInRangeBg]}
+              style={[cs.cell, inTint && cs.cellInRangeBg, capLeft && cs.cellCapLeft, capRight && cs.cellCapRight]}
             >
               <View style={[cs.cellInner, isToday && !isSelected && cs.cellToday, isSelected && cs.cellSelected]}>
                 <Text style={[cs.cellText, isSelected && cs.cellTextSelected, disabled && cs.cellTextDisabled]}>
@@ -145,6 +156,8 @@ const cs = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
   cell: { flexBasis: '14.2857%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
   cellInRangeBg: { backgroundColor: Colors.primaryLight },
+  cellCapLeft: { borderTopLeftRadius: 16, borderBottomLeftRadius: 16 },
+  cellCapRight: { borderTopRightRadius: 16, borderBottomRightRadius: 16 },
   cellInner: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   cellToday: { borderWidth: 1.5, borderColor: Colors.primary },
   cellSelected: { backgroundColor: Colors.primary },

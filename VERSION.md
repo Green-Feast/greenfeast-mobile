@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.4.5 — 2026-07-13
+- Build 4, OTA 5.
+- Fixed two UI bugs: the "Tomorrow" day-cell label in the new Add-to-day
+  sheet wrapped mid-word ("Tomorro"/"w") since it didn't fit the 56px cell —
+  shortened to "Tmrw" (+ `numberOfLines={1}` as a backstop). The pause-
+  subscription date-range calendar (`BookingCalendar`, range mode) tinted
+  each in-range day as its own square with hard edges and left the
+  start/end days untinted behind their selected circle (a visible gap) —
+  now the whole span (including start/end) is tinted as one band, rounded
+  at the true start/end and at each row's first/last column, so it reads
+  as a connected pill like a normal booking-calendar range picker.
+
 ### 1.4.4 — 2026-07-12
 - Build 4, OTA 4.
 - Refer-a-friend WhatsApp card: added to the Account tab (was Home-only
