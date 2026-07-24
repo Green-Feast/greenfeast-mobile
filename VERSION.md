@@ -52,6 +52,22 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.5.1 — 2026-07-13
+- Build 5, OTA 1.
+- Pause-subscription date-range calendar (`BookingCalendar`): the in-range
+  tint was `Colors.primaryLight`, a hair off pure white — nearly invisible
+  against the sheet's cream50 background, so the "connected band" fix from
+  1.4.5 was technically correct but unreadable. Switched to `Colors.green100`
+  (visibly green), dimmed disabled/past days to 40% opacity for clearer
+  contrast against selectable ones, and bumped the day circle/text slightly
+  for legibility.
+- Meal detail's Zomato button: the brand SVG is a wordmark with a lot of
+  built-in vertical padding, so at any button-sized icon dimension it
+  rendered as an illegible squiggle (unlike Swiggy's icon, which is a
+  compact mark and reads fine small). Replaced it with a bold italic
+  "Zomato" text label instead of the glyph — removed the now-unused
+  `ZomatoIcon` component.
+
 ### 1.5.0 — 2026-07-13
 - Build 5, OTA 0.
 - Fixed the startup splash screen showing Expo's own default logo instead of

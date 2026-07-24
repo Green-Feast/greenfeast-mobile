@@ -25,7 +25,6 @@ import Skeleton from '@/components/Skeleton'
 import MacroRow from '@/components/MacroRow'
 import MacroRing from '@/components/MacroRing'
 import SwiggyIcon from '@/components/SwiggyIcon'
-import ZomatoIcon from '@/components/ZomatoIcon'
 import AddToDaySheet from '@/components/AddToDaySheet'
 import * as Haptics from 'expo-haptics'
 
@@ -289,7 +288,7 @@ export default function MenuScreen() {
                 )}
                 {isConfigured(ZOMATO_URL) && (
                   <Pressable style={[styles.brandBtn, { backgroundColor: '#E23744' }]} onPress={() => Linking.openURL(ZOMATO_URL)}>
-                    <ZomatoIcon size={22} color="#fff" />
+                    <Text style={styles.brandBtnTextBold}>Zomato</Text>
                   </Pressable>
                 )}
                 <Pressable style={styles.takeawayBtn} onPress={() => {}}>
@@ -405,6 +404,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12, borderRadius: 999,
   },
   brandBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
+  brandBtnTextBold: { fontFamily: Fonts.bodyBold, fontSize: 15, color: '#fff', fontStyle: 'italic' },
   takeawayBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     paddingVertical: 12, borderRadius: 999, backgroundColor: '#fff',

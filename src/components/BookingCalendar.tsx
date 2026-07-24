@@ -133,7 +133,7 @@ export default function BookingCalendar(props: BookingCalendarProps) {
               key={iso}
               onPress={() => handlePress(iso)}
               disabled={disabled}
-              style={[cs.cell, inTint && cs.cellInRangeBg, capLeft && cs.cellCapLeft, capRight && cs.cellCapRight]}
+              style={[cs.cell, disabled && cs.cellDim, inTint && cs.cellInRangeBg, capLeft && cs.cellCapLeft, capRight && cs.cellCapRight]}
             >
               <View style={[cs.cellInner, isToday && !isSelected && cs.cellToday, isSelected && cs.cellSelected]}>
                 <Text style={[cs.cellText, isSelected && cs.cellTextSelected, disabled && cs.cellTextDisabled]}>
@@ -152,16 +152,20 @@ const cs = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 4 },
   monthLabel: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.text },
   weekdayRow: { flexDirection: 'row', marginBottom: 4 },
-  weekdayLabel: { flexBasis: '14.2857%', textAlign: 'center', fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.textLight, textTransform: 'uppercase' },
+  weekdayLabel: { flexBasis: '14.2857%', textAlign: 'center', fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.textLight, textTransform: 'uppercase', letterSpacing: 0.5 },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
   cell: { flexBasis: '14.2857%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
-  cellInRangeBg: { backgroundColor: Colors.primaryLight },
-  cellCapLeft: { borderTopLeftRadius: 16, borderBottomLeftRadius: 16 },
-  cellCapRight: { borderTopRightRadius: 16, borderBottomRightRadius: 16 },
-  cellInner: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  cellDim: { opacity: 0.4 },
+  // green100, not the near-white primaryLight — the band needs to actually
+  // read against the sheet's cream50 background, which primaryLight (a hair
+  // off pure white) doesn't.
+  cellInRangeBg: { backgroundColor: Colors.green100 },
+  cellCapLeft: { borderTopLeftRadius: 18, borderBottomLeftRadius: 18 },
+  cellCapRight: { borderTopRightRadius: 18, borderBottomRightRadius: 18 },
+  cellInner: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   cellToday: { borderWidth: 1.5, borderColor: Colors.primary },
   cellSelected: { backgroundColor: Colors.primary },
-  cellText: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.text },
+  cellText: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.text },
   cellTextSelected: { color: '#fff', fontFamily: Fonts.bodySemi },
   cellTextDisabled: { color: Colors.textLight },
 })
