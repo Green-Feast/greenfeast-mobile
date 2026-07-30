@@ -78,14 +78,23 @@ Deno.serve(async (req) => {
 
     const rzpOrder = await rzpRes.json()
 
-    // Insert pending payment row
-    await supabase.from('payments').insert({
+    // Insert pending payment row. Checked, not fire-and-forget: the webhook
+    // matches on cf_order_id to activate the subscription, so a failed insert
+    // means a paid customer whose plan never activates.
+    const { error: payErr } = await supabase.from('payments').insert({
       user_id: user.id,
       subscription_id,
       amount: amount_paise,
       status: 'created',
-      razorpay_order_id: rzpOrder.id,
+      cf_order_id: rzpOrder.id,
     })
+    if (payErr) {
+      console.error('razorpay-create-order: payments insert failed:', payErr.message)
+      return new Response(
+        JSON.stringify({ error: 'Could not start the payment. Please try again.' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     return new Response(
       JSON.stringify({

@@ -47,18 +47,32 @@ Deno.serve(async (req) => {
     if (event.event === 'payment.captured') {
       const payment = event.payload.payment.entity
 
-      const { data: paymentRow } = await supabase
+      const { data: paymentRow, error: payErr } = await supabase
         .from('payments')
         .update({
           status: 'paid',
-          razorpay_payment_id: payment.id,
+          cf_payment_id: payment.id,
         })
-        .eq('razorpay_order_id', payment.order_id)
+        .eq('cf_order_id', payment.order_id)
         .select('subscription_id, user_id, amount')
         .single()
 
+      // If this lookup fails we credit nobody and activate nothing — the
+      // customer has paid and gets silence. Log loudly and 500 so Razorpay
+      // retries the webhook instead of treating it as delivered.
+      if (payErr || !paymentRow) {
+        console.error(
+          'razorpay-webhook: no payments row for order', payment.order_id,
+          payErr?.message ?? '(no matching row)'
+        )
+        return new Response(
+          JSON.stringify({ error: 'payment row not found' }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+
       // Wallet top-up: no subscription, credit the captured amount directly.
-      if (paymentRow && !paymentRow.subscription_id) {
+      if (!paymentRow.subscription_id) {
         const capturedPaise = payment.amount // Razorpay sends amount in paise
         await supabase.rpc('wallet_credit', {
           p_user: paymentRow.user_id,
@@ -68,7 +82,7 @@ Deno.serve(async (req) => {
         })
       }
 
-      if (paymentRow?.subscription_id) {
+      if (paymentRow.subscription_id) {
         const { data: sub } = await supabase
           .from('subscriptions')
           .select('plan_id')
@@ -110,13 +124,16 @@ Deno.serve(async (req) => {
 
     if (event.event === 'payment.failed') {
       const payment = event.payload.payment.entity
-      await supabase
+      const { error: failErr } = await supabase
         .from('payments')
         .update({
           status: 'failed',
-          razorpay_payment_id: payment.id,
+          cf_payment_id: payment.id,
         })
-        .eq('razorpay_order_id', payment.order_id)
+        .eq('cf_order_id', payment.order_id)
+      if (failErr) {
+        console.error('razorpay-webhook: could not mark payment failed:', failErr.message)
+      }
     }
 
     return new Response(JSON.stringify({ ok: true }), {

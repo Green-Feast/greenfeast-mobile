@@ -56,14 +56,21 @@ Deno.serve(async (req) => {
     if (!rzpRes.ok) throw new Error('Razorpay order creation failed')
     const rzpOrder = await rzpRes.json()
 
-    // Insert a payment row (subscription_id is NULL for top-ups)
-    await supabase.from('payments').insert({
+    // Insert a payment row (subscription_id is NULL for top-ups).
+    // MUST NOT be fire-and-forget: the webhook finds this row by cf_order_id to
+    // credit the wallet, so if the insert fails the customer pays and is never
+    // credited. Fail the request instead of handing back a payable order id.
+    const { error: payErr } = await supabase.from('payments').insert({
       user_id: user.id,
       subscription_id: null,
       amount: amount_paise,
       status: 'created',
-      razorpay_order_id: rzpOrder.id,
+      cf_order_id: rzpOrder.id,
     })
+    if (payErr) {
+      console.error('wallet-topup: payments insert failed:', payErr.message)
+      return json({ error: 'Could not start the top-up. Please try again.' }, 500)
+    }
 
     return json({ order_id: rzpOrder.id, amount: rzpOrder.amount, currency: rzpOrder.currency, key_id: KEY_ID })
   } catch (err) {
