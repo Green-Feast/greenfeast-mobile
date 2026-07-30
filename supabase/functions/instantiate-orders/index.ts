@@ -187,7 +187,19 @@ Deno.serve(async (req) => {
   }
 
   const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
-  const isServiceRole = token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  // Two things satisfy "service role" here: the platform-reserved
+  // SUPABASE_SERVICE_ROLE_KEY (what other edge functions — manage-subscription,
+  // razorpay-webhook — read on their own side when calling this one, so those
+  // calls have always matched each other correctly), and INTERNAL_FN_SECRET
+  // (for callers outside Supabase's edge runtime, e.g. the admin app's Vercel
+  // Cron routes — those hold the long-form legacy service_role key from
+  // Supabase's dashboard, which is NOT the same string as what
+  // Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') resolves to inside a function
+  // on this project, so that comparison silently always failed for any
+  // caller outside Supabase itself).
+  const isServiceRole =
+    token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ||
+    (!!Deno.env.get('INTERNAL_FN_SECRET') && token === Deno.env.get('INTERNAL_FN_SECRET'))
 
   try {
     const supabase = createClient(
