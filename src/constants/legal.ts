@@ -15,7 +15,7 @@ GreenFeast delivers freshly prepared meals to subscribers in Jaipur on a recurri
 You're responsible for the accuracy of the information you provide (name, phone number, delivery address, dietary preferences) and for keeping your account credentials secure. You must be able to enter into a binding contract to use the Service.
 
 3. Subscriptions, Billing & Cancellation
-Subscription plans are billed as described at checkout. You can pause, skip individual deliveries, change your plan, or cancel from the My Plan section of the app, subject to the cutoff times shown there (typically 8 PM the night before a delivery). Refunds for undelivered meals are credited to your in-app wallet unless otherwise stated.
+Subscription plans are billed as described at checkout. You can pause, skip individual deliveries, change your plan, or cancel from the My Plan section of the app, subject to the cutoff times shown there (8 AM for lunch and 1 PM for dinner, both on the delivery day). Refunds for undelivered meals are credited to your in-app wallet unless otherwise stated.
 
 4. Delivery
 We aim to deliver within the windows shown in the app. Delays can occur due to weather, traffic, or circumstances outside our control. Please ensure someone is available to receive deliveries, or provide accurate address/landmark details.

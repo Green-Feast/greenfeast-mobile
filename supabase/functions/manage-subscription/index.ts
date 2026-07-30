@@ -111,23 +111,37 @@ Deno.serve(async (req) => {
 
     if (action === 'skip') {
       if (!delivery_date) return json({ error: 'delivery_date required for skip' }, 400)
-      if (delivery_date < today()) return json({ error: 'Cannot skip a past delivery' }, 400)
       if (sub.status === 'cancelled') return json({ error: 'Subscription is cancelled' }, 400)
 
       // meal_slot is optional: omitted = whole-day skip (Plan Settings' "Skip a
       // specific day" flow), present = skip just that slot (My Plan hero card).
-      let skipQuery = supabase
+      // Each requested slot is checked independently against its own cutoff —
+      // a whole-day skip after lunch has locked should still skip dinner.
+      const candidateSlots = meal_slot ? [meal_slot] : ['lunch', 'dinner']
+      const openSlots: string[] = []
+      for (const s of candidateSlots) {
+        const { data: locked } = await supabase.rpc('is_slot_locked', { p_date: delivery_date, p_slot: s })
+        if (!locked) openSlots.push(s)
+      }
+      if (openSlots.length === 0) {
+        return json({
+          error: meal_slot
+            ? 'Cannot skip — this slot has already locked for the day.'
+            : 'Cannot skip — both slots have already locked for the day.',
+        }, 400)
+      }
+
+      const { error: skipErr } = await supabase
         .from('orders')
         .update({ status: 'skipped' })
         .eq('subscription_id', subscription_id)
         .eq('delivery_date', delivery_date)
         .in('status', ['scheduled', 'confirmed'])
-      if (meal_slot) skipQuery = skipQuery.eq('meal_slot', meal_slot)
-      const { error: skipErr } = await skipQuery
+        .in('meal_slot', openSlots)
 
       if (skipErr) throw skipErr
 
-      return json({ ok: true, action: 'skipped', delivery_date, meal_slot: meal_slot ?? null })
+      return json({ ok: true, action: 'skipped', delivery_date, meal_slot: meal_slot ?? null, slots_skipped: openSlots })
     }
 
     // ── cancel ───────────────────────────────────────────────────────────────

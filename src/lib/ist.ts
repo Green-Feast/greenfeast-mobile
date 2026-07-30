@@ -28,11 +28,28 @@ export function endOfMonthISO(iso: string): string {
   return d.toISOString().split('T')[0]
 }
 
-// A delivery is locked (can't be swapped/added-to) if it's today/past, or
-// tomorrow after 8 PM IST. Shared by subscription.tsx's day cart and Home's
-// quick-add cards so both enforce the exact same cutoff.
-export function isDeliveryLocked(dateStr: string): boolean {
+// Per-slot, same-day cutoffs: lunch locks 8 AM, dinner locks 1 PM, both IST,
+// both on the delivery date itself (not the night before — the kitchen needs
+// a hard stop before it starts on each slot, not a day's advance notice).
+export const SLOT_CUTOFF_HOUR: Record<'lunch' | 'dinner', number> = {
+  lunch: 8,
+  dinner: 13,
+}
+
+// A slot is locked (can't be swapped/added-to/skipped) if its delivery date is
+// in the past, or it's today and the slot's cutoff hour has passed. Enforced
+// server-side too — see `is_slot_locked` (migration 031) — since edit
+// endpoints must never trust the client's clock. Shared by subscription.tsx's
+// day cart, Home's quick-add cards, and AddToDaySheet so all three agree.
+export function isSlotLocked(dateStr: string, slot: 'lunch' | 'dinner'): boolean {
   const today = istToday()
-  if (dateStr <= today) return true
-  return dateStr === addDaysISO(today, 1) && istHour() >= 20
+  if (dateStr < today) return true
+  if (dateStr > today) return false
+  return istHour() >= SLOT_CUTOFF_HOUR[slot]
+}
+
+// Whole-day lock (both slots past cutoff) — for UI that shows one lock state
+// per day rather than per slot (e.g. AddToDaySheet's day chips).
+export function isDayFullyLocked(dateStr: string): boolean {
+  return isSlotLocked(dateStr, 'lunch') && isSlotLocked(dateStr, 'dinner')
 }

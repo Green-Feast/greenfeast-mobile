@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
 
     const { data: order } = await supabase
       .from('orders')
-      .select('id, user_id, extra_dish, status, delivery_date')
+      .select('id, user_id, extra_dish, status, delivery_date, meal_slot')
       .eq('id', order_id)
       .single()
 
@@ -49,8 +49,12 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'Cannot remove a delivered, cancelled, or skipped dish' }, 400)
     }
-    if (order.delivery_date < new Date().toISOString().split('T')[0]) {
-      return json({ error: 'Cannot remove a past order' }, 400)
+
+    const { data: locked } = await supabase.rpc('is_slot_locked', {
+      p_date: order.delivery_date, p_slot: order.meal_slot,
+    })
+    if (locked) {
+      return json({ error: 'Cannot remove — this slot has already locked for the day.' }, 400)
     }
 
     const { error: updateErr } = await supabase

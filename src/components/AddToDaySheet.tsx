@@ -10,7 +10,7 @@ import { X, Check, Minus, Plus } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { istToday, addDaysISO, isDeliveryLocked, dowMon0 } from '@/lib/ist'
+import { istToday, addDaysISO, isSlotLocked, isDayFullyLocked, dowMon0 } from '@/lib/ist'
 import { Colors, Fonts } from '@/constants/colors'
 
 const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -19,7 +19,6 @@ type DayInfo = {
   date: string
   label: string
   refOrderId: string | null
-  locked: boolean
 }
 
 type Props = {
@@ -81,12 +80,16 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
           date,
           label,
           refOrderId: dayOrders[0]?.id ?? null,
-          locked: isDeliveryLocked(date),
         })
       }
       setDays(list)
-      const firstOpen = list.find((d) => d.refOrderId && !d.locked)
+      // Default to the first day with an order and at least one open slot,
+      // preferring lunch — same-day cutoffs mean a day can have one slot
+      // locked and the other still open (e.g. today's lunch past 8 AM but
+      // dinner still open until 1 PM).
+      const firstOpen = list.find((d) => d.refOrderId && !isDayFullyLocked(d.date))
       setSelectedDate(firstOpen?.date ?? null)
+      if (firstOpen) setSlot(isSlotLocked(firstOpen.date, 'lunch') ? 'dinner' : 'lunch')
       setLoading(false)
     })()
   }, [visible, hasSubscription, user])
@@ -94,6 +97,10 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
   async function handleAdd() {
     const day = days.find((d) => d.date === selectedDate)
     if (!day?.refOrderId) return
+    if (isSlotLocked(day.date, slot)) {
+      setError(`Cannot add — ${slot} has already locked for this day.`)
+      return
+    }
     setSubmitting(true)
     setError('')
     try {
@@ -129,6 +136,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
   }
 
   const selectedDay = days.find((d) => d.date === selectedDate)
+  const selectedSlotLocked = !!selectedDate && isSlotLocked(selectedDate, slot)
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -173,7 +181,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
               <Text style={styles.sectionLabel}>Choose a day</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayRow}>
                 {days.map((d) => {
-                  const disabled = !d.refOrderId || d.locked
+                  const disabled = !d.refOrderId || isDayFullyLocked(d.date)
                   const active = d.date === selectedDate
                   return (
                     <Pressable
@@ -195,17 +203,21 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
 
               <Text style={styles.sectionLabel}>Slot</Text>
               <View style={styles.slotToggle}>
-                {(['lunch', 'dinner'] as const).map((s) => (
-                  <Pressable
-                    key={s}
-                    style={[styles.slotBtn, slot === s && styles.slotBtnActive]}
-                    onPress={() => setSlot(s)}
-                  >
-                    <Text style={[styles.slotBtnText, slot === s && styles.slotBtnTextActive]}>
-                      {s === 'lunch' ? 'Lunch' : 'Dinner'}
-                    </Text>
-                  </Pressable>
-                ))}
+                {(['lunch', 'dinner'] as const).map((s) => {
+                  const slotDisabled = !selectedDate || isSlotLocked(selectedDate, s)
+                  return (
+                    <Pressable
+                      key={s}
+                      disabled={slotDisabled}
+                      style={[styles.slotBtn, slot === s && styles.slotBtnActive, slotDisabled && styles.slotBtnDisabled]}
+                      onPress={() => setSlot(s)}
+                    >
+                      <Text style={[styles.slotBtnText, slot === s && styles.slotBtnTextActive, slotDisabled && styles.slotBtnTextDisabled]}>
+                        {s === 'lunch' ? 'Lunch' : 'Dinner'}{slotDisabled ? ' (closed)' : ''}
+                      </Text>
+                    </Pressable>
+                  )
+                })}
               </View>
 
               <Text style={styles.sectionLabel}>Quantity</Text>
@@ -219,13 +231,15 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
                 </Pressable>
               </View>
 
-              <Text style={styles.hint}>Billed on delivery. Removable from My Plan until 8 PM the evening before.</Text>
+              <Text style={styles.hint}>
+                Billed on delivery. Removable from My Plan until {slot === 'lunch' ? '8 AM' : '1 PM'} on delivery day.
+              </Text>
 
               {!!error && <Text style={styles.error}>{error}</Text>}
 
               <Pressable
-                style={[styles.primaryBtn, (!selectedDay?.refOrderId || submitting) && styles.primaryBtnDisabled]}
-                disabled={!selectedDay?.refOrderId || submitting}
+                style={[styles.primaryBtn, (!selectedDay?.refOrderId || selectedSlotLocked || submitting) && styles.primaryBtnDisabled]}
+                disabled={!selectedDay?.refOrderId || selectedSlotLocked || submitting}
                 onPress={handleAdd}
               >
                 {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Add to cart</Text>}
@@ -269,8 +283,10 @@ const styles = StyleSheet.create({
   slotToggle: { flexDirection: 'row', backgroundColor: Colors.cream200, borderRadius: 14, padding: 4, gap: 4 },
   slotBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   slotBtnActive: { backgroundColor: Colors.green700 },
+  slotBtnDisabled: { opacity: 0.4 },
   slotBtnText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.ink500 },
   slotBtnTextActive: { color: '#fff' },
+  slotBtnTextDisabled: { color: Colors.ink400 },
 
   qtyStepper: { flexDirection: 'row', alignItems: 'center', gap: 20, alignSelf: 'flex-start' },
   qtyBtn: {

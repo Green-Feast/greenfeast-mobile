@@ -52,6 +52,33 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.5.1 — 2026-07-30
+- Build 5, OTA 1.
+- Delivery cutoffs are now per-slot, same-day: lunch locks 8 AM IST, dinner
+  locks 1 PM IST (both on the delivery date itself), replacing the old
+  "everything locks at 8 PM the night before" rule. This is the client's
+  explicit call ahead of rollout — kitchen/delivery lists need a hard,
+  trustworthy freeze point per slot, not a blanket night-before cutoff.
+- **Enforced server-side for the first time.** Every edit path (switch-meal,
+  add-dish, update-day-cart, remove-dish, manage-subscription's skip) only
+  ever rejected strictly-past dates, in UTC — there was no real cutoff
+  enforcement anywhere before this. New Postgres function `is_slot_locked`
+  (migration 031) is the single source of truth all five now call; verified
+  directly against production at every boundary (yesterday/today/tomorrow ×
+  both slots) before wiring it in.
+- `src/lib/ist.ts`: `isDeliveryLocked(date)` → `isSlotLocked(date, slot)` +
+  `isDayFullyLocked(date)`. Updated the three call sites (My Plan's day
+  modal, Home's quick-add target selection, the Menu → Add-to-day sheet) to
+  be slot-aware instead of date-only — Home's `findNextAddTarget` in
+  particular was picking whichever slot happened to be first for a date,
+  which could hand back an already-locked slot.
+- My Plan also now locks a slot the moment its order reaches `preparing`,
+  independent of the time cutoff — unlocking "today" under the new rule
+  would otherwise expose Skip/Swap/Remove on a meal the kitchen already
+  started.
+- Updated every "8 PM the night before" reference (My Plan, Home's quick-add
+  confirmation, the Add-to-day sheet, the Account FAQ, the Terms).
+
 ### 1.5.0 — 2026-07-13
 - Build 5, OTA 0.
 - Fixed the startup splash screen showing Expo's own default logo instead of

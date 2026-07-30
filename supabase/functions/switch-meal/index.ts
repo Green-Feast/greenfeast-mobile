@@ -51,8 +51,11 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'Cannot switch a delivered, cancelled, or skipped order' }, 400)
     }
-    if (order.delivery_date < new Date().toISOString().split('T')[0]) {
-      return json({ error: 'Cannot switch a past order' }, 400)
+    const { data: locked } = await supabase.rpc('is_slot_locked', {
+      p_date: order.delivery_date, p_slot: order.meal_slot,
+    })
+    if (locked) {
+      return json({ error: 'Cannot switch — this slot has already locked for the day.' }, 400)
     }
     if (order.meal_template_id === meal_template_id) {
       return json({ ok: true, charged: false }) // nothing to do

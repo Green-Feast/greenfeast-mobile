@@ -18,7 +18,7 @@ import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
-import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isDeliveryLocked } from '@/lib/ist'
+import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
 import RazorpayWebView from '@/components/RazorpayWebView'
 import MacroRow from '@/components/MacroRow'
@@ -149,7 +149,7 @@ export default function SubscriptionScreen() {
   const [skipConfirm, setSkipConfirm] = useState<{ date: string; slot: 'lunch' | 'dinner' } | null>(null)
   const [skipping, setSkipping] = useState(false)
   const [selectedDay, setSelectedDay] = useState<string>(istToday())
-  const [selectedSlot, setSelectedSlot] = useState<'lunch' | 'dinner'>(istHour() < 14 ? 'lunch' : 'dinner')
+  const [selectedSlot, setSelectedSlot] = useState<'lunch' | 'dinner'>(istHour() < SLOT_CUTOFF_HOUR.dinner ? 'lunch' : 'dinner')
   const [showDayModal, setShowDayModal] = useState(false)
   const [swapping, setSwapping] = useState(false)
   const [swapError, setSwapError] = useState('')
@@ -576,7 +576,11 @@ export default function SubscriptionScreen() {
   const heroProtein = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.protein ?? 0) * (o.quantity ?? 1)), 0)
   const heroCarbs = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.carbs ?? 0) * (o.quantity ?? 1)), 0)
   const heroFat = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.fat ?? 0) * (o.quantity ?? 1)), 0)
-  const heroLocked = isDeliveryLocked(selectedDay)
+  // Locked once the slot's cutoff passes (8 AM lunch / 1 PM dinner, same day),
+  // or once the kitchen has already started on it — unlocking "today" under
+  // the new same-day cutoff would otherwise expose Skip/Swap/Remove on a meal
+  // that's already `preparing`.
+  const heroLocked = isSlotLocked(selectedDay, selectedSlot) || heroBase?.status === 'preparing'
   const heroIsToday = selectedDay === todayStr
 
   // Day modal data (same slot).
@@ -1151,7 +1155,7 @@ export default function SubscriptionScreen() {
                         🔒 Changes for this day are locked
                       </Text>
                       <Text style={s.dayModalLockSub}>
-                        Swaps close at 8 PM the night before delivery
+                        {selectedSlot === 'lunch' ? 'Lunch closes at 8 AM' : 'Dinner closes at 1 PM'} on delivery day
                       </Text>
                     </View>
                   ) : (

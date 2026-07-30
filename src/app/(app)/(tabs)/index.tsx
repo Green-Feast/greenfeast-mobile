@@ -23,7 +23,7 @@ import MacroRow from '@/components/MacroRow'
 import MacroRing from '@/components/MacroRing'
 import StoryCarousel from '@/components/StoryCarousel'
 import { supabase } from '@/lib/supabase'
-import { istToday, istHour, addDaysISO, isDeliveryLocked } from '@/lib/ist'
+import { istToday, istHour, addDaysISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import { Colors, Fonts } from '@/constants/colors'
@@ -111,10 +111,13 @@ function seedFromDate(dateStr: string): number {
   return Number(dateStr.replace(/-/g, ''))
 }
 
-// First upcoming, unlocked (not today/past, not tomorrow-after-8pm) day with
-// an existing non-extra order — reused as the reference order for a
-// one-tap "add this dish to my next delivery" flow, exactly like
-// subscription.tsx's own addRefOrder derivation.
+// First upcoming, unlocked (slot cutoff hasn't passed) order — reused as the
+// reference order for a one-tap "add this dish to my next delivery" flow,
+// exactly like subscription.tsx's own addRefOrder derivation. Checked per
+// (date, slot), not per date — a date can have one slot already locked (e.g.
+// today's lunch, past 8 AM) while the other is still open (today's dinner,
+// before 1 PM), and picking the wrong one would hand back an add target the
+// server immediately rejects.
 function findNextAddTarget(orders: UpcomingOrder[]): AddTarget | null {
   const byDate = new Map<string, UpcomingOrder[]>()
   for (const o of orders) {
@@ -125,9 +128,12 @@ function findNextAddTarget(orders: UpcomingOrder[]): AddTarget | null {
   }
   const dates = [...byDate.keys()].sort()
   for (const d of dates) {
-    if (isDeliveryLocked(d)) continue
-    const base = byDate.get(d)![0]
-    return { refOrderId: base.id, date: d, slot: base.meal_slot as 'lunch' | 'dinner' }
+    const slotOrder = [...byDate.get(d)!].sort((a, b) => a.meal_slot.localeCompare(b.meal_slot))
+    for (const base of slotOrder) {
+      const slot = base.meal_slot as 'lunch' | 'dinner'
+      if (isSlotLocked(d, slot)) continue
+      return { refOrderId: base.id, date: d, slot }
+    }
   }
   return null
 }
@@ -231,7 +237,7 @@ export default function Home() {
       // to whatever exists so the card never blanks out unnecessarily.
       if (orderRes.error) console.warn('[Home] today order fetch error:', orderRes.error.message)
       const rows = (orderRes.data as unknown as Order[]) ?? []
-      const preferredSlot = istHour() < 14 ? 'lunch' : 'dinner'
+      const preferredSlot = istHour() < SLOT_CUTOFF_HOUR.dinner ? 'lunch' : 'dinner'
       setTodayOrder(rows.find((r) => r.meal_slot === preferredSlot) ?? rows[0] ?? null)
 
       setAddTarget(findNextAddTarget((upcomingRes.data as unknown as UpcomingOrder[]) ?? []))
@@ -656,7 +662,8 @@ export default function Home() {
                   {confirmMeal.price != null ? ` · ₹${(confirmMeal.price / 100).toFixed(0)}` : ''}
                 </Text>
                 <Text style={styles.confirmNote}>
-                  Billed from your wallet on delivery. Removable from My Plan until 8 PM the evening before.
+                  Billed from your wallet on delivery. Removable from My Plan until{' '}
+                  {addTarget.slot === 'lunch' ? '8 AM' : '1 PM'} on delivery day.
                 </Text>
                 {addError ? <Text style={styles.confirmError}>{addError}</Text> : null}
                 <View style={styles.confirmBtnRow}>

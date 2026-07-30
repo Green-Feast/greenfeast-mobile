@@ -56,8 +56,14 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(ref.status)) {
       return json({ error: 'Cannot add to a delivered, cancelled, or skipped slot' }, 400)
     }
-    if (ref.delivery_date < new Date().toISOString().split('T')[0]) {
-      return json({ error: 'Cannot add to a past order' }, 400)
+
+    const effectiveSlot = meal_slot ?? ref.meal_slot
+
+    const { data: locked } = await supabase.rpc('is_slot_locked', {
+      p_date: ref.delivery_date, p_slot: effectiveSlot,
+    })
+    if (locked) {
+      return json({ error: 'Cannot add — this slot has already locked for the day.' }, 400)
     }
 
     // Base per-meal rate (paise) from the plan — add-ons are not included.
@@ -74,8 +80,6 @@ Deno.serve(async (req) => {
 
     if (!plan) return json({ error: 'Plan not found' }, 404)
     const rate = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
-
-    const effectiveSlot = meal_slot ?? ref.meal_slot
 
     // Next slot_seq for this (subscription, date, slot).
     const { data: existing } = await supabase

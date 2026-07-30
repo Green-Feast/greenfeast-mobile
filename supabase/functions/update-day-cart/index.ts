@@ -57,8 +57,11 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'This delivery can no longer be changed' }, 400)
     }
-    if (order.delivery_date < new Date().toISOString().split('T')[0]) {
-      return json({ error: 'Cannot edit a past order' }, 400)
+    const { data: locked } = await supabase.rpc('is_slot_locked', {
+      p_date: order.delivery_date, p_slot: order.meal_slot,
+    })
+    if (locked) {
+      return json({ error: 'Cannot edit — this slot has already locked for the day.' }, 400)
     }
 
     // Backfill the base-meal rate snapshot on older orders so cart_total is right.
