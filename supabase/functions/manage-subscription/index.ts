@@ -131,9 +131,12 @@ Deno.serve(async (req) => {
         }, 400)
       }
 
+      // skip_reason='user' matters: an auto-pause-after-repeated-skips feature
+      // reads this to count only wallet-driven skips — a user choosing to skip
+      // a day must never count toward that.
       const { error: skipErr } = await supabase
         .from('orders')
-        .update({ status: 'skipped' })
+        .update({ status: 'skipped', skip_reason: 'user' })
         .eq('subscription_id', subscription_id)
         .eq('delivery_date', delivery_date)
         .in('status', ['scheduled', 'confirmed'])
