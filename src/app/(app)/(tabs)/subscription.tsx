@@ -15,12 +15,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
+import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
+import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
-import CashfreeWebView from '@/components/CashfreeWebView'
 import MacroRow from '@/components/MacroRow'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -156,13 +157,10 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showAddMoney, setShowAddMoney] = useState(false)
-  const [showCashfree, setShowCashfree] = useState(false)
   const [funding, setFunding] = useState(false)
   const [freeMealIds, setFreeMealIds] = useState<Set<string>>(new Set())
   const [topupAmountPaise, setTopupAmountPaise] = useState(50000) // ₹500 default
   const [topupCustom, setTopupCustom] = useState('')
-  const [cfPaymentSessionId, setCfPaymentSessionId] = useState<string | null>(null)
-  const [cfEnvironment, setCfEnvironment] = useState<'sandbox' | 'production'>('sandbox')
   const [creatingTopup, setCreatingTopup] = useState(false)
   const didAutoSync = useRef(false)
   const stripRef = useRef<ScrollView | null>(null)
@@ -432,6 +430,29 @@ export default function SubscriptionScreen() {
     setTransactions((data as WalletTransaction[]) ?? [])
   }
 
+  // The native SDK's callback is registered once per mount and can't take
+  // fresh props/state each render — a ref keeps it reading the latest
+  // fetch functions instead of a stale closure from mount time.
+  const latestTopupHandlers = useRef({ fetchAll, fetchTransactions })
+  latestTopupHandlers.current = { fetchAll, fetchTransactions }
+
+  useEffect(() => {
+    const callback: CFCallback = {
+      onVerify: () => {
+        // Optimistic refresh — the webhook is the authoritative credit,
+        // this just reflects it in the UI as soon as possible.
+        latestTopupHandlers.current.fetchAll()
+        latestTopupHandlers.current.fetchTransactions()
+        setShowTransactions(true)
+      },
+      onError: (error: CFErrorResponse) => {
+        console.warn('Wallet top-up failed:', error.getMessage())
+      },
+    }
+    CFPaymentGatewayService.setCallback(callback)
+    return () => CFPaymentGatewayService.removeCallback()
+  }, [])
+
   async function createTopupOrder() {
     if (!user) return
     const amount = topupCustom ? Math.round(parseFloat(topupCustom) * 100) : topupAmountPaise
@@ -445,10 +466,15 @@ export default function SubscriptionScreen() {
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
       if (error || data?.error) throw new Error(data?.error ?? 'Failed to create order')
-      setCfPaymentSessionId(data.payment_session_id)
-      setCfEnvironment(data.environment ?? 'sandbox')
       setShowAddMoney(false)
-      setShowCashfree(true)
+      const cfSession = new CFSession(
+        data.payment_session_id,
+        data.order_id,
+        data.environment === 'production' ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX
+      )
+      CFPaymentGatewayService.doWebPayment(cfSession)
+      // Native checkout UI takes over the screen until onVerify/onError fires
+      // (registered once on mount below).
     } catch (e: any) {
       console.error('createTopupOrder:', e)
     } finally {
@@ -1428,34 +1454,6 @@ export default function SubscriptionScreen() {
             </ScrollView>
           </Pressable>
         </Pressable>
-      </Modal>
-
-      {/* Cashfree payment — for wallet top-ups. Must be a real RN <Modal>, not
-          a plain sibling View: Modal renders to its own native fullscreen
-          overlay regardless of where it sits in the tree, whereas a bare
-          CashfreeWebView here was just another child in this screen's normal
-          layout — it only got whatever leftover space was left at the
-          bottom instead of covering the screen. */}
-      <Modal
-        visible={showCashfree && !!cfPaymentSessionId}
-        animationType="slide"
-        presentationStyle="fullScreen"
-      >
-        {cfPaymentSessionId && (
-          <CashfreeWebView
-            paymentSessionId={cfPaymentSessionId}
-            environment={cfEnvironment}
-            onSuccess={async () => {
-              setShowCashfree(false)
-              setCfPaymentSessionId(null)
-              await fetchAll()
-              fetchTransactions()
-              setShowTransactions(true)
-            }}
-            onFailure={() => { setShowCashfree(false); setCfPaymentSessionId(null) }}
-            onDismiss={() => { setShowCashfree(false); setCfPaymentSessionId(null) }}
-          />
-        )}
       </Modal>
     </View>
   )

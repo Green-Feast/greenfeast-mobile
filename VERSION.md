@@ -52,6 +52,23 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.7.0 — 2026-08-05
+- Build 7, OTA 0.
+- Replaced the WebView-embedded Cashfree checkout with Cashfree's official
+  native React Native SDK (`react-native-cashfree-pg-sdk` +
+  `cashfree-pg-api-contract`). Two WebView-specific bugs in a row (a
+  redirect-timing bug causing false "success", then a real card payment
+  failing before Cashfree even logged an attempt — likely a WebView/iframe
+  cookie or environment incompatibility with the embedded `_modal` checkout)
+  made clear this integration path wasn't reliable. The native SDK handles
+  UPI/card/netbanking natively instead of through an injected web checkout,
+  which is what Cashfree recommends for React Native apps.
+  `CashfreeWebView.tsx` and `react-native-webview` are both removed —
+  nothing else in the app used the WebView package.
+- **Requires a new native build, not just an OTA update** — adds a native
+  module and an iOS `Info.plist` entry (`LSApplicationQueriesSchemes` for
+  UPI app deep links).
+
 ### 1.6.5 — 2026-08-05
 - Build 6, OTA 5.
 - Fixed a 50+ second stuck loading skeleton that only cleared after several

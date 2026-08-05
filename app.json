@@ -9,7 +9,14 @@
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.greenfeast.app",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "amazonpay", "upi", "credpay", "bhim", "paytmmp", "phonepe",
+          "tez", "navipay", "mobikwik", "myairtel", "popclubapp", "super",
+          "kiwi", "simplypayupi", "whatsapp"
+        ]
+      }
     },
     "android": {
       "package": "com.greenfeast.app",

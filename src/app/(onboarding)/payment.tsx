@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -12,17 +12,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import * as Haptics from 'expo-haptics'
+import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
+import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
-import CashfreeWebView from '@/components/CashfreeWebView'
 import SectionProgress from '@/components/SectionProgress'
 
 type Method = 'cashfree' | 'cod'
-type Phase = 'summary' | 'creating' | 'checkout' | 'success'
+type Phase = 'summary' | 'creating' | 'success'
 
 const PLAN_AMOUNTS: Record<string, number> = {
   trial: 149900,
@@ -68,11 +69,6 @@ export default function PaymentScreen() {
   // Set after DB records created
   const [subscriptionId, setSubscriptionId] = useState('')
   const [firstDelivery, setFirstDelivery] = useState('')
-
-  // Set after Cashfree order created
-  const [cfOrder, setCfOrder] = useState<{
-    orderId: string; paymentSessionId: string; environment: 'sandbox' | 'production'
-  } | null>(null)
 
   const planAmount = PLAN_AMOUNTS[store.planId ?? ''] ?? 149900
   const addonTotal = store.addOns.reduce((s, a) => s + a.pricePerMeal, 0) * (PLAN_DELIVERIES[store.planId ?? ''] ?? 5)
@@ -283,7 +279,9 @@ export default function PaymentScreen() {
         return
       }
 
-      // Cashfree: create order via Edge Function
+      // Cashfree: create order via Edge Function, then hand off to the
+      // native SDK — it takes over the screen with its own checkout UI until
+      // onVerify/onError fires (registered on mount below).
       const { data: { session } } = await supabase.auth.getSession()
       const res = await supabase.functions.invoke('cashfree-create-order', {
         body: { subscription_id: subId, amount_paise: grandTotal },
@@ -292,12 +290,14 @@ export default function PaymentScreen() {
 
       if (res.error) throw new Error(res.error.message)
 
-      setCfOrder({
-        orderId: res.data.order_id,
-        paymentSessionId: res.data.payment_session_id,
-        environment: res.data.environment,
-      })
-      setPhase('checkout')
+      const cfSession = new CFSession(
+        res.data.payment_session_id,
+        res.data.order_id,
+        res.data.environment === 'production' ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX
+      )
+      CFPaymentGatewayService.doWebPayment(cfSession)
+      // Stay in 'creating' — the native checkout UI covers this screen until
+      // the callback below fires.
     } catch (e: any) {
       setError(e?.message ?? 'Something went wrong. Please try again.')
       setPhase('summary')
@@ -321,10 +321,26 @@ export default function PaymentScreen() {
   }
 
   function handlePaymentFailure(errMsg: string) {
-    setCfOrder(null)
     setPhase('summary')
     setError(`Payment failed: ${errMsg}`)
   }
+
+  // The native SDK's callback is registered once per mount and can't take
+  // fresh props/state each render — a ref keeps it reading the latest
+  // subscriptionId/handlers instead of a stale closure from mount time.
+  const latest = useRef({ handlePaymentSuccess, handlePaymentFailure })
+  latest.current = { handlePaymentSuccess, handlePaymentFailure }
+
+  useEffect(() => {
+    const callback: CFCallback = {
+      onVerify: () => { latest.current.handlePaymentSuccess() },
+      onError: (error: CFErrorResponse) => {
+        latest.current.handlePaymentFailure(error.getMessage() || 'Please try again.')
+      },
+    }
+    CFPaymentGatewayService.setCallback(callback)
+    return () => CFPaymentGatewayService.removeCallback()
+  }, [])
 
   async function handleDevSkip() {
     setError('')
@@ -344,27 +360,6 @@ export default function PaymentScreen() {
       setError(e?.message ?? 'Dev skip failed')
       setPhase('summary')
     }
-  }
-
-  function handleCheckoutDismissed() {
-    setCfOrder(null)
-    setPhase('summary')
-    // No error — user just cancelled
-  }
-
-  // ── Cashfree WebView fullscreen ───────────────────────────────────────────
-  if (phase === 'checkout' && cfOrder) {
-    return (
-      <Modal visible animationType="slide" presentationStyle="fullScreen">
-        <CashfreeWebView
-          paymentSessionId={cfOrder.paymentSessionId}
-          environment={cfOrder.environment}
-          onSuccess={handlePaymentSuccess}
-          onFailure={handlePaymentFailure}
-          onDismiss={handleCheckoutDismissed}
-        />
-      </Modal>
-    )
   }
 
   // ── Main summary screen ──────────────────────────────────────────────────
