@@ -52,6 +52,20 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.6.5 — 2026-08-05
+- Build 6, OTA 5.
+- Fixed a 50+ second stuck loading skeleton that only cleared after several
+  app reopens: no Supabase call anywhere (auth session restore, REST
+  queries) had a timeout, so a bad/black-holed connection could hang a
+  request far longer than reasonable with nothing to fail it gracefully.
+  Added a 15s AbortController timeout to the Supabase client's fetch,
+  applied globally. Also wrapped the auth gate's profile lookup in a
+  try/catch so a timeout there can't leave the app stuck waiting forever —
+  it now falls back and lets the user retry once the network recovers.
+  (Verified the classic supabase-js navigator-lock deadlock bug does NOT
+  apply here — this version already defaults to lockless auth coordination,
+  so applying that old fix would have been a regression.) JS-only.
+
 ### 1.6.4 — 2026-08-05
 - Build 6, OTA 4.
 - Fixed the wallet top-up checkout appearing as a squashed sliver at the

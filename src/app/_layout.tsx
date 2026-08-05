@@ -43,15 +43,26 @@ function AuthGate() {
       setSession(session)
 
       if (session) {
-        const [{ data }, { count }] = await Promise.all([
-          supabase.from('users').select('phone, onboarded').eq('id', session.user.id).single(),
-          supabase
-            .from('subscriptions')
-            .select('id', { count: 'exact', head: true })
-            .eq('user_id', session.user.id)
-            .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)'),
-        ])
-        setProfileLoaded(data?.phone ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
+        // A thrown/rejected lookup here (e.g. the fetch timeout in
+        // lib/supabase.ts firing on a bad connection) must never leave
+        // profileLoading stuck true forever — that would hang the redirect
+        // effect below indefinitely. Fall back to "unknown" values so the
+        // redirect logic can proceed; a genuinely returning user just retries
+        // once the network recovers.
+        try {
+          const [{ data }, { count }] = await Promise.all([
+            supabase.from('users').select('phone, onboarded').eq('id', session.user.id).single(),
+            supabase
+              .from('subscriptions')
+              .select('id', { count: 'exact', head: true })
+              .eq('user_id', session.user.id)
+              .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)'),
+          ])
+          setProfileLoaded(data?.phone ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
+        } catch (err) {
+          console.warn('[AuthGate] profile lookup failed:', err)
+          setProfileLoaded(null, false, false)
+        }
 
         // Record Terms/Privacy consent exactly once per account, the moment
         // any session is first established. Safe to run unconditionally on
