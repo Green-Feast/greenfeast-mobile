@@ -14,7 +14,7 @@ or prototype.** Every change should be production-grade: no shortcuts, no "good 
 demo" reasoning, proper error handling at system boundaries, full UX polish.
 
 Sibling repos: `greenfeast-admin` (Next.js admin dashboard), Supabase backend (auth, postgres,
-edge functions). Payments via Razorpay.
+edge functions). Payments via Cashfree.
 
 # Git / GitHub
 

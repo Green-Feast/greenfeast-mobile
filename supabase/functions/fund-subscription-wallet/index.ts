@@ -3,7 +3,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 // Credits a subscription's wallet with the plan's grand total (base + add-ons),
 // computed SERVER-SIDE from the catalogue so the amount can never be inflated by
 // the client. Idempotent via wallet_credit(reference_id = subscription_id), so the
-// app's optimistic call and the Razorpay webhook can both fire safely.
+// app's optimistic call and the Cashfree webhook can both fire safely.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

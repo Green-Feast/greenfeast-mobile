@@ -1,7 +1,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-// Creates a Razorpay order for an arbitrary wallet top-up amount.
-// The razorpay-webhook handles the authoritative credit on payment.captured.
+// Creates a Cashfree order for an arbitrary wallet top-up amount.
+// cashfree-webhook handles the authoritative credit on PAYMENT_SUCCESS_WEBHOOK.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -9,6 +9,20 @@ const corsHeaders = {
 }
 
 const MIN_TOPUP_PAISE = 10000  // ₹100 minimum
+
+const CASHFREE_ENV = Deno.env.get('CASHFREE_ENV') === 'production' ? 'production' : 'sandbox'
+const CASHFREE_BASE = CASHFREE_ENV === 'production'
+  ? 'https://api.cashfree.com/pg'
+  : 'https://sandbox.cashfree.com/pg'
+
+function sanitizeCustomerId(id: string) {
+  return id.replace(/[^a-zA-Z0-9_-]/g, '')
+}
+
+function sanitizePhone(phone: string) {
+  const digits = phone.replace(/\D/g, '')
+  return digits.slice(-10)
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -35,26 +49,42 @@ Deno.serve(async (req) => {
       return json({ error: `Minimum top-up is ₹${MIN_TOPUP_PAISE / 100}` }, 400)
     }
 
-    const KEY_ID = Deno.env.get('RAZORPAY_KEY_ID')!
-    const KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET')!
-    const credentials = btoa(`${KEY_ID}:${KEY_SECRET}`)
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('name, phone')
+      .eq('id', user.id)
+      .single()
 
-    const rzpRes = await fetch('https://api.razorpay.com/v1/orders', {
+    const APP_ID = Deno.env.get('CASHFREE_APP_ID')!
+    const SECRET_KEY = Deno.env.get('CASHFREE_SECRET_KEY')!
+    const orderId = `topup_${user.id.slice(0, 20)}_${Date.now()}`
+
+    const cfRes = await fetch(`${CASHFREE_BASE}/orders`, {
       method: 'POST',
       headers: {
-        Authorization: `Basic ${credentials}`,
+        'x-client-id': APP_ID,
+        'x-client-secret': SECRET_KEY,
+        'x-api-version': '2023-08-01',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: amount_paise,
-        currency: 'INR',
-        receipt: `topup_${user.id.slice(0, 20)}_${Date.now()}`,
-        notes: { purpose: 'topup', user_id: user.id, amount_paise },
+        order_id: orderId,
+        order_amount: amount_paise / 100, // Cashfree wants rupees, not paise
+        order_currency: 'INR',
+        customer_details: {
+          customer_id: sanitizeCustomerId(user.id),
+          customer_phone: sanitizePhone(userRow?.phone ?? ''),
+          customer_name: userRow?.name || undefined,
+        },
       }),
     })
 
-    if (!rzpRes.ok) throw new Error('Razorpay order creation failed')
-    const rzpOrder = await rzpRes.json()
+    if (!cfRes.ok) {
+      const body = await cfRes.text()
+      console.error('Cashfree order creation failed:', body)
+      throw new Error('Cashfree order creation failed')
+    }
+    const cfOrder = await cfRes.json()
 
     // Insert a payment row (subscription_id is NULL for top-ups).
     // MUST NOT be fire-and-forget: the webhook finds this row by cf_order_id to
@@ -65,14 +95,14 @@ Deno.serve(async (req) => {
       subscription_id: null,
       amount: amount_paise,
       status: 'created',
-      cf_order_id: rzpOrder.id,
+      cf_order_id: orderId,
     })
     if (payErr) {
       console.error('wallet-topup: payments insert failed:', payErr.message)
       return json({ error: 'Could not start the top-up. Please try again.' }, 500)
     }
 
-    return json({ order_id: rzpOrder.id, amount: rzpOrder.amount, currency: rzpOrder.currency, key_id: KEY_ID })
+    return json({ order_id: orderId, payment_session_id: cfOrder.payment_session_id, environment: CASHFREE_ENV })
   } catch (err) {
     console.error('wallet-topup error:', err)
     return json({ error: 'Could not create top-up order. Please try again.' }, 500)

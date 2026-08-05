@@ -20,7 +20,7 @@ import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
-import RazorpayWebView from '@/components/RazorpayWebView'
+import CashfreeWebView from '@/components/CashfreeWebView'
 import MacroRow from '@/components/MacroRow'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -156,13 +156,13 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showAddMoney, setShowAddMoney] = useState(false)
-  const [showRazorpay, setShowRazorpay] = useState(false)
+  const [showCashfree, setShowCashfree] = useState(false)
   const [funding, setFunding] = useState(false)
   const [freeMealIds, setFreeMealIds] = useState<Set<string>>(new Set())
   const [topupAmountPaise, setTopupAmountPaise] = useState(50000) // ₹500 default
   const [topupCustom, setTopupCustom] = useState('')
-  const [razorpayOrderId, setRazorpayOrderId] = useState<string | null>(null)
-  const [razorpayAmountPaise, setRazorpayAmountPaise] = useState(0)
+  const [cfPaymentSessionId, setCfPaymentSessionId] = useState<string | null>(null)
+  const [cfEnvironment, setCfEnvironment] = useState<'sandbox' | 'production'>('sandbox')
   const [creatingTopup, setCreatingTopup] = useState(false)
   const didAutoSync = useRef(false)
   const stripRef = useRef<ScrollView | null>(null)
@@ -445,10 +445,10 @@ export default function SubscriptionScreen() {
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
       if (error || data?.error) throw new Error(data?.error ?? 'Failed to create order')
-      setRazorpayOrderId(data.order_id)
-      setRazorpayAmountPaise(amount)
+      setCfPaymentSessionId(data.payment_session_id)
+      setCfEnvironment(data.environment ?? 'sandbox')
       setShowAddMoney(false)
-      setShowRazorpay(true)
+      setShowCashfree(true)
     } catch (e: any) {
       console.error('createTopupOrder:', e)
     } finally {
@@ -1430,23 +1430,20 @@ export default function SubscriptionScreen() {
         </Pressable>
       </Modal>
 
-      {/* Razorpay payment — for wallet top-ups */}
-      {showRazorpay && razorpayOrderId && (
-        <RazorpayWebView
-          orderId={razorpayOrderId}
-          amount={razorpayAmountPaise}
-          keyId={process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID ?? ''}
-          userName={user?.user_metadata?.name ?? user?.email ?? 'User'}
-          userPhone={user?.phone ?? ''}
-          onSuccess={async (_paymentId) => {
-            setShowRazorpay(false)
-            setRazorpayOrderId(null)
+      {/* Cashfree payment — for wallet top-ups */}
+      {showCashfree && cfPaymentSessionId && (
+        <CashfreeWebView
+          paymentSessionId={cfPaymentSessionId}
+          environment={cfEnvironment}
+          onSuccess={async () => {
+            setShowCashfree(false)
+            setCfPaymentSessionId(null)
             await fetchAll()
             fetchTransactions()
             setShowTransactions(true)
           }}
-          onFailure={() => { setShowRazorpay(false); setRazorpayOrderId(null) }}
-          onDismiss={() => { setShowRazorpay(false); setRazorpayOrderId(null) }}
+          onFailure={() => { setShowCashfree(false); setCfPaymentSessionId(null) }}
+          onDismiss={() => { setShowCashfree(false); setCfPaymentSessionId(null) }}
         />
       )}
     </View>

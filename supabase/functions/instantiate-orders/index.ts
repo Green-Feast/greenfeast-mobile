@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
   const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
   // Two things satisfy "service role" here: the platform-reserved
   // SUPABASE_SERVICE_ROLE_KEY (what other edge functions — manage-subscription,
-  // razorpay-webhook — read on their own side when calling this one, so those
+  // cashfree-webhook — read on their own side when calling this one, so those
   // calls have always matched each other correctly), and INTERNAL_FN_SECRET
   // (for callers outside Supabase's edge runtime, e.g. the admin app's Vercel
   // Cron routes — those hold the long-form legacy service_role key from

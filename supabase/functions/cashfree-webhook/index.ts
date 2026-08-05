@@ -6,19 +6,18 @@ const DELIVERIES_BY_PLAN: Record<string, number> = {
   plan30: 30,
 }
 
-async function verifyRazorpaySignature(body: string, signature: string, secret: string): Promise<boolean> {
+// Cashfree signs webhooks as base64(HMAC-SHA256(secret, timestamp + rawBody))
+// using the same client secret used to authenticate API calls — no separate
+// webhook secret to configure.
+async function verifyCashfreeSignature(
+  rawBody: string, timestamp: string, signature: string, secret: string
+): Promise<boolean> {
   const enc = new TextEncoder()
   const key = await crypto.subtle.importKey(
-    'raw',
-    enc.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
   )
-  const sigBytes = await crypto.subtle.sign('HMAC', key, enc.encode(body))
-  const expected = Array.from(new Uint8Array(sigBytes))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('')
+  const sigBytes = await crypto.subtle.sign('HMAC', key, enc.encode(timestamp + rawBody))
+  const expected = btoa(String.fromCharCode(...new Uint8Array(sigBytes)))
   return expected === signature
 }
 
@@ -29,12 +28,13 @@ Deno.serve(async (req) => {
 
   try {
     const rawBody = await req.text()
-    const signature = req.headers.get('x-razorpay-signature') ?? ''
-    const secret = Deno.env.get('RAZORPAY_WEBHOOK_SECRET')!
+    const signature = req.headers.get('x-webhook-signature') ?? ''
+    const timestamp = req.headers.get('x-webhook-timestamp') ?? ''
+    const secret = Deno.env.get('CASHFREE_SECRET_KEY')!
 
-    const valid = await verifyRazorpaySignature(rawBody, signature, secret)
+    const valid = await verifyCashfreeSignature(rawBody, timestamp, signature, secret)
     if (!valid) {
-      console.error('Razorpay webhook: invalid signature')
+      console.error('Cashfree webhook: invalid signature')
       return new Response(JSON.stringify({ error: 'Invalid signature' }), { status: 400 })
     }
 
@@ -44,25 +44,26 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    if (event.event === 'payment.captured') {
-      const payment = event.payload.payment.entity
+    if (event.type === 'PAYMENT_SUCCESS_WEBHOOK') {
+      const order = event.data.order
+      const payment = event.data.payment
 
       const { data: paymentRow, error: payErr } = await supabase
         .from('payments')
         .update({
           status: 'paid',
-          cf_payment_id: payment.id,
+          cf_payment_id: String(payment.cf_payment_id),
         })
-        .eq('cf_order_id', payment.order_id)
+        .eq('cf_order_id', order.order_id)
         .select('subscription_id, user_id, amount')
         .single()
 
       // If this lookup fails we credit nobody and activate nothing — the
-      // customer has paid and gets silence. Log loudly and 500 so Razorpay
+      // customer has paid and gets silence. Log loudly and 500 so Cashfree
       // retries the webhook instead of treating it as delivered.
       if (payErr || !paymentRow) {
         console.error(
-          'razorpay-webhook: no payments row for order', payment.order_id,
+          'cashfree-webhook: no payments row for order', order.order_id,
           payErr?.message ?? '(no matching row)'
         )
         return new Response(
@@ -71,14 +72,17 @@ Deno.serve(async (req) => {
         )
       }
 
+      // Cashfree reports amounts in rupees, not paise — the DB stores paise
+      // everywhere else, so convert on the way in.
+      const capturedPaise = Math.round((payment.payment_amount ?? 0) * 100)
+
       // Wallet top-up: no subscription, credit the captured amount directly.
       if (!paymentRow.subscription_id) {
-        const capturedPaise = payment.amount // Razorpay sends amount in paise
         await supabase.rpc('wallet_credit', {
           p_user: paymentRow.user_id,
           p_amount: capturedPaise,
           p_reason: 'Wallet top-up',
-          p_reference_id: payment.id,
+          p_reference_id: String(payment.cf_payment_id),
         })
       }
 
@@ -122,17 +126,18 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (event.event === 'payment.failed') {
-      const payment = event.payload.payment.entity
+    if (event.type === 'PAYMENT_FAILED_WEBHOOK' || event.type === 'PAYMENT_USER_DROPPED_WEBHOOK') {
+      const order = event.data.order
+      const payment = event.data.payment
       const { error: failErr } = await supabase
         .from('payments')
         .update({
           status: 'failed',
-          cf_payment_id: payment.id,
+          cf_payment_id: payment?.cf_payment_id ? String(payment.cf_payment_id) : null,
         })
-        .eq('cf_order_id', payment.order_id)
+        .eq('cf_order_id', order.order_id)
       if (failErr) {
-        console.error('razorpay-webhook: could not mark payment failed:', failErr.message)
+        console.error('cashfree-webhook: could not mark payment failed:', failErr.message)
       }
     }
 
@@ -141,7 +146,7 @@ Deno.serve(async (req) => {
       headers: { 'Content-Type': 'application/json' },
     })
   } catch (err) {
-    console.error('razorpay-webhook error:', err)
+    console.error('cashfree-webhook error:', err)
     return new Response(JSON.stringify({ error: 'Webhook processing failed' }), { status: 500 })
   }
 })

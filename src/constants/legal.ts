@@ -43,14 +43,14 @@ This Privacy Policy explains what information GreenFeast ("we", "us", "our") col
 - Account details: name, phone number, email (if you sign in with Google/Apple/email).
 - Delivery information: addresses, landmarks, and map pins you provide.
 - Health & dietary information: height, weight, goals, allergens, and dietary preferences you enter during onboarding, used solely to personalize your meal recommendations.
-- Order & payment information: subscription plan, order history, wallet balance and transactions. Payments are processed by Razorpay; we do not store your card or UPI credentials.
+- Order & payment information: subscription plan, order history, wallet balance and transactions. Payments are processed by Cashfree; we do not store your card or UPI credentials.
 - Device information: basic diagnostic data (app version, device type) to help us debug issues.
 
 2. How We Use Your Information
 We use your information to operate the Service: creating your account, building your meal plan and recommendations, scheduling and delivering orders, processing payments, and providing customer support.
 
 3. Sharing
-We share information with service providers strictly as needed to run the Service — for example, our payment processor (Razorpay) and our delivery operations team. We do not sell your personal information.
+We share information with service providers strictly as needed to run the Service — for example, our payment processor (Cashfree) and our delivery operations team. We do not sell your personal information.
 
 4. Data Retention
 We retain your account and order data for as long as your account is active, and as needed to comply with legal obligations (such as tax records for payments).

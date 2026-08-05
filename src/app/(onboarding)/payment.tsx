@@ -18,10 +18,10 @@ import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
-import RazorpayWebView from '@/components/RazorpayWebView'
+import CashfreeWebView from '@/components/CashfreeWebView'
 import SectionProgress from '@/components/SectionProgress'
 
-type Method = 'razorpay' | 'cod'
+type Method = 'cashfree' | 'cod'
 type Phase = 'summary' | 'creating' | 'checkout' | 'success'
 
 const PLAN_AMOUNTS: Record<string, number> = {
@@ -57,10 +57,10 @@ function fmtRupees(paise: number) {
 export default function PaymentScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
-  const { setOnboarded, setHasSubscription, phone } = useAuthStore()
+  const { setOnboarded, setHasSubscription } = useAuthStore()
   const store = useOnboardingStore()
 
-  const [method, setMethod] = useState<Method>('razorpay')
+  const [method, setMethod] = useState<Method>('cashfree')
   const [phase, setPhase] = useState<Phase>('summary')
   const [error, setError] = useState('')
   const [userName, setUserName] = useState('')
@@ -69,9 +69,9 @@ export default function PaymentScreen() {
   const [subscriptionId, setSubscriptionId] = useState('')
   const [firstDelivery, setFirstDelivery] = useState('')
 
-  // Set after Razorpay order created
-  const [rzpOrder, setRzpOrder] = useState<{
-    orderId: string; amount: number; keyId: string
+  // Set after Cashfree order created
+  const [cfOrder, setCfOrder] = useState<{
+    orderId: string; paymentSessionId: string; environment: 'sandbox' | 'production'
   } | null>(null)
 
   const planAmount = PLAN_AMOUNTS[store.planId ?? ''] ?? 149900
@@ -89,7 +89,7 @@ export default function PaymentScreen() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) throw new Error('Not authenticated')
 
-    // Display name for Razorpay checkout prefill (cosmetic)
+    // Display name for the success screen's "Welcome aboard" greeting (cosmetic)
     const { data: profile } = await supabase.from('users').select('name').eq('id', user.id).single()
     setUserName(profile?.name ?? (user.user_metadata?.full_name as string) ?? '')
 
@@ -283,19 +283,19 @@ export default function PaymentScreen() {
         return
       }
 
-      // Razorpay: create order via Edge Function
+      // Cashfree: create order via Edge Function
       const { data: { session } } = await supabase.auth.getSession()
-      const res = await supabase.functions.invoke('razorpay-create-order', {
+      const res = await supabase.functions.invoke('cashfree-create-order', {
         body: { subscription_id: subId, amount_paise: grandTotal },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       })
 
       if (res.error) throw new Error(res.error.message)
 
-      setRzpOrder({
+      setCfOrder({
         orderId: res.data.order_id,
-        amount: res.data.amount,
-        keyId: res.data.key_id,
+        paymentSessionId: res.data.payment_session_id,
+        environment: res.data.environment,
       })
       setPhase('checkout')
     } catch (e: any) {
@@ -304,7 +304,7 @@ export default function PaymentScreen() {
     }
   }
 
-  async function handlePaymentSuccess(paymentId: string) {
+  async function handlePaymentSuccess() {
     // Optimistically activate — webhook will also fire and do the same (idempotent)
     await activateSubscription(subscriptionId)
     // Instantiate orders now too. The webhook also does this, but it depends on
@@ -321,7 +321,7 @@ export default function PaymentScreen() {
   }
 
   function handlePaymentFailure(errMsg: string) {
-    setRzpOrder(null)
+    setCfOrder(null)
     setPhase('summary')
     setError(`Payment failed: ${errMsg}`)
   }
@@ -347,21 +347,18 @@ export default function PaymentScreen() {
   }
 
   function handleCheckoutDismissed() {
-    setRzpOrder(null)
+    setCfOrder(null)
     setPhase('summary')
     // No error — user just cancelled
   }
 
-  // ── Razorpay WebView fullscreen ──────────────────────────────────────────
-  if (phase === 'checkout' && rzpOrder) {
+  // ── Cashfree WebView fullscreen ───────────────────────────────────────────
+  if (phase === 'checkout' && cfOrder) {
     return (
       <Modal visible animationType="slide" presentationStyle="fullScreen">
-        <RazorpayWebView
-          orderId={rzpOrder.orderId}
-          amount={rzpOrder.amount}
-          keyId={rzpOrder.keyId}
-          userName={userName}
-          userPhone={phone ?? ''}
+        <CashfreeWebView
+          paymentSessionId={cfOrder.paymentSessionId}
+          environment={cfOrder.environment}
           onSuccess={handlePaymentSuccess}
           onFailure={handlePaymentFailure}
           onDismiss={handleCheckoutDismissed}
@@ -406,11 +403,11 @@ export default function PaymentScreen() {
         <Text style={styles.sectionTitle}>Payment method</Text>
 
         <TouchableOpacity
-          style={[styles.methodCard, method === 'razorpay' && styles.methodCardActive]}
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMethod('razorpay') }}
+          style={[styles.methodCard, method === 'cashfree' && styles.methodCardActive]}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMethod('cashfree') }}
         >
-          <View style={[styles.radio, method === 'razorpay' && styles.radioActive]}>
-            {method === 'razorpay' && <View style={styles.radioDot} />}
+          <View style={[styles.radio, method === 'cashfree' && styles.radioActive]}>
+            {method === 'cashfree' && <View style={styles.radioDot} />}
           </View>
           <View style={styles.methodText}>
             <Text style={styles.methodTitle}>Pay Online</Text>
@@ -433,10 +430,10 @@ export default function PaymentScreen() {
           <Text style={styles.methodIcon}>💵</Text>
         </TouchableOpacity>
 
-        {method === 'razorpay' && (
+        {method === 'cashfree' && (
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
-              You'll be redirected to a secure Razorpay checkout. Supports Google Pay, PhonePe, BHIM,
+              You'll be redirected to a secure Cashfree checkout. Supports Google Pay, PhonePe, BHIM,
               HDFC, ICICI, and all major UPI apps.
             </Text>
           </View>
@@ -469,7 +466,7 @@ export default function PaymentScreen() {
         <Button onPress={handleProceed} disabled={phase === 'creating'}>
           {phase === 'creating' ? (
             <ActivityIndicator color="#fff" />
-          ) : method === 'razorpay' ? (
+          ) : method === 'cashfree' ? (
             `Pay ${fmtRupees(grandTotal)} →`
           ) : (
             'Confirm order →'

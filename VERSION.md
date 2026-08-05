@@ -52,6 +52,15 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.6.1 — 2026-08-05
+- Build 6, OTA 1.
+- Replaced Razorpay with Cashfree as the payment processor, everywhere —
+  onboarding plan payment and wallet top-ups both now create Cashfree
+  orders and checkout through a `CashfreeWebView` (same WebView + JS-SDK
+  pattern as before, just Cashfree's checkout.js instead of Razorpay's).
+  Test-mode credentials verified working end-to-end against Cashfree's
+  sandbox Orders API. JS-only change — no native config touched.
+
 ### 1.6.0 — 2026-08-05
 - Build 6, OTA 0.
 - Fixed push notifications never actually registering — Android push via

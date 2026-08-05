@@ -5,19 +5,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Platform,
 } from 'react-native'
 import WebView, { WebViewMessageEvent, WebViewNavigation } from 'react-native-webview'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors, Fonts } from '@/constants/colors'
 
 type Props = {
-  orderId: string
-  amount: number       // in paise
-  keyId: string
-  userName: string
-  userPhone: string
-  onSuccess: (razorpayPaymentId: string) => void
+  paymentSessionId: string
+  environment: 'sandbox' | 'production'
+  onSuccess: () => void
   onFailure: (error: string) => void
   onDismiss: () => void
 }
@@ -67,53 +63,35 @@ function buildCheckoutHtml(props: Props) {
     <p style="font-size:15px;margin-bottom:16px;color:#555">Opening payment gateway…</p>
     <span class="dot"></span><span class="dot"></span><span class="dot"></span>
   </div>
-  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
   <script>
     function postMsg(data) {
       window.ReactNativeWebView.postMessage(JSON.stringify(data));
     }
 
-    var options = {
-      key: "${s(props.keyId)}",
-      amount: ${props.amount},
-      currency: "INR",
-      name: "GreenFeast",
-      description: "Meal Subscription",
-      order_id: "${s(props.orderId)}",
-      prefill: {
-        name: "${s(props.userName)}",
-        contact: "${s(props.userPhone)}"
-      },
-      theme: { color: "#1B5E20" },
-      handler: function(response) {
-        postMsg({
-          type: "success",
-          payment_id: response.razorpay_payment_id,
-          order_id: response.razorpay_order_id
-        });
-      },
-      modal: {
-        ondismiss: function() {
-          postMsg({ type: "dismissed" });
-        },
-        escape: false
-      }
-    };
-
-    var rzp = new Razorpay(options);
-    rzp.on("payment.failed", function(response) {
-      postMsg({
-        type: "failed",
-        error: response.error.description || "Payment failed. Please try again."
+    try {
+      var cashfree = Cashfree({ mode: "${s(props.environment)}" });
+      cashfree.checkout({
+        paymentSessionId: "${s(props.paymentSessionId)}",
+        redirectTarget: "_self"
+      }).then(function(result) {
+        if (result && result.error) {
+          postMsg({ type: "failed", error: result.error.message || "Payment failed. Please try again." });
+        } else {
+          postMsg({ type: "success" });
+        }
+      }).catch(function(err) {
+        postMsg({ type: "failed", error: (err && err.message) || "Payment failed. Please try again." });
       });
-    });
-    rzp.open();
+    } catch (err) {
+      postMsg({ type: "failed", error: "Could not open payment gateway." });
+    }
   </script>
 </body>
 </html>`
 }
 
-export default function RazorpayWebView(props: Props) {
+export default function CashfreeWebView(props: Props) {
   const insets = useSafeAreaInsets()
   const webViewRef = useRef<WebView>(null)
 
@@ -121,7 +99,7 @@ export default function RazorpayWebView(props: Props) {
     try {
       const data = JSON.parse(event.nativeEvent.data)
       if (data.type === 'success') {
-        props.onSuccess(data.payment_id)
+        props.onSuccess()
       } else if (data.type === 'failed') {
         props.onFailure(data.error)
       } else if (data.type === 'dismissed') {
@@ -154,7 +132,7 @@ export default function RazorpayWebView(props: Props) {
 
       <WebView
         ref={webViewRef}
-        source={{ html: buildCheckoutHtml(props), baseUrl: 'https://checkout.razorpay.com' }}
+        source={{ html: buildCheckoutHtml(props), baseUrl: 'https://sdk.cashfree.com' }}
         originWhitelist={['*']}
         onMessage={onMessage}
         onNavigationStateChange={onNavigationStateChange}
@@ -168,7 +146,7 @@ export default function RazorpayWebView(props: Props) {
           </View>
         )}
         onShouldStartLoadWithRequest={(request) => {
-          // Let Razorpay's checkout page load normally
+          // Let Cashfree's checkout page load normally
           // Block any non-http redirect that isn't the initial load
           const url = request.url
           if (url.startsWith('http://') || url.startsWith('https://') || url === 'about:blank') {
