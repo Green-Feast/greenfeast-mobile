@@ -15,6 +15,7 @@
       "package": "com.greenfeast.app",
       "usesCleartextTraffic": true,
       "softwareKeyboardLayoutMode": "resize",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#1B5E20",
         "foregroundImage": "./assets/images/android-icon-foreground.png"

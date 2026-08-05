@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "537430814656",
+    "project_id": "greenfeast-app",
+    "storage_bucket": "greenfeast-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:537430814656:android:9c9039502282bbc49a6225",
+        "android_client_info": {
+          "package_name": "com.greenfeast.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBiqTjbsOsm3qTBFgd0jlQi-fFusI_gfB8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

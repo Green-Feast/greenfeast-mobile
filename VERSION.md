@@ -52,6 +52,19 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.6.0 — 2026-08-05
+- Build 6, OTA 0.
+- Fixed push notifications never actually registering — Android push via
+  Expo requires the project's own Firebase (FCM V1) setup, which this app
+  never had. Added `google-services.json` (client-side Firebase config,
+  referenced via `app.json`'s new `android.googleServicesFile`) and
+  uploaded the matching FCM V1 service-account key to EAS's Android
+  credentials. Confirmed the missing `google-services.json` was the actual
+  blocker — the EAS-side key alone wasn't enough, since the app itself has
+  no way to reach Firebase without this file baked into the native build.
+- **Requires a new native build, not just an OTA update** — this changes
+  native Android config, same as the earlier splash-screen fix.
+
 ### 1.5.1 — 2026-07-30
 - Build 5, OTA 1.
 - Delivery cutoffs are now per-slot, same-day: lunch locks 8 AM IST, dinner
