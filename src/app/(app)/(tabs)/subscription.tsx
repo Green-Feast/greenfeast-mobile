@@ -1430,22 +1430,33 @@ export default function SubscriptionScreen() {
         </Pressable>
       </Modal>
 
-      {/* Cashfree payment — for wallet top-ups */}
-      {showCashfree && cfPaymentSessionId && (
-        <CashfreeWebView
-          paymentSessionId={cfPaymentSessionId}
-          environment={cfEnvironment}
-          onSuccess={async () => {
-            setShowCashfree(false)
-            setCfPaymentSessionId(null)
-            await fetchAll()
-            fetchTransactions()
-            setShowTransactions(true)
-          }}
-          onFailure={() => { setShowCashfree(false); setCfPaymentSessionId(null) }}
-          onDismiss={() => { setShowCashfree(false); setCfPaymentSessionId(null) }}
-        />
-      )}
+      {/* Cashfree payment — for wallet top-ups. Must be a real RN <Modal>, not
+          a plain sibling View: Modal renders to its own native fullscreen
+          overlay regardless of where it sits in the tree, whereas a bare
+          CashfreeWebView here was just another child in this screen's normal
+          layout — it only got whatever leftover space was left at the
+          bottom instead of covering the screen. */}
+      <Modal
+        visible={showCashfree && !!cfPaymentSessionId}
+        animationType="slide"
+        presentationStyle="fullScreen"
+      >
+        {cfPaymentSessionId && (
+          <CashfreeWebView
+            paymentSessionId={cfPaymentSessionId}
+            environment={cfEnvironment}
+            onSuccess={async () => {
+              setShowCashfree(false)
+              setCfPaymentSessionId(null)
+              await fetchAll()
+              fetchTransactions()
+              setShowTransactions(true)
+            }}
+            onFailure={() => { setShowCashfree(false); setCfPaymentSessionId(null) }}
+            onDismiss={() => { setShowCashfree(false); setCfPaymentSessionId(null) }}
+          />
+        )}
+      </Modal>
     </View>
   )
 }

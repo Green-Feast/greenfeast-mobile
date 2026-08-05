@@ -52,6 +52,16 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.6.4 — 2026-08-05
+- Build 6, OTA 4.
+- Fixed the wallet top-up checkout appearing as a squashed sliver at the
+  bottom of My Plan instead of fullscreen: `CashfreeWebView` was rendered as
+  a plain sibling `View` there (unlike the onboarding payment screen, which
+  correctly wraps it in a real RN `<Modal>`). A bare View just takes
+  whatever leftover space is left in the screen's normal layout; `<Modal>`
+  renders to its own native fullscreen overlay regardless of where it sits
+  in the tree. JS-only — no native config touched.
+
 ### 1.6.3 — 2026-08-05
 - Build 6, OTA 3.
 - Fixed Cashfree checkout firing "success" instantly with no payment made:
