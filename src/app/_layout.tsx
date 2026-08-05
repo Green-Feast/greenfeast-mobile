@@ -32,13 +32,17 @@ SplashScreen.preventAutoHideAsync()
 function AuthGate() {
   const router = useRouter()
   const segments = useSegments()
-  const { session, phone, onboarded, loading, setSession, setPhone, setOnboarded, setHasSubscription } = useAuthStore()
+  const { session, phone, onboarded, loading, profileLoading, setSession, setProfileLoaded } = useAuthStore()
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      // Unblock every tab's own data fetch (Home, My Plan, Account) the
+      // moment the session itself is known — they only ever needed
+      // `user.id`, not phone/onboarded, so there's no reason to make them
+      // wait on the profile lookup below too.
+      setSession(session)
+
       if (session) {
-        // Fetch phone + onboarded + subscription status before marking loading
-        // done so both the gate and the tab bar have complete info.
         const [{ data }, { count }] = await Promise.all([
           supabase.from('users').select('phone, onboarded').eq('id', session.user.id).single(),
           supabase
@@ -47,9 +51,7 @@ function AuthGate() {
             .eq('user_id', session.user.id)
             .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)'),
         ])
-        setPhone(data?.phone ?? null)
-        setOnboarded(data?.onboarded ?? false)
-        setHasSubscription((count ?? 0) > 0)
+        setProfileLoaded(data?.phone ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
 
         // Record Terms/Privacy consent exactly once per account, the moment
         // any session is first established. Safe to run unconditionally on
@@ -64,18 +66,17 @@ function AuthGate() {
           .is('terms_accepted_at', null)
           .then(() => {})
       } else {
-        setPhone(null)
-        setOnboarded(false)
-        setHasSubscription(false)
+        setProfileLoaded(null, false, false)
       }
-      setSession(session)
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
-    if (loading) return
+    // Redirect decisions need phone/onboarded, not just the session, so this
+    // effect (unlike each tab's own fetch) waits on both.
+    if (loading || profileLoading) return
 
     const inAuthGroup = segments[0] === '(auth)'
     const inOnboardingGroup = segments[0] === '(onboarding)'
@@ -112,7 +113,7 @@ function AuthGate() {
     if (inAuthGroup || (inOnboardingGroup && IDENTITY_SCREENS.includes(segments[1] ?? ''))) {
       router.replace('/(app)/(tabs)')
     }
-  }, [session, phone, onboarded, loading, segments])
+  }, [session, phone, onboarded, loading, profileLoading, segments])
 
   // Stack instead of Slot so the whole app has one real navigation history —
   // back/swipe-back always returns to the literal previous screen, matching

@@ -52,6 +52,17 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.6.2 — 2026-08-05
+- Build 6, OTA 2.
+- Fixed slow cold start (10-20s skeleton on every app open): the auth store's
+  single `loading` flag conflated "session restored" with "phone/onboarded
+  profile looked up," so every tab's own data fetch (Home, My Plan, Account)
+  was blocked behind an extra serial network round-trip it never actually
+  needed. Split into `loading` (session only — what each tab's fetch waits
+  on) and `profileLoading` (phone/onboarded lookup — only the redirect logic
+  in `_layout.tsx` needs this). Removes one full round-trip from every cold
+  start. JS-only change — no native config touched.
+
 ### 1.6.1 — 2026-08-05
 - Build 6, OTA 1.
 - Replaced Razorpay with Cashfree as the payment processor, everywhere —
