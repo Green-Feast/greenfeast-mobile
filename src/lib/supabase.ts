@@ -5,23 +5,15 @@ import { Platform } from 'react-native'
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!
 
-const NETWORK_TIMEOUT_MS = 15000
-
-// Nothing in supabase-js (session restore/refresh, REST queries, RPCs) has a
-// timeout by default — on a bad or "black-holed" connection (packets silently
-// dropped, no explicit rejection) a request can hang far longer than the OS's
-// own TCP timeout before giving up, which is what produced a 50+ second stuck
-// loading skeleton that only cleared after several app reopens. Wrapping the
-// client's fetch in an AbortController timeout means every Supabase call —
-// including the auth session restore that every screen's own loading state
-// waits on — fails fast and lets calling code's existing error handling take
-// over, instead of hanging indefinitely.
-function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS)
-  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timeout))
-}
-
+// A previous attempt wrapped every call in a custom AbortController-based
+// fetch timeout to fix a rare stuck-loading bug. That broke EVERY Supabase
+// call app-wide (login, Menu, everything) — AbortController/signal support
+// in this native build's fetch implementation wasn't verified before
+// shipping, and it very likely doesn't behave the way a plain browser/Node
+// fetch does here. Reverted. If the stuck-loading issue needs revisiting,
+// use a Promise.race + setTimeout approach instead (doesn't touch fetch's
+// signal at all, so it can't have this failure mode), and verify on-device
+// before shipping again.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: AsyncStorage,
@@ -33,8 +25,5 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     // PKCE returns ?code= on redirect (what our native handler expects);
     // the default implicit flow returns tokens in the URL fragment instead.
     flowType: 'pkce',
-  },
-  global: {
-    fetch: fetchWithTimeout,
   },
 })
