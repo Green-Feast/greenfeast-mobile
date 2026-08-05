@@ -73,12 +73,26 @@ function buildCheckoutHtml(props: Props) {
       var cashfree = Cashfree({ mode: "${s(props.environment)}" });
       cashfree.checkout({
         paymentSessionId: "${s(props.paymentSessionId)}",
-        redirectTarget: "_self"
+        // "_modal" keeps the checkout as an overlay within this same page —
+        // no navigation away. "_self" causes a full-page redirect, which
+        // inside a WebView resolves the promise immediately with
+        // {redirect: true} the moment the redirect *starts*, not when the
+        // payment actually finishes — that was firing "success" instantly
+        // with no payment having happened at all.
+        redirectTarget: "_modal"
       }).then(function(result) {
         if (result && result.error) {
           postMsg({ type: "failed", error: result.error.message || "Payment failed. Please try again." });
-        } else {
+        } else if (result && result.paymentDetails) {
+          // The flow actually completed. Cashfree's own docs note this
+          // fires "irrespective of transaction status" — it's not proof of
+          // success, just that there's something to check. The app treats
+          // this as optimistic (same as before) and the webhook remains the
+          // authoritative source that actually updates the database.
           postMsg({ type: "success" });
+        } else {
+          // Modal closed without completing — user backed out.
+          postMsg({ type: "dismissed" });
         }
       }).catch(function(err) {
         postMsg({ type: "failed", error: (err && err.message) || "Payment failed. Please try again." });

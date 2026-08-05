@@ -52,6 +52,16 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.6.3 — 2026-08-05
+- Build 6, OTA 3.
+- Fixed Cashfree checkout firing "success" instantly with no payment made:
+  `redirectTarget: "_self"` causes a full-page redirect, which inside a
+  WebView resolves the checkout promise immediately with `{redirect: true}`
+  the moment the redirect *starts* — not when payment finishes. Switched to
+  `redirectTarget: "_modal"` (overlay, no navigation) and now only treat
+  `result.paymentDetails` as completion, matching Cashfree's own docs.
+  JS-only — no native config touched.
+
 ### 1.6.2 — 2026-08-05
 - Build 6, OTA 2.
 - Fixed slow cold start (10-20s skeleton on every app open): the auth store's
