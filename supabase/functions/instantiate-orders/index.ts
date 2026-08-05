@@ -21,7 +21,7 @@ function next14Days(): Date[] {
 async function processSubscription(supabase: any, subId: string): Promise<number> {
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, user_id, batch_id, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id')
+    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id')
     .eq('id', subId)
     .single()
 
@@ -125,7 +125,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
           user_id: sub.user_id,
           subscription_id: subId,
           meal_template_id: mealTemplateId,
-          batch_id: sub.batch_id ?? null,
+          batch_id: (slot === 'lunch' ? sub.batch_id_lunch : sub.batch_id_dinner) ?? null,
           address_id: addr?.id ?? null,
           delivery_date: dateStr,
           meal_slot: slot,

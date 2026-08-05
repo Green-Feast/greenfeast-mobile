@@ -67,9 +67,12 @@ Deno.serve(async (req) => {
     }
 
     // Base per-meal rate (paise) from the plan — add-ons are not included.
+    // Also fetch both slot batches: a dinner dish added off a lunch reference
+    // order (or vice versa) must ride the subscription's batch for the slot
+    // it's actually being added to, not the reference order's own batch.
     const { data: sub } = await supabase
       .from('subscriptions')
-      .select('plan_id')
+      .select('plan_id, batch_id_lunch, batch_id_dinner')
       .eq('id', ref.subscription_id)
       .single()
     const { data: plan } = await supabase
@@ -100,7 +103,7 @@ Deno.serve(async (req) => {
         user_id: user.id,
         subscription_id: ref.subscription_id,
         meal_template_id,
-        batch_id: ref.batch_id ?? null,
+        batch_id: (effectiveSlot === 'lunch' ? sub?.batch_id_lunch : sub?.batch_id_dinner) ?? null,
         address_id: ref.address_id ?? null,
         delivery_date: ref.delivery_date,
         meal_slot: effectiveSlot,
