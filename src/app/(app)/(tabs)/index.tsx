@@ -482,7 +482,7 @@ export default function Home() {
                 >
                   <View style={styles.categoryCircle}>
                     {catMeal?.image_url ? (
-                      <Image source={{ uri: catMeal.image_url }} style={styles.categoryImg} contentFit="cover" cachePolicy="memory-disk" />
+                      <Image source={{ uri: catMeal.image_url }} style={styles.categoryImg} contentFit="cover" cachePolicy="memory-disk" transition={200} />
                     ) : (
                       <Text style={styles.categoryEmoji}>{CATEGORY_EMOJIS[cat.toLowerCase()] ?? '🍽️'}</Text>
                     )}
@@ -507,7 +507,7 @@ export default function Home() {
                 return (
                   <View key={meal.id} style={styles.pickCard}>
                     {meal.image_url ? (
-                      <Image source={{ uri: meal.image_url }} style={styles.pickImage} contentFit="cover" cachePolicy="memory-disk" />
+                      <Image source={{ uri: meal.image_url }} style={styles.pickImage} contentFit="cover" cachePolicy="memory-disk" transition={200} />
                     ) : (
                       <View style={[styles.pickImage, styles.pickImageFallback]}>
                         <Text style={{ fontSize: 26 }}>{CATEGORY_EMOJIS[meal.category] ?? '🍽️'}</Text>

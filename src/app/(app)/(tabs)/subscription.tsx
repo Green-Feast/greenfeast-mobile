@@ -1008,6 +1008,7 @@ export default function SubscriptionScreen() {
                         style={s.dayModalCurrentImg}
                         contentFit="cover"
                         cachePolicy="memory-disk"
+                        transition={200}
                       />
                     )}
                     <Text style={s.dayModalCurrentName}>

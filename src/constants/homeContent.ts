@@ -5,10 +5,8 @@
 // OTA payload entirely, and expo-image's disk cache makes repeat views
 // instant after the first load, same as every meal photo elsewhere in the
 // app. Upload/replace via scripts/upload-story-photos.ts.
-const STORY_IMAGE_BASE = 'https://amwwjcwoumhbdxaxvexj.supabase.co/storage/v1/object/public/story-images'
-
 export type StorySlide = {
-  image: string
+  image: any
   eyebrow: string
   title: string
   body: string
@@ -16,25 +14,25 @@ export type StorySlide = {
 
 export const STORY_SLIDES: StorySlide[] = [
   {
-    image: `${STORY_IMAGE_BASE}/farm.png`,
+    image: require('@/assets/images/farm.webp'),
     eyebrow: 'FARM',
     title: 'It starts in the fields.',
     body: 'Vegetables and grains sourced from growers around Jaipur, picked for what\'s actually in season — not what\'s convenient.',
   },
   {
-    image: `${STORY_IMAGE_BASE}/kitchen.png`,
+    image: require('@/assets/images/kitchen.webp'),
     eyebrow: 'KITCHEN',
     title: 'Cooked this morning.',
     body: "Every meal is prepared fresh in our Jaipur kitchen the same day it's delivered — no cold storage, no shortcuts.",
   },
   {
-    image: `${STORY_IMAGE_BASE}/door.png`,
+    image: require('@/assets/images/door.webp'),
     eyebrow: 'DOOR',
     title: 'Straight to you, still warm.',
     body: 'Packed and out for delivery within hours of leaving the kitchen — before 1 PM for lunch, every weekday.',
   },
   {
-    image: `${STORY_IMAGE_BASE}/you.png`,
+    image: require('@/assets/images/you.webp'),
     eyebrow: 'YOU',
     title: 'Nutrition, considered.',
     body: 'Every bowl is built around real macros — fuel for your goals, not just another meal to get through the day.',

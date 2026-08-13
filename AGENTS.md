@@ -33,8 +33,9 @@ edge functions). Payments via Cashfree.
 - `gh`/`eas` are already authenticated as the `greenfeast` account on this machine.
 - **`eas build` is fine to run directly** — it only produces an installable artifact.
 - **Never run `eas update` (OTA push) directly.** Commit the change and hand the user the
-  exact `eas update` command to run themselves — they want to control the timing since OTA
-  pushes go live to real users immediately. Native-only changes (new native deps, app.json
+  exact `eas update` command to run themselves using the explicit format:
+  `npx eas update --channel preview --message "v1.x.y: <description>"`
+  They want to control the timing since OTA pushes go live to real users immediately. Native-only changes (new native deps, app.json
   native config like `adaptiveIcon`/`softwareKeyboardLayoutMode`) can't ship via OTA at all
   and require a full rebuild.
 

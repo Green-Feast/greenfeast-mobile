@@ -52,6 +52,13 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.7.1 — 2026-08-13
+- Build 7, OTA 1.
+- Optimized app image loading performance:
+  - Bundled Home Story Carousel images locally as compressed WebP assets (`farm.webp`, `kitchen.webp`, `door.webp`, `you.webp`), eliminating 10MB network payload for 0ms instant offline rendering.
+  - Compressed all 20 food dish images to WebP format (>99% payload reduction from 10MB+ down to ~30-60KB each) and updated Supabase Storage with 1-year disk caching headers.
+  - Added smooth `transition={200}` fade-in effects across `<Image>` components.
+
 ### 1.7.0 — 2026-08-05
 - Build 7, OTA 0.
 - Replaced the WebView-embedded Cashfree checkout with Cashfree's official

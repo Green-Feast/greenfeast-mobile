@@ -27,12 +27,6 @@ export default function StoryCarousel({ slides }: Props) {
   const [page, setPage] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Warm the cache for all 4 up front so swiping never shows a blank frame
-  // (same prefetch pattern as menu.tsx).
-  useEffect(() => {
-    Image.prefetch(slides.map((s) => s.image))
-  }, [slides])
-
   function startTimer() {
     if (timerRef.current) clearInterval(timerRef.current)
     timerRef.current = setInterval(() => {
@@ -65,8 +59,8 @@ export default function StoryCarousel({ slides }: Props) {
         onMomentumScrollEnd={onMomentumScrollEnd}
       >
         {slides.map((slide, i) => (
-          <View key={i} style={{ width, height: CARD_H }}>
-            <Image source={{ uri: slide.image }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" />
+          <View key={i} style={{ width, height: CARD_H, backgroundColor: Colors.cream200 }}>
+            <Image source={slide.image} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.75)']}
               style={styles.fade}
