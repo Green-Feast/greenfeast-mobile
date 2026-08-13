@@ -11,8 +11,10 @@ import { createClient } from '@supabase/supabase-js'
 import * as fs from 'fs'
 import * as path from 'path'
 
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://amwwjcwoumhbdxaxvexj.supabase.co'
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtd3dqY3dvdW1oYmR4YXh2ZXhqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDU4NTE2NSwiZXhwIjoyMDk2MTYxMTY1fQ.3r6lj-LZRrOEX1pdKgyEmW3HBPwjkavpmI4dmWBgrbk'
+// Never hardcode a fallback for either of these — a service key committed to the
+// repo grants full RLS-bypassing read/write on the whole database.
+const SUPABASE_URL = process.env.SUPABASE_URL
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const COMPRESSED_DIR = path.join(__dirname, '..', 'assets', 'food_compressed')
 const LOCAL_FOOD_DIR = path.join(__dirname, '..', 'assets', 'food')
 const BUCKET = 'meal-images'

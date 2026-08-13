@@ -42,8 +42,8 @@ const PAGE_W = width
 
 // Representative photo for the "Your menu style" card, picked by menu type.
 const MENU_STYLE_PHOTOS = {
-  M1: require('@/assets/food/quinoa-buddha.jpg'),
-  M2: require('@/assets/food/mediterranean-bliss.jpg'),
+  M1: require('@/assets/food/quinoa-buddha.webp'),
+  M2: require('@/assets/food/mediterranean-bliss.webp'),
 } as const
 
 function fmt(paise: number) {

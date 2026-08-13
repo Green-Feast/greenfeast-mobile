@@ -11,7 +11,7 @@ import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import Logo from '@/components/Logo'
 
-const FOOD_PHOTO = require('@/assets/food/avo-protein.jpg')
+const FOOD_PHOTO = require('@/assets/food/avo-protein.webp')
 
 export default function GateScreen() {
   const router = useRouter()

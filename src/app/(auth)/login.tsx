@@ -25,7 +25,7 @@ import { Colors, Fonts } from '@/constants/colors'
 import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Logo from '@/components/Logo'
 
-const HERO_PHOTO = require('@/assets/food/burrito-bowl.jpg')
+const HERO_PHOTO = require('@/assets/food/burrito-bowl.webp')
 
 WebBrowser.maybeCompleteAuthSession()
 

@@ -45,3 +45,12 @@ example
 # generated native folders
 /ios
 /android
+
+# Next.js build output (stray — this is an Expo app)
+.next/
+
+# kitchen POS menu export (migration source data, not app source)
+assets/Greenfeast menu.csv
+
+# design handoff bundle from claude.ai/design (prototypes, not app source)
+greenfeast-design-system/
