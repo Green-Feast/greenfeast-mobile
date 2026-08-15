@@ -25,7 +25,6 @@ import {
   RefreshCw,
 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
-import * as Updates from 'expo-updates'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
@@ -47,22 +46,6 @@ export default function AccountScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
   const { user, signOut, loading: authLoading } = useAuthStore()
-  const { currentlyRunning } = Updates.useUpdates()
-  const [updateLogs, setUpdateLogs] = useState<Updates.UpdatesLogEntry[] | null>(null)
-  const [loadingLogs, setLoadingLogs] = useState(false)
-
-  async function handleCheckUpdateLogs() {
-    setLoadingLogs(true)
-    try {
-      const entries = await Updates.readLogEntriesAsync(24 * 60 * 60 * 1000) // last 24h
-      setUpdateLogs(entries)
-    } catch (e) {
-      console.error('[OTA] readLogEntriesAsync() failed:', e)
-      setUpdateLogs([])
-    } finally {
-      setLoadingLogs(false)
-    }
-  }
 
   async function handleLogout() {
     setLogoutConfirm(false)
@@ -317,46 +300,6 @@ export default function AccountScreen() {
         </View>
 
         <Text style={styles.version}>GreenFeast v{APP_VERSION_STRING}</Text>
-
-        {SHOW_DEV_SKIP && (
-          <View style={styles.diag}>
-            <Text style={styles.diagText}>
-              channel: {currentlyRunning.channel ?? '(none — cannot OTA)'}
-            </Text>
-            <Text style={styles.diagText}>
-              source: {currentlyRunning.isEmbeddedLaunch ? 'embedded build' : 'OTA update'}
-            </Text>
-            <Text style={styles.diagText}>
-              updateId: {currentlyRunning.updateId ?? '(embedded)'}
-            </Text>
-            <Text style={styles.diagText}>
-              runtime: {currentlyRunning.runtimeVersion ?? '—'}
-            </Text>
-            <Text style={[styles.diagText, __DEV__ && { color: Colors.danger }]}>
-              __DEV__: {String(__DEV__)}{__DEV__ ? ' (dev mode — OTA will NOT work)' : ' (release build — OK for OTA)'}
-            </Text>
-
-            <Pressable onPress={handleCheckUpdateLogs} disabled={loadingLogs} style={{ marginTop: 12 }}>
-              <Text style={[styles.diagText, { color: Colors.green700, fontFamily: Fonts.bodySemi }]}>
-                {loadingLogs ? 'Reading update logs…' : 'Check update logs (last 24h)'}
-              </Text>
-            </Pressable>
-
-            {updateLogs !== null && (
-              <View style={{ marginTop: 8, gap: 6 }}>
-                {updateLogs.length === 0 ? (
-                  <Text style={styles.diagText}>No log entries in the last 24h.</Text>
-                ) : (
-                  updateLogs.map((entry, i) => (
-                    <Text key={i} style={[styles.diagText, entry.level === 'error' && { color: Colors.danger }]}>
-                      [{entry.level}/{entry.code}] {entry.message}
-                    </Text>
-                  ))
-                )}
-              </View>
-            )}
-          </View>
-        )}
       </ScrollView>
 
       {/* Logout confirm */}
@@ -477,9 +420,6 @@ const styles = StyleSheet.create({
   faqA: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, lineHeight: 18, paddingBottom: 12 },
 
   version: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink400, textAlign: 'center', marginTop: 8 },
-  diag: { marginTop: 12, paddingHorizontal: 16, gap: 2 },
-  diagText: { fontFamily: Fonts.body, fontSize: 11, color: Colors.ink400, textAlign: 'center' },
-
   // Error state
   errorWrap: { justifyContent: 'center', alignItems: 'center', padding: 32 },
   errorEmoji: { fontSize: 40, marginBottom: 12 },
