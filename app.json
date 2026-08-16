@@ -12,9 +12,21 @@
       "supportsTablet": false,
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
-          "amazonpay", "upi", "credpay", "bhim", "paytmmp", "phonepe",
-          "tez", "navipay", "mobikwik", "myairtel", "popclubapp", "super",
-          "kiwi", "simplypayupi", "whatsapp"
+          "amazonpay",
+          "upi",
+          "credpay",
+          "bhim",
+          "paytmmp",
+          "phonepe",
+          "tez",
+          "navipay",
+          "mobikwik",
+          "myairtel",
+          "popclubapp",
+          "super",
+          "kiwi",
+          "simplypayupi",
+          "whatsapp"
         ]
       }
     },

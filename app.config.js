@@ -7,6 +7,14 @@
 // they must be provided as EAS environment variables:
 //   eas env:create --name GOOGLE_MAPS_API_KEY_ANDROID --value <key> --visibility plaintext --environment preview --environment production
 //   eas env:create --name GOOGLE_MAPS_API_KEY_IOS --value <key> --visibility plaintext --environment preview --environment production
+//
+// iOS goes through react-native-maps' own config plugin (below) instead of
+// expo.ios.config.googleMapsApiKey: since react-native-maps 1.23.0 restructured
+// its podspec to a `react-native-maps/Google` subspec, Expo's older generic
+// mechanism still writes a Podfile line for a standalone `react-native-google-maps`
+// pod that no longer exists, which fails `pod install`. The bundled plugin writes
+// the correct pod line itself, so ios.config.googleMapsApiKey must stay unset —
+// setting both would run two competing Podfile mods.
 const appJson = require('./app.json')
 
 module.exports = () => {
@@ -14,13 +22,6 @@ module.exports = () => {
 
   return {
     ...expo,
-    ios: {
-      ...expo.ios,
-      config: {
-        ...(expo.ios.config || {}),
-        googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY_IOS,
-      },
-    },
     android: {
       ...expo.android,
       config: {
@@ -30,5 +31,9 @@ module.exports = () => {
         },
       },
     },
+    plugins: [
+      ...expo.plugins,
+      ['react-native-maps', { iosGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY_IOS }],
+    ],
   }
 }
