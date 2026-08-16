@@ -374,7 +374,7 @@ export default function Home() {
 
           <Text style={styles.heroTitle}>Nutrition,{'\n'}considered.</Text>
           <Text style={styles.heroSubtitle}>
-            Fresh meals from our Jaipur kitchen to your door — every weekday, before 1 PM.
+            Fresh meals from our Jaipur kitchen to your door.
           </Text>
 
           <Pressable
