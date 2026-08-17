@@ -8,49 +8,27 @@ import {
   FlatList,
   Pressable,
   StyleSheet,
-  Modal,
   ScrollView,
-  Dimensions,
   Linking,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams } from 'expo-router'
-import { X, ExternalLink, MapPin, CalendarPlus } from 'lucide-react-native'
+import { ExternalLink, MapPin, CalendarPlus } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { SWIGGY_URL, ZOMATO_URL, KITCHEN_MAPS_URL, isConfigured } from '@/constants/links'
+import { CATEGORIES, CATEGORY_EMOJIS } from '@/constants/categories'
 import Skeleton from '@/components/Skeleton'
 import MacroRow from '@/components/MacroRow'
-import MacroRing from '@/components/MacroRing'
-import SwiggyIcon from '@/components/SwiggyIcon'
 import AddToDaySheet from '@/components/AddToDaySheet'
+import MealDetailModal, { type MealDetail } from '@/components/MealDetailModal'
 import * as Haptics from 'expo-haptics'
 
-const { width } = Dimensions.get('window')
-const CARD_WIDTH = (width - 48) / 2
+export { CATEGORIES, CATEGORY_EMOJIS }
 
-type Meal = {
-  id: string
-  name: string
-  category: string
-  description: string | null
-  price: number | null
-  kcal: number | null
-  protein: number | null
-  carbs: number | null
-  fat: number | null
-  tags: string[]
-  image_url: string | null
-}
-
-// Exported so Home's category row (deeplinks into this screen) shares the
-// exact same category list/emoji fallback instead of a second copy drifting.
-export const CATEGORIES = ['All', 'Bowl', 'Wrap', 'Salad', 'Toast', 'Smoothie']
-export const CATEGORY_EMOJIS: Record<string, string> = {
-  bowl: '🥗', wrap: '🌯', salad: '🥙', toast: '🍞', smoothie: '🥤',
-}
+type Meal = MealDetail
 
 function formatPrice(paise: number | null) {
   if (paise == null) return ''
@@ -126,10 +104,10 @@ export default function MenuScreen() {
       {loading ? (
         <View style={styles.grid}>
           <View style={styles.row}>
-            {[0, 1].map((i) => <Skeleton key={i} width={CARD_WIDTH} height={170} borderRadius={16} />)}
+            {[0, 1].map((i) => <Skeleton key={i} width="48%" height={170} borderRadius={16} />)}
           </View>
           <View style={[styles.row, { marginTop: 12 }]}>
-            {[0, 1].map((i) => <Skeleton key={i} width={CARD_WIDTH} height={170} borderRadius={16} />)}
+            {[0, 1].map((i) => <Skeleton key={i} width="48%" height={170} borderRadius={16} />)}
           </View>
         </View>
       ) : (
@@ -203,103 +181,15 @@ export default function MenuScreen() {
         />
       )}
 
-      {/* Detail — full-screen modal */}
-      <Modal visible={!!selected} animationType="slide" onRequestClose={() => setSelected(null)}>
-        {selected && (
-          <View style={styles.detailScreen}>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 12 }}>
-              {selected.image_url ? (
-                <Image
-                  source={{ uri: selected.image_url }}
-                  style={styles.detailImage}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                />
-              ) : (
-                <View style={styles.detailImageEmoji}>
-                  <Text style={styles.emojiText}>{CATEGORY_EMOJIS[selected.category] ?? '🍽️'}</Text>
-                </View>
-              )}
-              <Pressable
-                style={[styles.detailClose, { top: insets.top + 12 }]}
-                onPress={() => setSelected(null)}
-                hitSlop={8}
-              >
-                <X size={20} color="#fff" />
-              </Pressable>
-
-              <View style={styles.detailBody}>
-                <Text style={styles.detailCategory}>{selected.category}</Text>
-                <Text style={styles.detailName}>{selected.name}</Text>
-                {selected.price != null && <Text style={styles.detailPrice}>{formatPrice(selected.price)}</Text>}
-
-                {selected.description ? <Text style={styles.detailDesc}>{selected.description}</Text> : null}
-
-                {(selected.kcal != null || selected.protein != null) && (
-                  <View style={styles.ringWrap}>
-                    <MacroRing
-                      size={124}
-                      strokeWidth={13}
-                      centerValue={selected.kcal != null ? String(selected.kcal) : '—'}
-                      centerLabel="kcal"
-                      segments={[
-                        { value: (selected.protein ?? 0) * 4, color: Colors.macroProtein },
-                        { value: (selected.carbs ?? 0) * 4, color: Colors.macroCarbs },
-                        { value: (selected.fat ?? 0) * 9, color: Colors.macroFat },
-                      ]}
-                    />
-                    <MacroRow
-                      protein={selected.protein}
-                      carbs={selected.carbs}
-                      fat={selected.fat}
-                      kcal={selected.kcal}
-                      size="md"
-                    />
-                  </View>
-                )}
-
-                {selected.tags?.length > 0 && (
-                  <View style={styles.tagsWrap}>
-                    {selected.tags.map((tag) => (
-                      <View key={tag} style={styles.tagYellow}>
-                        <Text style={styles.tagYellowText}>{tag}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </View>
-            </ScrollView>
-
-            {/* CTA bar */}
-            <View style={[styles.detailCtaBar, { paddingBottom: 12 + insets.bottom }]}>
-              <Pressable
-                style={styles.addDayBtn}
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setAddSheetOpen(true) }}
-              >
-                <CalendarPlus size={17} color="#fff" />
-                <Text style={styles.addDayBtnText}>Add to day</Text>
-              </Pressable>
-              <View style={styles.brandRow}>
-                {isConfigured(SWIGGY_URL) && (
-                  <Pressable style={[styles.brandBtn, { backgroundColor: '#FC8019' }]} onPress={() => Linking.openURL(SWIGGY_URL)}>
-                    <SwiggyIcon size={18} color="#fff" />
-                    <Text style={styles.brandBtnText}>Swiggy</Text>
-                  </Pressable>
-                )}
-                {isConfigured(ZOMATO_URL) && (
-                  <Pressable style={[styles.brandBtn, { backgroundColor: '#E23744' }]} onPress={() => Linking.openURL(ZOMATO_URL)}>
-                    <Text style={styles.brandBtnTextBold}>Zomato</Text>
-                  </Pressable>
-                )}
-                <Pressable style={styles.takeawayBtn} onPress={() => {}}>
-                  <MapPin size={16} color={Colors.green700} />
-                  <Text style={styles.takeawayBtnText}>Takeaway</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        )}
-      </Modal>
+      <MealDetailModal
+        meal={selected}
+        onClose={() => setSelected(null)}
+        primaryAction={{
+          label: 'Add to day',
+          icon: <CalendarPlus size={17} color="#fff" />,
+          onPress: () => setAddSheetOpen(true),
+        }}
+      />
 
       {selected && (
         <AddToDaySheet
@@ -333,7 +223,13 @@ const styles = StyleSheet.create({
   grid: { padding: 16, paddingBottom: 32 },
   row: { gap: 12, marginBottom: 12 },
   card: {
-    width: CARD_WIDTH,
+    flex: 1,
+    // Caps a lone odd-count last-row card at half width instead of
+    // stretching to fill the row — pure flex/CSS, no Dimensions/
+    // useWindowDimensions subscription needed, so it's correct on rotation
+    // and foldables for free (module-scope Dimensions.get('window') was the
+    // old bug here: captured once at import, never updated).
+    maxWidth: '48%',
     backgroundColor: Colors.cream200,
     borderRadius: 20,
     padding: 12,
@@ -368,47 +264,4 @@ const styles = StyleSheet.create({
   craveBtnGhost: { backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.green700 },
   craveBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
   craveBtnGhostText: { color: Colors.green700 },
-
-  detailScreen: { flex: 1, backgroundColor: Colors.cream50 },
-  detailImage: { width: '100%', height: 320, backgroundColor: Colors.cream300 },
-  detailImageEmoji: { width: '100%', height: 320, backgroundColor: Colors.cream300, alignItems: 'center', justifyContent: 'center' },
-  detailClose: {
-    position: 'absolute', left: 16,
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center',
-  },
-  detailBody: { padding: 20, gap: 4 },
-  detailCategory: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.green700, textTransform: 'capitalize', letterSpacing: 0.4 },
-  detailName: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.ink900, marginTop: 2 },
-  detailPrice: { fontFamily: Fonts.bodyBold, fontSize: 18, color: Colors.ink900, marginTop: 4 },
-  detailDesc: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, lineHeight: 21, marginTop: 12 },
-
-  ringWrap: { alignItems: 'center', gap: 16, marginTop: 24 },
-
-  tagsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 16 },
-  tagYellow: { backgroundColor: Colors.badgeBg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  tagYellowText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.badgeText },
-
-  detailCtaBar: {
-    paddingHorizontal: 20, paddingTop: 12, gap: 10,
-    backgroundColor: Colors.cream50, borderTopWidth: 1, borderTopColor: Colors.border,
-  },
-  addDayBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: Colors.green700, borderRadius: 999, paddingVertical: 15,
-  },
-  addDayBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: '#fff' },
-  brandRow: { flexDirection: 'row', gap: 10 },
-  brandBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    paddingVertical: 12, borderRadius: 999,
-  },
-  brandBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
-  brandBtnTextBold: { fontFamily: Fonts.bodyBold, fontSize: 15, color: '#fff', fontStyle: 'italic' },
-  takeawayBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    paddingVertical: 12, borderRadius: 999, backgroundColor: '#fff',
-    borderWidth: 1.5, borderColor: Colors.green700,
-  },
-  takeawayBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.green700 },
 })
