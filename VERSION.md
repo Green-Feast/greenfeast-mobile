@@ -58,6 +58,8 @@ of what changed. Newest first.
   - Bundled Home Story Carousel images locally as compressed WebP assets (`farm.webp`, `kitchen.webp`, `door.webp`, `you.webp`), eliminating 10MB network payload for 0ms instant offline rendering.
   - Compressed all 20 food dish images to WebP format (>99% payload reduction from 10MB+ down to ~30-60KB each) and updated Supabase Storage with 1-year disk caching headers.
   - Added smooth `transition={200}` fade-in effects across `<Image>` components.
+- Removed the OTA diagnostic panel (channel/source/updateId/runtime/log-check) from the Account screen — it was gated behind `SHOW_DEV_SKIP`, which the preview profile always sets, so it was showing on every test build. Dropped along with its now-unused `expo-updates` hooks and styles.
+- Fixed an indefinite stuck-loading skeleton on the app's first cold launch of the day (worked fine on relaunch, which is why it went unnoticed for a while): `authLoading` had exactly one way to become `false` — `onAuthStateChange` firing — and supabase-js only fires that after restoring the session, which refreshes the token over the network first if it's expired. That refresh had no timeout, so a cold radio could stall it forever with zero logged errors, leaving every tab on its skeleton indefinitely. Added `withTimeout()` (`Promise.race` + `setTimeout`, deliberately not AbortController — the 1.6.5 attempt used AbortController and broke every Supabase call app-wide because signal support in this native build's fetch doesn't behave like browser/Node fetch, reverted in `8efa7f5`) and bounded session restore (10s), the profile lookup (10s), and Home's data fetch (15s). Verified on-device via airplane-mode repro.
 
 ### 1.7.0 — 2026-08-05
 - Build 7, OTA 0.
