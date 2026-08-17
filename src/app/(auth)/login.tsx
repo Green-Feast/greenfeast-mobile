@@ -16,31 +16,50 @@ import { useRouter } from 'expo-router'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { StatusBar } from 'expo-status-bar'
-import { Check } from 'lucide-react-native'
+import { ChevronLeft } from 'lucide-react-native'
 import * as WebBrowser from 'expo-web-browser'
 import * as Linking from 'expo-linking'
 import { makeRedirectUri } from 'expo-auth-session'
+// Static import (not the lazy `await import()` the auth call below still
+// uses) so AppleAuthenticationButton is a real component reference. Expo
+// modules ship a real, importable JS API on every platform with a no-op
+// native binding where unsupported, so this is safe to evaluate on Android
+// too — only device verification can fully confirm it, per this project's
+// own habit of not trusting an untested native-adjacent assumption blindly.
+import * as AppleAuthentication from 'expo-apple-authentication'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
-import { SHOW_DEV_SKIP } from '@/constants/dev'
+import { SHOW_DEV_LOGIN, DEV_LOGIN_EMAIL, DEV_LOGIN_PASSWORD } from '@/constants/dev'
 import Logo from '@/components/Logo'
+import GoogleIcon from '@/components/GoogleIcon'
 
 const HERO_PHOTO = require('@/assets/food/burrito-bowl.webp')
 
 WebBrowser.maybeCompleteAuthSession()
 
-type EmailMode = 'signin' | 'signup'
+// 'choice' shows the sign-in options; the email views progressively reveal
+// the form only once the subscriber has actually chosen email — this is what
+// actually removes the dead space below the old always-visible form, since
+// there's simply less on screen at once, not a layout trick on top of it.
+type AuthView = 'choice' | 'email-signin' | 'email-signup'
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
   const [googleLoading, setGoogleLoading] = useState(false)
   const [appleLoading, setAppleLoading] = useState(false)
+  const [appleAvailable, setAppleAvailable] = useState(false)
   const [error, setError] = useState('')
-  const [agreed, setAgreed] = useState(false)
   const handledUrl = useRef<string | null>(null)
 
-  const [emailMode, setEmailMode] = useState<EmailMode>('signin')
+  // False on iOS < 13 and on simulators with no Apple ID signed in — the
+  // button must not render at all in either case, not just fail on tap.
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return
+    AppleAuthentication.isAvailableAsync().then(setAppleAvailable)
+  }, [])
+
+  const [view, setView] = useState<AuthView>('choice')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [emailLoading, setEmailLoading] = useState(false)
@@ -59,16 +78,12 @@ export default function LoginScreen() {
     })
   }, [incomingUrl])
 
-  const CONSENT_MSG = 'Please tick the box below to agree to the Terms & Conditions and Privacy Policy first.'
-
-  function toggleAgreed() {
-    const next = !agreed
-    setAgreed(next)
-    if (next && error === CONSENT_MSG) setError('')
+  function goToChoice() {
+    setView('choice')
+    setError('')
   }
 
   async function signInWithGoogle() {
-    if (!agreed) { setError(CONSENT_MSG); return }
     setGoogleLoading(true)
     setError('')
     try {
@@ -102,23 +117,33 @@ export default function LoginScreen() {
   }
 
   async function signInWithApple() {
-    if (!agreed) { setError(CONSENT_MSG); return }
+    // AppleAuthenticationButton has no disabled prop, so this guard is the
+    // only thing standing between a fast double-tap and two concurrent
+    // sign-in attempts.
+    if (appleLoading) return
     setAppleLoading(true)
     setError('')
     try {
-      const AppleAuth = await import('expo-apple-authentication')
-      const credential = await AppleAuth.signInAsync({
+      const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
-          AppleAuth.AppleAuthenticationScope.FULL_NAME,
-          AppleAuth.AppleAuthenticationScope.EMAIL,
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
       })
       if (credential.identityToken) {
-        const { error } = await supabase.auth.signInWithIdToken({
+        const { data, error } = await supabase.auth.signInWithIdToken({
           provider: 'apple',
           token: credential.identityToken,
         })
         if (error) throw error
+        // fullName is only ever returned on the FIRST authorization for this
+        // Apple ID — every later sign-in gets null. Persist it now or the
+        // account has no name forever (Home's greeting silently renders
+        // blank), since nothing else captures it later.
+        const givenName = credential.fullName?.givenName
+        if (givenName && data.user) {
+          await supabase.from('users').update({ name: givenName }).eq('id', data.user.id).is('name', null)
+        }
       }
     } catch (err: any) {
       if (err?.code !== 'ERR_REQUEST_CANCELED') {
@@ -130,7 +155,6 @@ export default function LoginScreen() {
   }
 
   async function handleEmailAuth() {
-    if (!agreed) { setError(CONSENT_MSG); return }
     const trimmedEmail = email.trim()
     const trimmedPassword = password.trim()
     if (!trimmedEmail || !trimmedPassword) {
@@ -140,7 +164,7 @@ export default function LoginScreen() {
     setEmailLoading(true)
     setError('')
     try {
-      if (emailMode === 'signin') {
+      if (view === 'email-signin') {
         const { error } = await supabase.auth.signInWithPassword({
           email: trimmedEmail,
           password: trimmedPassword,
@@ -167,6 +191,19 @@ export default function LoginScreen() {
 
   const isLoading = googleLoading || appleLoading || emailLoading
 
+  const consentNotice = (
+    <Text style={styles.consentNotice}>
+      By continuing you agree to our{' '}
+      <Text style={styles.consentLink} onPress={() => router.push('/(legal)/terms' as any)}>
+        Terms & Conditions
+      </Text>
+      {' '}and{' '}
+      <Text style={styles.consentLink} onPress={() => router.push('/(legal)/privacy' as any)}>
+        Privacy Policy
+      </Text>.
+    </Text>
+  )
+
   // ── Email-confirmed success state ────────────────────────────────
 
   if (signupSuccess) {
@@ -185,7 +222,7 @@ export default function LoginScreen() {
           </Text>
           <TouchableOpacity
             style={styles.emailBtn}
-            onPress={() => { setSignupSuccess(false); setEmailMode('signin') }}
+            onPress={() => { setSignupSuccess(false); setView('email-signin') }}
           >
             <Text style={styles.emailBtnText}>Back to Sign In</Text>
           </TouchableOpacity>
@@ -205,9 +242,13 @@ export default function LoginScreen() {
           global dark-icon default while this screen is focused. */}
       <StatusBar style="light" />
 
-      {/* Hero photo */}
+      {/* Hero photo — screen-proportional (not a fixed 200pt banner) with a
+          top-anchored crop, matching (onboarding)/gate.tsx's treatment. A
+          fixed height forced a ~49% crop on this square photo; height:'42%'
+          keeps the container close to square, so cover crops only the empty
+          plate/table below instead of the bowl itself. */}
       <View style={styles.heroWrap}>
-        <Image source={HERO_PHOTO} style={styles.heroPhoto} contentFit="cover" cachePolicy="memory-disk" />
+        <Image source={HERO_PHOTO} style={styles.heroPhoto} contentFit="cover" contentPosition="top" cachePolicy="memory-disk" />
         <LinearGradient colors={['transparent', Colors.cream50]} style={styles.heroFade} pointerEvents="none" />
       </View>
 
@@ -220,152 +261,146 @@ export default function LoginScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[styles.scroll, { paddingBottom: 48 + insets.bottom }]}
+        contentContainerStyle={[styles.scroll, { paddingBottom: 32 + insets.bottom }]}
       >
-        {/* Headline */}
-        <Text style={styles.headline}>Sign in to continue</Text>
-        <Text style={styles.subheadline}>Good food, goals met.</Text>
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        {/* Google */}
-        <TouchableOpacity
-          style={styles.oauthBtn}
-          onPress={signInWithGoogle}
-          disabled={isLoading}
-        >
-          {googleLoading ? (
-            <ActivityIndicator color={Colors.ink900} />
-          ) : (
-            <>
-              <Text style={styles.googleG}>G</Text>
-              <Text style={styles.oauthBtnText}>Continue with Google</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* Apple — iOS only */}
-        {Platform.OS === 'ios' && (
-          <TouchableOpacity
-            style={styles.appleBtn}
-            onPress={signInWithApple}
-            disabled={isLoading}
-          >
-            {appleLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Text style={styles.appleIcon}></Text>
-                <Text style={styles.appleBtnText}>Continue with Apple</Text>
-              </>
-            )}
-          </TouchableOpacity>
+        {view !== 'choice' && (
+          <Pressable onPress={goToChoice} hitSlop={10} style={styles.backBtn}>
+            <ChevronLeft size={22} color={Colors.ink900} />
+          </Pressable>
         )}
 
-        {/* Divider */}
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        {/* Email auth */}
-        <View style={styles.emailSection}>
-          {/* Mode toggles */}
-          <View style={styles.modeTabs}>
-            <TouchableOpacity
-              onPress={() => { setEmailMode('signin'); setError('') }}
-              style={styles.modeTabBtn}
-            >
-              <Text style={[styles.modeTabText, emailMode === 'signin' && styles.modeTabActive]}>
-                Sign In
-              </Text>
-              {emailMode === 'signin' && <View style={styles.modeTabUnderline} />}
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => { setEmailMode('signup'); setError('') }}
-              style={styles.modeTabBtn}
-            >
-              <Text style={[styles.modeTabText, emailMode === 'signup' && styles.modeTabActive]}>
-                Create Account
-              </Text>
-              {emailMode === 'signup' && <View style={styles.modeTabUnderline} />}
-            </TouchableOpacity>
-          </View>
-
-          {/* Email field */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>EMAIL</Text>
-            <TextInput
-              style={styles.fieldInput}
-              placeholder="you@example.com"
-              placeholderTextColor={Colors.ink300}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={email}
-              onChangeText={setEmail}
-            />
-          </View>
-
-          {/* Password field */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>PASSWORD</Text>
-            <TextInput
-              style={styles.fieldInput}
-              placeholder={emailMode === 'signup' ? 'Min 8 characters' : '••••••••'}
-              placeholderTextColor={Colors.ink300}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={password}
-              onChangeText={setPassword}
-              onSubmitEditing={handleEmailAuth}
-              returnKeyType="go"
-            />
-          </View>
-
-          <TouchableOpacity
-            style={styles.emailBtn}
-            onPress={handleEmailAuth}
-            disabled={emailLoading}
-          >
-            {emailLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.emailBtnText}>
-                {emailMode === 'signin' ? 'Sign In →' : 'Create Account →'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* Terms & Privacy consent */}
-        <View style={styles.consentRow}>
-          <Pressable
-            style={[styles.checkbox, agreed && styles.checkboxChecked]}
-            onPress={toggleAgreed}
-            hitSlop={8}
-          >
-            {agreed && <Check size={14} color="#fff" strokeWidth={3} />}
-          </Pressable>
-          <Text style={styles.consentText} onPress={toggleAgreed}>
-            I agree to the{' '}
-            <Text style={styles.consentLink} onPress={() => router.push('/(legal)/terms' as any)}>
-              Terms & Conditions
-            </Text>
-            {' '}and{' '}
-            <Text style={styles.consentLink} onPress={() => router.push('/(legal)/privacy' as any)}>
-              Privacy Policy
-            </Text>
+        {/* Headline */}
+        <View style={styles.headlineGroup}>
+          <Text style={styles.headline}>
+            {view === 'choice' ? 'Sign in to continue' : view === 'email-signin' ? 'Welcome back' : 'Create your account'}
+          </Text>
+          <Text style={styles.subheadline}>
+            {view === 'choice' ? 'Good food, goals met.' : view === 'email-signin' ? 'Sign in with your email' : 'Takes less than a minute'}
           </Text>
         </View>
 
-        {SHOW_DEV_SKIP && (
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        {view === 'choice' ? (
+          <View style={styles.buttonStack}>
+            <TouchableOpacity style={styles.oauthBtn} onPress={signInWithGoogle} disabled={isLoading}>
+              {googleLoading ? (
+                <ActivityIndicator color={Colors.ink900} />
+              ) : (
+                <>
+                  <GoogleIcon size={18} />
+                  <Text style={styles.oauthBtnText}>Continue with Google</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {/* Apple's own button, not a hand-rolled one — required by their
+                HIG (approved title, logo, colors, proportions) and a
+                documented App Store review flag otherwise. It renders null
+                on its own when unavailable, but only after logging a dev
+                warning — the appleAvailable check above avoids that. It has
+                no children/loading-spinner slot and no disabled prop, so
+                double-tap protection lives inside signInWithApple itself. */}
+            {Platform.OS === 'ios' && appleAvailable && (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={26}
+                style={styles.appleBtnNative}
+                onPress={signInWithApple}
+              />
+            )}
+
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              style={styles.emailOutlineBtn}
+              onPress={() => { setView('email-signin'); setError('') }}
+            >
+              <Text style={styles.emailOutlineBtnText}>Sign in with email</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.createAccountBtn}
+              onPress={() => { setView('email-signup'); setError('') }}
+            >
+              <Text style={styles.createAccountText}>
+                Don't have an account? <Text style={styles.createAccountTextBold}>Create one</Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.buttonStack}>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>EMAIL</Text>
+              <TextInput
+                style={styles.fieldInput}
+                placeholder="you@example.com"
+                placeholderTextColor={Colors.ink300}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="username"
+                autoComplete="email"
+                value={email}
+                onChangeText={setEmail}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>PASSWORD</Text>
+              <TextInput
+                style={styles.fieldInput}
+                placeholder={view === 'email-signup' ? 'Min 8 characters' : '••••••••'}
+                placeholderTextColor={Colors.ink300}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType={view === 'email-signup' ? 'newPassword' : 'password'}
+                autoComplete={view === 'email-signup' ? 'new-password' : 'current-password'}
+                value={password}
+                onChangeText={setPassword}
+                onSubmitEditing={handleEmailAuth}
+                returnKeyType="go"
+              />
+            </View>
+
+            <TouchableOpacity style={styles.emailBtn} onPress={handleEmailAuth} disabled={emailLoading}>
+              {emailLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.emailBtnText}>
+                  {view === 'email-signin' ? 'Sign In →' : 'Create Account →'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.createAccountBtn}
+              onPress={() => { setView(view === 'email-signin' ? 'email-signup' : 'email-signin'); setError('') }}
+            >
+              <Text style={styles.createAccountText}>
+                {view === 'email-signin' ? (
+                  <>Don't have an account? <Text style={styles.createAccountTextBold}>Create one</Text></>
+                ) : (
+                  <>Already have an account? <Text style={styles.createAccountTextBold}>Sign in</Text></>
+                )}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={styles.consentWrap}>{consentNotice}</View>
+
+        {SHOW_DEV_LOGIN && DEV_LOGIN_EMAIL && (
           <TouchableOpacity
             style={styles.devBtn}
             onPress={async () => {
-              await supabase.auth.signInWithPassword({ email: 'test@test.com', password: 'test1234' })
+              await supabase.auth.signInWithPassword({ email: DEV_LOGIN_EMAIL, password: DEV_LOGIN_PASSWORD })
             }}
           >
             <Text style={styles.devBtnText}>Dev: Skip Login</Text>
@@ -384,7 +419,7 @@ const styles = StyleSheet.create({
 
   heroWrap: {
     width: '100%',
-    height: 200,
+    height: '42%',
   },
   heroPhoto: {
     width: '100%',
@@ -395,7 +430,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: '60%',
+    height: '35%',
   },
 
   wordmarkRow: {
@@ -413,24 +448,25 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
 
+  // gap alone owns vertical rhythm from here down — two rhythms: 24 between
+  // sections (headline / buttons / consent), 12 within the button stack.
   scroll: {
     paddingHorizontal: 20,
-    paddingBottom: 48,
-    gap: 16,
+    gap: 24,
   },
 
+  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginLeft: -8 },
+
+  headlineGroup: { gap: 4 },
   headline: {
     fontFamily: Fonts.heading,
     fontSize: 32,
     color: Colors.ink900,
-    marginTop: 8,
-    marginBottom: 4,
   },
   subheadline: {
     fontFamily: Fonts.body,
     fontSize: 15,
     color: Colors.ink500,
-    marginBottom: 8,
   },
 
   error: {
@@ -439,58 +475,47 @@ const styles = StyleSheet.create({
     color: Colors.danger,
   },
 
+  buttonStack: { gap: 12 },
+
   // OAuth buttons
   oauthBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
+    borderWidth: 1,
+    borderColor: '#747775',
     borderRadius: 999,
     paddingVertical: 15,
     minHeight: 52,
-    backgroundColor: Colors.cream50,
+    backgroundColor: '#FFFFFF',
   },
-  googleG: { fontFamily: Fonts.bodyBold, fontSize: 17, color: '#4285F4' },
-  oauthBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.ink900 },
+  oauthBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#1F1F1F' },
 
-  appleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    borderRadius: 999,
-    paddingVertical: 15,
-    minHeight: 52,
-    backgroundColor: '#000',
-  },
-  appleIcon: { fontSize: 18, color: '#fff' },
-  appleBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
+  // AppleAuthenticationButton must not get backgroundColor/borderRadius via
+  // style (Apple's own docs: silently ignored and against guidelines) — use
+  // buttonStyle/cornerRadius on the component instead. It also has no
+  // intrinsic size, so an explicit height is required or it won't appear.
+  appleBtnNative: { width: '100%', height: 52 },
 
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   dividerLine: { flex: 1, height: 1, backgroundColor: Colors.ink100 },
   dividerText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink300 },
 
-  // Email section
-  emailSection: { gap: 16 },
-  modeTabs: { flexDirection: 'row', gap: 20 },
-  modeTabBtn: { alignItems: 'center', paddingBottom: 4 },
-  modeTabText: {
-    fontFamily: Fonts.bodyMed,
-    fontSize: 15,
-    color: Colors.ink400,
+  emailOutlineBtn: {
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 999,
+    paddingVertical: 15,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modeTabActive: { color: Colors.green700 },
-  modeTabUnderline: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: Colors.green700,
-    borderRadius: 1,
-  },
+  emailOutlineBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.ink900 },
+
+  createAccountBtn: { alignItems: 'center', paddingVertical: 4 },
+  createAccountText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500 },
+  createAccountTextBold: { fontFamily: Fonts.bodySemi, color: Colors.green700 },
 
   fieldGroup: { gap: 6 },
   fieldLabel: {
@@ -517,7 +542,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 52,
     justifyContent: 'center',
-    marginTop: 4,
   },
   emailBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
 
@@ -525,32 +549,13 @@ const styles = StyleSheet.create({
   successDesc: { fontFamily: Fonts.body, fontSize: 15, color: Colors.ink500, lineHeight: 22 },
   successEmail: { fontFamily: Fonts.bodyBold, color: Colors.ink900 },
 
-  consentRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    marginTop: 4,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  checkboxChecked: {
-    backgroundColor: Colors.green700,
-    borderColor: Colors.green700,
-  },
-  consentText: {
-    flex: 1,
+  consentWrap: { paddingTop: 4 },
+  consentNotice: {
     fontFamily: Fonts.body,
-    fontSize: 13,
-    color: Colors.ink500,
-    lineHeight: 19,
+    fontSize: 12,
+    color: Colors.ink400,
+    lineHeight: 18,
+    textAlign: 'center',
   },
   consentLink: {
     fontFamily: Fonts.bodyMed,

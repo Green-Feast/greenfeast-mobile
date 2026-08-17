@@ -10,6 +10,7 @@
     "ios": {
       "bundleIdentifier": "com.greenfeast.app",
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
           "amazonpay",
@@ -64,6 +65,7 @@
       ],
       "expo-image",
       "expo-font",
+      "expo-apple-authentication",
       [
         "expo-location",
         {
