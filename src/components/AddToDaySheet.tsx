@@ -208,10 +208,17 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
                       onPress={() => setSelectedDate(d.date)}
                       style={[styles.dayCell, active && styles.dayCellActive, disabled && styles.dayCellDisabled]}
                     >
-                      <Text numberOfLines={1} style={[styles.dayCellLabel, active && styles.dayCellLabelActive, disabled && styles.dayCellLabelDisabled]}>
+                      <Text
+                        numberOfLines={1}
+                        maxFontSizeMultiplier={1.3}
+                        style={[styles.dayCellLabel, active && styles.dayCellLabelActive, disabled && styles.dayCellLabelDisabled]}
+                      >
                         {d.label}
                       </Text>
-                      <Text style={[styles.dayCellDate, active && styles.dayCellLabelActive, disabled && styles.dayCellLabelDisabled]}>
+                      <Text
+                        maxFontSizeMultiplier={1.3}
+                        style={[styles.dayCellDate, active && styles.dayCellLabelActive, disabled && styles.dayCellLabelDisabled]}
+                      >
                         {d.date.slice(8, 10)}
                       </Text>
                     </Pressable>

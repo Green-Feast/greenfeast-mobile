@@ -333,6 +333,10 @@ const styles = StyleSheet.create({
   rankRowActive: {
     borderColor: Colors.green700,
     shadowColor: Colors.green700,
+    // Only shadow definition in the app missing shadowOffset — iOS defaults
+    // to no offset at all without it, rendering a symmetric halo instead of
+    // a cast drop shadow (Android's elevation was unaffected either way).
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
     elevation: 4,

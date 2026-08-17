@@ -42,15 +42,15 @@ export default function MacroRow({ protein, carbs, fat, fibre, kcal, size = 'md'
         return (
           <View key={key} style={styles.item}>
             <View style={[styles.tick, { width: tick.width, height: tick.height, backgroundColor: color }]} />
-            <Text style={[styles.label, { fontSize: tick.labelSize }]}>{label}</Text>
-            <Text style={[styles.value, { fontSize: tick.valueSize }]}>{Math.round(val)}g</Text>
+            <Text style={[styles.label, { fontSize: tick.labelSize }]} maxFontSizeMultiplier={1.3}>{label}</Text>
+            <Text style={[styles.value, { fontSize: tick.valueSize }]} maxFontSizeMultiplier={1.3}>{Math.round(val)}g</Text>
           </View>
         )
       })}
       {kcal != null && !isNaN(kcal) && (
         <View style={styles.kcalItem}>
-          <Text style={[styles.label, { fontSize: tick.labelSize }]}>KCAL</Text>
-          <Text style={[styles.value, { fontSize: tick.valueSize }]}>{Math.round(kcal)}</Text>
+          <Text style={[styles.label, { fontSize: tick.labelSize }]} maxFontSizeMultiplier={1.3}>KCAL</Text>
+          <Text style={[styles.value, { fontSize: tick.valueSize }]} maxFontSizeMultiplier={1.3}>{Math.round(kcal)}</Text>
         </View>
       )}
     </View>

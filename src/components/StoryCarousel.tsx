@@ -4,7 +4,7 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  Dimensions,
+  useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native'
@@ -13,7 +13,6 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { Colors, Fonts } from '@/constants/colors'
 import type { StorySlide } from '@/constants/homeContent'
 
-const { width } = Dimensions.get('window')
 const CARD_H = 400
 const AUTO_ADVANCE_MS = 5000
 
@@ -23,6 +22,12 @@ type Props = { slides: StorySlide[] }
 // Same pagingEnabled-ScrollView pattern as the onboarding recommendation
 // carousel, auto-advancing on a timer that resets on manual swipe.
 export default function StoryCarousel({ slides }: Props) {
+  // useWindowDimensions (not module-scope Dimensions.get) — this was the
+  // worst instance of that bug in the app: a stale width captured once at
+  // import would make the auto-advance timer's scrollTo(x: next * width)
+  // land on the wrong offset after any rotation/split-screen/foldable
+  // dimension change, permanently, since nothing here ever re-read it.
+  const { width } = useWindowDimensions()
   const scrollRef = useRef<ScrollView>(null)
   const [page, setPage] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -41,7 +46,11 @@ export default function StoryCarousel({ slides }: Props) {
   useEffect(() => {
     startTimer()
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [slides.length])
+    // width included deliberately — startTimer's setInterval closes over it,
+    // so a dimension change (rotation/split-screen) needs a fresh timer with
+    // the current width, not a stale one from whenever this last ran.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slides.length, width])
 
   function onMomentumScrollEnd(e: NativeSyntheticEvent<NativeScrollEvent>) {
     const next = Math.round(e.nativeEvent.contentOffset.x / width)

@@ -1096,14 +1096,16 @@ export default function SubscriptionScreen() {
                           style={[s.qtyBtn, (cartBusy || (dayOrder.quantity ?? 1) <= 1) && { opacity: 0.4 }]}
                           onPress={() => handleCartOp(dayOrder.id, 'dec_qty')}
                           disabled={cartBusy || (dayOrder.quantity ?? 1) <= 1}
+                          hitSlop={8}
                         >
                           <Text style={s.qtyBtnText}>−</Text>
                         </Pressable>
-                        <Text style={s.qtyValue}>{dayOrder.quantity ?? 1}</Text>
+                        <Text style={s.qtyValue} maxFontSizeMultiplier={1.3}>{dayOrder.quantity ?? 1}</Text>
                         <Pressable
                           style={[s.qtyBtn, cartBusy && { opacity: 0.4 }]}
                           onPress={() => handleCartOp(dayOrder.id, 'inc_qty')}
                           disabled={cartBusy}
+                          hitSlop={8}
                         >
                           <Text style={s.qtyBtnText}>+</Text>
                         </Pressable>
@@ -1159,14 +1161,16 @@ export default function SubscriptionScreen() {
                                   style={[s.qtyBtn, (cartBusy || (isDefault && qty <= 1)) && { opacity: 0.4 }]}
                                   onPress={() => handleCartOp(dayOrder.id, 'dec_addon_qty', a.id)}
                                   disabled={cartBusy || (isDefault && qty <= 1)}
+                                  hitSlop={8}
                                 >
                                   <Text style={s.qtyBtnText}>−</Text>
                                 </Pressable>
-                                <Text style={s.qtyValue}>{qty}</Text>
+                                <Text style={s.qtyValue} maxFontSizeMultiplier={1.3}>{qty}</Text>
                                 <Pressable
                                   style={[s.qtyBtn, cartBusy && { opacity: 0.4 }]}
                                   onPress={() => handleCartOp(dayOrder.id, 'inc_addon_qty', a.id)}
                                   disabled={cartBusy}
+                                  hitSlop={8}
                                 >
                                   <Text style={s.qtyBtnText}>+</Text>
                                 </Pressable>
@@ -1344,7 +1348,7 @@ export default function SubscriptionScreen() {
                             )}
                             {!isCurrent && !swapping && available && (
                               <View style={[s.switchBadge, (isFree || effectiveAddMode) && s.switchBadgeFree]}>
-                                <Text style={[s.switchBadgeText, (isFree || effectiveAddMode) && s.switchBadgeTextFree]}>
+                                <Text style={[s.switchBadgeText, (isFree || effectiveAddMode) && s.switchBadgeTextFree]} maxFontSizeMultiplier={1.3}>
                                   {effectiveAddMode ? 'Add' : isFree ? 'Free' : '+₹20'}
                                 </Text>
                               </View>

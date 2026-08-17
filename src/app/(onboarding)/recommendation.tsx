@@ -6,7 +6,7 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Dimensions,
+  useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native'
@@ -37,9 +37,6 @@ type Addon = {
   fat: number | null
 }
 
-const { width } = Dimensions.get('window')
-const PAGE_W = width
-
 // Representative photo for the "Your menu style" card, picked by menu type.
 const MENU_STYLE_PHOTOS = {
   M1: require('@/assets/food/quinoa-buddha.webp'),
@@ -53,6 +50,10 @@ function fmt(paise: number) {
 export default function RecommendationScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  // Not module-scope Dimensions.get — that would go stale on rotation/
+  // split-screen/foldables and desync onScroll's page-index math from
+  // Page's actual rendered width.
+  const { width } = useWindowDimensions()
   const { recommendation, allergens, proteinTarget, fibreTarget, dietaryFreeText, setPlan } = useOnboardingStore()
 
   const [plans, setPlans] = useState<Plan[]>([])
@@ -154,7 +155,7 @@ export default function RecommendationScreen() {
     router.push('/(onboarding)/days')
   }
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
-    const next = Math.round(e.nativeEvent.contentOffset.x / PAGE_W)
+    const next = Math.round(e.nativeEvent.contentOffset.x / width)
     if (next !== page) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setPage(next)
   }
@@ -365,7 +366,8 @@ export default function RecommendationScreen() {
 }
 
 function Page({ children }: { children: React.ReactNode }) {
-  return <View style={{ width: PAGE_W, paddingHorizontal: 24 }}>{children}</View>
+  const { width } = useWindowDimensions()
+  return <View style={{ width, paddingHorizontal: 24 }}>{children}</View>
 }
 
 // Fixed height so all 4 carousel cards read as the same size regardless of
