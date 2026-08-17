@@ -2,10 +2,15 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 // Edit a single day's cart on an EXISTING base order:
 //
-//   op = 'add_addon'    { addon_id }  — attach an add-on to the day.
-//   op = 'remove_addon' { addon_id }  — detach a non-default add-on.
-//   op = 'inc_qty'                    — +1 base portion (never re-bills here).
-//   op = 'dec_qty'                    — -1 base portion (never below the slot floor).
+//   op = 'add_addon'      { addon_id }  — attach an add-on to the day, at quantity 1.
+//   op = 'remove_addon'   { addon_id }  — detach a non-default add-on entirely.
+//   op = 'inc_qty'                      — +1 base portion (never re-bills here).
+//   op = 'dec_qty'                      — -1 base portion (never below the slot floor).
+//   op = 'inc_addon_qty'  { addon_id }  — attach at qty 1 if absent, else +1 (cap 10).
+//   op = 'dec_addon_qty'  { addon_id }  — -1; a non-default add-on at qty 1 is removed
+//                                         entirely rather than left at 0. A default
+//                                         add-on floors at 1 (same protection as
+//                                         remove_addon) instead of being removable here.
 //
 // IMPORTANT: no money moves here. The wallet is the billing ledger and is
 // debited ON DELIVERY by advance_batch_delivered, which bills orders.cart_total
@@ -33,7 +38,7 @@ Deno.serve(async (req) => {
   try {
     const { order_id, op, addon_id } = await req.json() as {
       order_id?: string
-      op?: 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty'
+      op?: 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty' | 'inc_addon_qty' | 'dec_addon_qty'
       addon_id?: string
     }
     if (!order_id || !op) return json({ error: 'order_id and op are required' }, 400)
@@ -103,6 +108,48 @@ Deno.serve(async (req) => {
       if (isDefault) return json({ error: 'cannot_remove_default_addon' }, 400)
       await supabase.from('order_addons')
         .delete().eq('order_id', order.id).eq('addon_id', addon_id).eq('kind', 'addon')
+    }
+
+    // ── inc_addon_qty (ensure present at >=1, then +1; capped at 10) ──────
+    if (op === 'inc_addon_qty') {
+      if (!addon_id) return json({ error: 'addon_id required' }, 400)
+      const { data: addon } = await supabase
+        .from('addons').select('id, price_per_meal').eq('id', addon_id).maybeSingle()
+      if (!addon) return json({ error: 'Add-on not found' }, 404)
+
+      const { data: existing } = await supabase
+        .from('order_addons')
+        .select('id, quantity').eq('order_id', order.id).eq('addon_id', addon_id).eq('kind', 'addon').maybeSingle()
+      if (!existing) {
+        await supabase.from('order_addons').insert({
+          order_id: order.id, addon_id, kind: 'addon', quantity: 1, unit_price: addon.price_per_meal,
+        })
+      } else {
+        const nextQty = (existing.quantity ?? 1) + 1
+        if (nextQty > 10) return json({ error: 'addon_quantity_cap' }, 400)
+        await supabase.from('order_addons').update({ quantity: nextQty }).eq('id', existing.id)
+      }
+    }
+
+    // ── dec_addon_qty (default add-on floors at 1; a non-default one at
+    //    quantity 1 is removed entirely rather than left at a stray 0) ─────
+    if (op === 'dec_addon_qty') {
+      if (!addon_id) return json({ error: 'addon_id required' }, 400)
+      const { data: existing } = await supabase
+        .from('order_addons')
+        .select('id, quantity').eq('order_id', order.id).eq('addon_id', addon_id).eq('kind', 'addon').maybeSingle()
+      if (!existing) return json({ error: 'Add-on not on this order' }, 400)
+
+      const qty = existing.quantity ?? 1
+      if (qty <= 1) {
+        const { data: isDefault } = await supabase
+          .from('subscription_addons').select('id')
+          .eq('subscription_id', order.subscription_id).eq('addon_id', addon_id).maybeSingle()
+        if (isDefault) return json({ error: 'cannot_remove_default_addon' }, 400)
+        await supabase.from('order_addons').delete().eq('id', existing.id)
+      } else {
+        await supabase.from('order_addons').update({ quantity: qty - 1 }).eq('id', existing.id)
+      }
     }
 
     // ── inc_qty / dec_qty (billed on delivery, not here) ──────────────────

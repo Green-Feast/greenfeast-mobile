@@ -19,6 +19,7 @@ import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react
 import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import { useAvailabilityStore, isMealAvailable, isAddonAvailable } from '@/store/availability'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
@@ -164,6 +165,9 @@ export default function SubscriptionScreen() {
   const [creatingTopup, setCreatingTopup] = useState(false)
   const didAutoSync = useRef(false)
   const stripRef = useRef<ScrollView | null>(null)
+  const unavailableMeals = useAvailabilityStore((st) => st.unavailableMeals)
+  const unavailableAddons = useAvailabilityStore((st) => st.unavailableAddons)
+  const ensureFreshAvailability = useAvailabilityStore((st) => st.ensureFresh)
 
   const fetchAll = useCallback(async () => {
     if (!user) return
@@ -253,6 +257,10 @@ export default function SubscriptionScreen() {
     setLoading(true)
     fetchAll().finally(() => setLoading(false))
   }, [fetchAll, authLoading])
+
+  useEffect(() => {
+    ensureFreshAvailability()
+  }, [ensureFreshAvailability])
 
   // Auto-sync: if the sub is active but no orders exist (e.g. instantiate-orders
   // failed silently during payment), retry it once so the week strip isn't empty.
@@ -364,6 +372,36 @@ export default function SubscriptionScreen() {
     }
   }
 
+  // Off-day path — a date with zero orders in any slot (e.g. a weekday
+  // turned off in the default plan) has no reference order for add-dish's
+  // usual { order_id } payload to derive subscription/date/address from, so
+  // this passes them directly instead.
+  async function handleAddDishOffDay(subId: string, date: string, slot: 'lunch' | 'dinner', newMealId: string) {
+    setSwapping(true)
+    setSwapError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+      const { data, error } = await supabase.functions.invoke('add-dish', {
+        body: { subscription_id: subId, delivery_date: date, meal_slot: slot, meal_template_id: newMealId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (error) throw error
+      if (data?.error === 'insufficient_balance') {
+        setSwapError('Insufficient wallet balance for an extra dish. Add money first.')
+        return
+      }
+      if (data?.error) throw new Error(data.error)
+      setShowDayModal(false)
+      setAddMode(false)
+      await fetchAll()
+    } catch (e: any) {
+      setSwapError(e?.message ?? 'Could not add dish. Try again.')
+    } finally {
+      setSwapping(false)
+    }
+  }
+
   async function handleRemoveDish(orderId: string) {
     if (cartBusy) return
     setCartBusy(true)
@@ -385,8 +423,13 @@ export default function SubscriptionScreen() {
     }
   }
 
-  // Add-on add/remove + base meal quantity, charged to the wallet immediately.
-  async function handleCartOp(orderId: string, op: 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty', addonId?: string) {
+  // Add-on add/remove/quantity + base meal quantity. Nothing here is charged
+  // immediately — everything is billed from the wallet on delivery.
+  async function handleCartOp(
+    orderId: string,
+    op: 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty' | 'inc_addon_qty' | 'dec_addon_qty',
+    addonId?: string
+  ) {
     if (cartBusy) return
     setCartBusy(true)
     setSwapError('')
@@ -408,6 +451,10 @@ export default function SubscriptionScreen() {
       }
       if (data?.error === 'below_minimum') {
         setSwapError('You already have the minimum number of meals for this slot.')
+        return
+      }
+      if (data?.error === 'addon_quantity_cap') {
+        setSwapError('Maximum 10 of this add-on per meal.')
         return
       }
       if (data?.error) throw new Error(data.error)
@@ -638,6 +685,9 @@ export default function SubscriptionScreen() {
   const dayTotal = dayMealsAddons + daySwapFees
   const lowBalance = walletBalance !== null && dayTotal > walletBalance
   const dayOrderAddonIds = new Set((dayOrder?.order_addons ?? []).filter(l => l.kind === 'addon' && l.addon_id).map(l => l.addon_id))
+  const dayOrderAddonQty = new Map(
+    (dayOrder?.order_addons ?? []).filter(l => l.kind === 'addon' && l.addon_id).map(l => [l.addon_id as string, l.quantity ?? 1])
+  )
   const defaultAddonIds = new Set(subAddons.map(a => a.addon_id))
 
   // Day label for hero card eyebrow: "TODAY'S LUNCH" / "FRI 3'S DINNER"
@@ -833,7 +883,12 @@ export default function SubscriptionScreen() {
         ) : (
           <View key="hero-empty" style={s.heroEmpty}>
             <Text style={s.heroEmptyText}>No {selectedSlot} on {dowShort(selectedDay)} {dayNum(selectedDay)}</Text>
-            {!heroLocked && dayAnyBase && (
+            {/* dayAnyBase used to gate this — meant a day with zero orders in
+                any slot (e.g. a weekday turned off in the default plan) had
+                no way to open the day modal at all. Off-day adds create an
+                extra_dish row with no base order, so dayAnyBase would stay
+                null even after adding one — this can't require it. */}
+            {!heroLocked && (
               <Pressable
                 style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }]}
                 onPress={() => { setAddMode(true); setShowDayModal(true) }}
@@ -1074,33 +1129,48 @@ export default function SubscriptionScreen() {
                     </View>
                   ))}
 
-                  {/* Add-ons for this day */}
+                  {/* Add-ons for this day — a stepper once one's on the order
+                      (quantity > 1 is billed as unit_price × quantity by
+                      recompute_order_cart already), a plain Add button
+                      before that. A default add-on's stepper floors at 1
+                      rather than letting it reach 0 — mirrors the server's
+                      cannot_remove_default_addon guard on remove_addon. */}
                   {!dayLocked && allAddons.length > 0 && (
                     <View style={s.addonEditWrap}>
                       <Text style={s.addonEditHead}>Add-ons for this day</Text>
                       {allAddons.map((a) => {
                         const on = dayOrderAddonIds.has(a.id)
                         const isDefault = defaultAddonIds.has(a.id)
+                        const qty = dayOrderAddonQty.get(a.id) ?? 1
+                        const available = isAddonAvailable({ unavailableAddons }, selectedDay, a.id)
                         return (
-                          <View key={a.id} style={s.addonEditRow}>
+                          <View key={a.id} style={[s.addonEditRow, !available && { opacity: 0.5 }]}>
                             <View style={{ flex: 1 }}>
                               <Text style={s.addonEditName}>{a.name}</Text>
                               <Text style={s.addonEditPrice}>
-                                ₹{fmt(a.price_per_meal)}{isDefault ? ' · in your plan' : ''}
+                                ₹{fmt(a.price_per_meal * (on ? qty : 1))}
+                                {isDefault ? ' · in your plan' : ''}
+                                {!available ? ' · not available today' : ''}
                               </Text>
                             </View>
-                            {on ? (
-                              isDefault ? (
-                                <View style={s.addonIncluded}><Text style={s.addonIncludedText}>Included</Text></View>
-                              ) : (
+                            {!available ? null : on ? (
+                              <View style={s.qtyStepper}>
                                 <Pressable
-                                  style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
-                                  onPress={() => handleCartOp(dayOrder.id, 'remove_addon', a.id)}
+                                  style={[s.qtyBtn, (cartBusy || (isDefault && qty <= 1)) && { opacity: 0.4 }]}
+                                  onPress={() => handleCartOp(dayOrder.id, 'dec_addon_qty', a.id)}
+                                  disabled={cartBusy || (isDefault && qty <= 1)}
+                                >
+                                  <Text style={s.qtyBtnText}>−</Text>
+                                </Pressable>
+                                <Text style={s.qtyValue}>{qty}</Text>
+                                <Pressable
+                                  style={[s.qtyBtn, cartBusy && { opacity: 0.4 }]}
+                                  onPress={() => handleCartOp(dayOrder.id, 'inc_addon_qty', a.id)}
                                   disabled={cartBusy}
                                 >
-                                  <Text style={s.addonRemoveText}>Remove</Text>
+                                  <Text style={s.qtyBtnText}>+</Text>
                                 </Pressable>
-                              )
+                              </View>
                             ) : (
                               <Pressable
                                 style={[s.addonAddBtn, cartBusy && { opacity: 0.4 }]}
@@ -1149,7 +1219,7 @@ export default function SubscriptionScreen() {
                 <View style={s.dayModalCurrentSection}>
                   <View style={s.dayModalNoOrder}>
                     <Text style={s.dayModalNoOrderText}>
-                      {dayHasNothing ? 'No delivery scheduled for this day' : `No ${selectedSlot} scheduled — add a dish below`}
+                      {dayHasNothing ? 'Nothing scheduled — pick a dish below to add one' : `No ${selectedSlot} scheduled — add a dish below`}
                     </Text>
                   </View>
 
@@ -1173,8 +1243,14 @@ export default function SubscriptionScreen() {
                 </View>
               )}
 
-              {/* Swap / Add section */}
-              {(dayOrder || addRefOrder) && (
+              {/* Swap / Add section — effectiveAddMode alone (not just dayOrder
+                  or addRefOrder) covers the fully-off-day case: zero orders in
+                  any slot on this date, so there's no reference order to swap
+                  or add against yet. effectiveAddMode is already true there
+                  (it's !dayOrder || addMode, and dayOrder is null), which is
+                  exactly what routes the tap handler below to the off-day
+                  add-dish path instead of the normal reference-order one. */}
+              {(dayOrder || addRefOrder || effectiveAddMode) && (
                 <View style={s.dayModalSwapSection}>
                   {dayLocked ? (
                     <View style={s.dayModalLockBanner}>
@@ -1220,20 +1296,30 @@ export default function SubscriptionScreen() {
                       {allMeals.map((meal) => {
                         const isCurrent = !effectiveAddMode && !!dayOrder && meal.id === dayOrder.meal_templates?.id
                         const isFree = !effectiveAddMode && !isCurrent && freeMealIds.has(meal.id)
+                        const available = isMealAvailable({ unavailableMeals }, selectedDay, meal.id)
                         return (
                           <Pressable
                             key={meal.id}
                             style={({ pressed }) => [
                               s.mealRow,
                               isCurrent && s.mealRowCurrent,
-                              pressed && !isCurrent && { opacity: 0.7 },
+                              !available && { opacity: 0.5 },
+                              pressed && !isCurrent && available && { opacity: 0.7 },
                             ]}
                             onPress={() => {
-                              if (swapping || isCurrent || !addRefOrder) return
-                              if (effectiveAddMode) handleAddDish(addRefOrder.id, meal.id, selectedSlot)
-                              else if (dayOrder) handleSwapMeal(dayOrder.id, meal.id)
+                              if (swapping || isCurrent || !available) return
+                              if (effectiveAddMode) {
+                                // addRefOrder is null on a fully-off day (zero
+                                // orders in any slot) — add-dish then has no
+                                // reference order to derive subscription/date/
+                                // address from, so pass them directly instead.
+                                if (addRefOrder) handleAddDish(addRefOrder.id, meal.id, selectedSlot)
+                                else handleAddDishOffDay(sub.id, selectedDay, selectedSlot, meal.id)
+                              } else if (dayOrder) {
+                                handleSwapMeal(dayOrder.id, meal.id)
+                              }
                             }}
-                            disabled={swapping || isCurrent}
+                            disabled={swapping || isCurrent || !available}
                           >
                             {meal.image_url ? (
                               <Image source={{ uri: meal.image_url }} style={s.mealRowThumb} contentFit="cover" cachePolicy="memory-disk" />
@@ -1245,8 +1331,10 @@ export default function SubscriptionScreen() {
                             <View style={s.mealRowInfo}>
                               <Text style={s.mealRowName} numberOfLines={2}>{meal.name}</Text>
                               <Text style={s.mealRowMeta}>
-                                {meal.kcal ? `${meal.kcal} kcal` : meal.category}
-                                {meal.protein ? ` · ${meal.protein}g protein` : ''}
+                                {!available
+                                  ? 'Not available on this day'
+                                  : meal.kcal ? `${meal.kcal} kcal` : meal.category}
+                                {available && meal.protein ? ` · ${meal.protein}g protein` : ''}
                               </Text>
                             </View>
                             {isCurrent && (
@@ -1254,7 +1342,7 @@ export default function SubscriptionScreen() {
                                 <Check size={14} color={Colors.primary} strokeWidth={2.5} />
                               </View>
                             )}
-                            {!isCurrent && !swapping && (
+                            {!isCurrent && !swapping && available && (
                               <View style={[s.switchBadge, (isFree || effectiveAddMode) && s.switchBadgeFree]}>
                                 <Text style={[s.switchBadgeText, (isFree || effectiveAddMode) && s.switchBadgeTextFree]}>
                                   {effectiveAddMode ? 'Add' : isFree ? 'Free' : '+₹20'}
@@ -1557,8 +1645,6 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   addonRemoveText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
-  addonIncluded: { backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
-  addonIncludedText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
 
   // Cart summary
   cartSummary: {

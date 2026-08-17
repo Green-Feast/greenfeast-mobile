@@ -1,10 +1,25 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-// Add an extra dish to an existing delivery slot (e.g. a 2nd lunch with a
-// different meal). The dish is NOT charged here — it's billed ON DELIVERY like
-// every other meal: advance_batch_delivered debits its cart_total and burns one
-// delivery from the counter. The row is flagged extra_dish=true only so the UI
-// can group it under the slot; it is billed the same as a base meal.
+// Add an extra dish to a delivery slot. The dish is NOT charged here — it's
+// billed ON DELIVERY like every other meal: advance_batch_delivered debits
+// its cart_total and burns one delivery from the counter. The row is flagged
+// extra_dish=true only so the UI can group it under the slot; it is billed
+// the same as a base meal.
+//
+// Two ways to call this, exactly one required:
+//
+//   { order_id, meal_template_id, meal_slot? }
+//     Existing behaviour — order_id is any existing order for the same day
+//     (any slot), used to derive subscription/date/batch/address. meal_slot
+//     is optional, defaulting to the reference order's own slot; pass it
+//     explicitly to add into a slot that has no order yet on that date (e.g.
+//     a dinner dish on a lunch-only plan), using the lunch order as reference.
+//
+//   { subscription_id, delivery_date, meal_slot, meal_template_id }
+//     Off-day path — for a date with ZERO existing orders in any slot (e.g. a
+//     weekday the subscriber turned off in their default plan). No reference
+//     order exists to derive anything from, so subscription ownership, date
+//     bounds and address all have to be established directly instead.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,15 +37,13 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    // order_id: any existing order for the same day (any slot) — used to derive
-    // subscription / date / batch / address. meal_template_id: dish to add.
-    // meal_slot: optional — defaults to the reference order's own slot; pass
-    // it explicitly to add a dish into a slot that has no order yet (e.g.
-    // adding a dinner dish on a lunch-only plan), using a same-day order in
-    // another slot as the reference.
-    const { order_id, meal_template_id, meal_slot } = await req.json()
-    if (!order_id || !meal_template_id) {
-      return json({ error: 'order_id and meal_template_id are required' }, 400)
+    const { order_id, subscription_id, delivery_date, meal_template_id, meal_slot } = await req.json()
+    if (!meal_template_id) return json({ error: 'meal_template_id is required' }, 400)
+    if (!order_id && !subscription_id) {
+      return json({ error: 'Either order_id or subscription_id is required' }, 400)
+    }
+    if (order_id && subscription_id) {
+      return json({ error: 'Pass order_id or subscription_id, not both' }, 400)
     }
     if (meal_slot && !['lunch', 'dinner'].includes(meal_slot)) {
       return json({ error: 'meal_slot must be lunch or dinner' }, 400)
@@ -45,25 +58,97 @@ Deno.serve(async (req) => {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token)
     if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
 
-    // Reference order — verify ownership and that the slot is still open.
-    const { data: ref } = await supabase
-      .from('orders')
-      .select('id, user_id, subscription_id, delivery_date, meal_slot, batch_id, address_id, status')
-      .eq('id', order_id)
-      .single()
+    // ── Derive a common context — { subscriptionId, effectiveDate,
+    //    effectiveSlot, addressId } — from whichever path was used. ────────
+    let subscriptionId: string
+    let effectiveDate: string
+    let effectiveSlot: 'lunch' | 'dinner'
+    let addressId: string | null
 
-    if (!ref || ref.user_id !== user.id) return json({ error: 'Order not found' }, 404)
-    if (['delivered', 'cancelled', 'skipped'].includes(ref.status)) {
-      return json({ error: 'Cannot add to a delivered, cancelled, or skipped slot' }, 400)
+    if (order_id) {
+      const { data: ref } = await supabase
+        .from('orders')
+        .select('id, user_id, subscription_id, delivery_date, meal_slot, address_id, status')
+        .eq('id', order_id)
+        .single()
+
+      if (!ref || ref.user_id !== user.id) return json({ error: 'Order not found' }, 404)
+      if (['delivered', 'cancelled', 'skipped'].includes(ref.status)) {
+        return json({ error: 'Cannot add to a delivered, cancelled, or skipped slot' }, 400)
+      }
+
+      subscriptionId = ref.subscription_id
+      effectiveDate = ref.delivery_date
+      effectiveSlot = (meal_slot ?? ref.meal_slot) as 'lunch' | 'dinner'
+      addressId = ref.address_id ?? null
+    } else {
+      if (!delivery_date || !meal_slot) {
+        return json({ error: 'delivery_date and meal_slot are required with subscription_id' }, 400)
+      }
+
+      // Ownership — mirrors the app's own subscription queries (e.g.
+      // AddToDaySheet): active/paused, or pending-but-already-paying-COD.
+      const { data: sub } = await supabase
+        .from('subscriptions')
+        .select('id, user_id, status, payment_method, end_date')
+        .eq('id', subscription_id)
+        .single()
+      if (!sub || sub.user_id !== user.id) return json({ error: 'Subscription not found' }, 404)
+      const validStatus =
+        sub.status === 'active' || sub.status === 'paused' || (sub.status === 'pending' && sub.payment_method === 'cod')
+      if (!validStatus) return json({ error: 'Subscription is not active' }, 400)
+      if (sub.end_date && delivery_date > sub.end_date) {
+        return json({ error: 'That date is after your subscription ends' }, 400)
+      }
+
+      subscriptionId = subscription_id
+      effectiveDate = delivery_date
+      effectiveSlot = meal_slot
+
+      // Address — most recent order's address for this subscription (where
+      // they've actually been receiving deliveries), else their default
+      // address, else any, else null (the existing order_id path already
+      // tolerates a null address the same way).
+      const { data: recentOrder } = await supabase
+        .from('orders')
+        .select('address_id')
+        .eq('subscription_id', subscriptionId)
+        .not('address_id', 'is', null)
+        .order('delivery_date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (recentOrder?.address_id) {
+        addressId = recentOrder.address_id
+      } else {
+        const { data: addr } = await supabase
+          .from('addresses')
+          .select('id, is_default')
+          .eq('user_id', user.id)
+          .order('is_default', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        addressId = addr?.id ?? null
+      }
     }
 
-    const effectiveSlot = meal_slot ?? ref.meal_slot
-
     const { data: locked } = await supabase.rpc('is_slot_locked', {
-      p_date: ref.delivery_date, p_slot: effectiveSlot,
+      p_date: effectiveDate, p_slot: effectiveSlot,
     })
     if (locked) {
       return json({ error: 'Cannot add — this slot has already locked for the day.' }, 400)
+    }
+
+    // Server-side availability enforcement — the app greys these out, but a
+    // client check is UX only, not a guarantee.
+    const { data: unavailable } = await supabase
+      .from('meal_availability')
+      .select('is_available')
+      .eq('for_date', effectiveDate)
+      .eq('meal_template_id', meal_template_id)
+      .eq('is_available', false)
+      .maybeSingle()
+    if (unavailable) {
+      return json({ error: 'This dish is not available on that date.' }, 400)
     }
 
     // Base per-meal rate (paise) from the plan — add-ons are not included.
@@ -72,24 +157,30 @@ Deno.serve(async (req) => {
     // it's actually being added to, not the reference order's own batch.
     const { data: sub } = await supabase
       .from('subscriptions')
-      .select('plan_id, batch_id_lunch, batch_id_dinner')
-      .eq('id', ref.subscription_id)
+      .select('plan_id, batch_id_lunch, batch_id_dinner, deliveries_remaining')
+      .eq('id', subscriptionId)
       .single()
+    if (!sub) return json({ error: 'Subscription not found' }, 404)
+    if ((sub.deliveries_remaining ?? 0) <= 0) {
+      return json({ error: 'No deliveries remaining on this plan' }, 400)
+    }
     const { data: plan } = await supabase
       .from('plans')
       .select('base_price, meals_total')
-      .eq('id', sub?.plan_id)
+      .eq('id', sub.plan_id)
       .maybeSingle()
 
     if (!plan) return json({ error: 'Plan not found' }, 404)
     const rate = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
 
-    // Next slot_seq for this (subscription, date, slot).
+    // Next slot_seq for this (subscription, date, slot). Zero existing rows
+    // (the off-day case) resolves to slot_seq 1, leaving 0 unused for that
+    // (date, slot) — harmless, advance_batch_delivered just sorts by it.
     const { data: existing } = await supabase
       .from('orders')
       .select('slot_seq')
-      .eq('subscription_id', ref.subscription_id)
-      .eq('delivery_date', ref.delivery_date)
+      .eq('subscription_id', subscriptionId)
+      .eq('delivery_date', effectiveDate)
       .eq('meal_slot', effectiveSlot)
       .order('slot_seq', { ascending: false })
       .limit(1)
@@ -101,11 +192,11 @@ Deno.serve(async (req) => {
       .from('orders')
       .insert({
         user_id: user.id,
-        subscription_id: ref.subscription_id,
+        subscription_id: subscriptionId,
         meal_template_id,
-        batch_id: (effectiveSlot === 'lunch' ? sub?.batch_id_lunch : sub?.batch_id_dinner) ?? null,
-        address_id: ref.address_id ?? null,
-        delivery_date: ref.delivery_date,
+        batch_id: (effectiveSlot === 'lunch' ? sub.batch_id_lunch : sub.batch_id_dinner) ?? null,
+        address_id: addressId,
+        delivery_date: effectiveDate,
         meal_slot: effectiveSlot,
         status: 'scheduled',
         is_customized: true,

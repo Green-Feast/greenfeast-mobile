@@ -61,6 +61,19 @@ Deno.serve(async (req) => {
       return json({ ok: true, charged: false }) // nothing to do
     }
 
+    // Server-side availability enforcement — the app greys these out, but a
+    // client check is UX only, not a guarantee.
+    const { data: unavailable } = await supabase
+      .from('meal_availability')
+      .select('is_available')
+      .eq('for_date', order.delivery_date)
+      .eq('meal_template_id', meal_template_id)
+      .eq('is_available', false)
+      .maybeSingle()
+    if (unavailable) {
+      return json({ error: 'This dish is not available on that date.' }, 400)
+    }
+
     // Load subscription to find its menu_type
     const { data: sub } = await supabase
       .from('subscriptions')
