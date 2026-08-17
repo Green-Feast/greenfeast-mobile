@@ -16,19 +16,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams } from 'expo-router'
 import { ExternalLink, MapPin, CalendarPlus } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { istToday } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
+import { useAvailabilityStore, isMealAvailable } from '@/store/availability'
 import { Colors, Fonts } from '@/constants/colors'
 import { SWIGGY_URL, ZOMATO_URL, KITCHEN_MAPS_URL, isConfigured } from '@/constants/links'
 import { CATEGORIES, CATEGORY_EMOJIS } from '@/constants/categories'
 import Skeleton from '@/components/Skeleton'
-import MacroRow from '@/components/MacroRow'
 import AddToDaySheet from '@/components/AddToDaySheet'
 import MealDetailModal, { type MealDetail } from '@/components/MealDetailModal'
 import * as Haptics from 'expo-haptics'
 
 export { CATEGORIES, CATEGORY_EMOJIS }
 
-type Meal = MealDetail
+// short_description is card-only — the detail modal keeps showing the full
+// description, where the longer ingredient lists are genuinely useful.
+type Meal = MealDetail & { short_description: string | null }
 
 function formatPrice(paise: number | null) {
   if (paise == null) return ''
@@ -44,6 +47,9 @@ export default function MenuScreen() {
   const [activeCategory, setActiveCategory] = useState('All')
   const [selected, setSelected] = useState<Meal | null>(null)
   const [addSheetOpen, setAddSheetOpen] = useState(false)
+  const today = istToday()
+  const unavailableMeals = useAvailabilityStore((s) => s.unavailableMeals)
+  const ensureFreshAvailability = useAvailabilityStore((s) => s.ensureFresh)
 
   // Category deeplink from Home (e.g. /(app)/(tabs)/menu?category=Bowl).
   useEffect(() => {
@@ -53,12 +59,16 @@ export default function MenuScreen() {
   }, [params.category])
 
   useEffect(() => {
+    ensureFreshAvailability()
+  }, [ensureFreshAvailability])
+
+  useEffect(() => {
     if (authLoading) return
     ;(async () => {
       try {
         const { data } = await supabase
           .from('meal_templates')
-          .select('id, name, category, description, price, kcal, protein, carbs, fat, tags, image_url')
+          .select('id, name, category, description, short_description, price, kcal, protein, carbs, fat, tags, image_url')
           .eq('is_active', true)
           .order('category')
         const list = (data ?? []) as Meal[]
@@ -118,34 +128,46 @@ export default function MenuScreen() {
           contentContainerStyle={styles.grid}
           columnWrapperStyle={styles.row}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                setSelected(item)
-              }}
-            >
-              {item.image_url ? (
-                <Image
-                  source={{ uri: item.image_url }}
-                  style={styles.cardImage}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  transition={150}
-                />
-              ) : (
-                <View style={styles.cardEmoji}>
-                  <Text style={styles.emojiText}>{CATEGORY_EMOJIS[item.category] ?? '🍽️'}</Text>
-                </View>
-              )}
-              <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
-              {item.price != null && <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>}
-              {(item.protein != null || item.kcal != null) && (
-                <MacroRow protein={item.protein} kcal={item.kcal} size="sm" />
-              )}
-            </Pressable>
-          )}
+          renderItem={({ item }) => {
+            // Greyed but still tappable — the detail view still opens, only
+            // the "Add to day" CTA gets disabled there. A card that vanishes
+            // or stops responding entirely reads as a broken app, not an
+            // unavailable dish.
+            const available = isMealAvailable({ unavailableMeals }, today, item.id)
+            return (
+              <Pressable
+                style={({ pressed }) => [styles.card, pressed && styles.cardPressed, !available && styles.cardUnavailable]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  setSelected(item)
+                }}
+              >
+                {item.image_url ? (
+                  <Image
+                    source={{ uri: item.image_url }}
+                    style={styles.cardImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    transition={150}
+                  />
+                ) : (
+                  <View style={styles.cardEmoji}>
+                    <Text style={styles.emojiText}>{CATEGORY_EMOJIS[item.category] ?? '🍽️'}</Text>
+                  </View>
+                )}
+                {!available && (
+                  <View style={styles.cardUnavailablePill}>
+                    <Text style={styles.cardUnavailablePillText}>Not available today</Text>
+                  </View>
+                )}
+                <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+                {item.price != null && <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>}
+                <Text style={styles.cardDesc} numberOfLines={2}>
+                  {item.short_description ?? item.description ?? ''}
+                </Text>
+              </Pressable>
+            )
+          }}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyText}>No meals in this category yet.</Text>
@@ -184,10 +206,14 @@ export default function MenuScreen() {
       <MealDetailModal
         meal={selected}
         onClose={() => setSelected(null)}
+        unavailableReason={
+          selected && !isMealAvailable({ unavailableMeals }, today, selected.id) ? 'Not available today' : null
+        }
         primaryAction={{
           label: 'Add to day',
           icon: <CalendarPlus size={17} color="#fff" />,
           onPress: () => setAddSheetOpen(true),
+          disabled: selected ? !isMealAvailable({ unavailableMeals }, today, selected.id) : false,
         }}
       />
 
@@ -238,7 +264,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   cardPressed: { transform: [{ scale: 0.97 }] },
+  cardUnavailable: { opacity: 0.55 },
   cardImage: { width: '100%', height: 110, borderRadius: 12, backgroundColor: Colors.cream300 },
+  cardUnavailablePill: {
+    position: 'absolute', top: 20, left: 20, right: 20,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center',
+  },
+  cardUnavailablePillText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: '#fff' },
   cardEmoji: {
     width: '100%',
     height: 110,
@@ -250,6 +283,10 @@ const styles = StyleSheet.create({
   emojiText: { fontSize: 40 },
   cardName: { fontFamily: Fonts.heading, fontSize: 15, color: Colors.ink900, lineHeight: 19 },
   cardPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.green700 },
+  // minHeight reserves 2 lines always — cardName is already numberOfLines={2}
+  // (so its own height already varies by up to 1 line), and a variable-height
+  // description on top of that would leave ragged FlatList rows.
+  cardDesc: { fontFamily: Fonts.body, fontSize: 12, lineHeight: 16, color: Colors.ink500, minHeight: 32 },
 
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyText: { fontFamily: Fonts.body, color: Colors.ink500, fontSize: 14 },
