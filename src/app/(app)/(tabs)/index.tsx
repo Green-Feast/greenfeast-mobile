@@ -10,6 +10,7 @@ import {
   Modal,
   ActivityIndicator,
   Linking,
+  Alert,
 } from 'react-native'
 import { Image } from 'expo-image'
 import Animated, { FadeInDown } from 'react-native-reanimated'
@@ -18,19 +19,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
 import * as Updates from 'expo-updates'
 import * as Haptics from 'expo-haptics'
-import { ArrowRight, Leaf, RefreshCw, Bell, X, ChevronRight } from 'lucide-react-native'
+import { ArrowRight, Leaf, RefreshCw, Bell, X, ChevronRight, Check, CalendarPlus } from 'lucide-react-native'
 import MacroRow from '@/components/MacroRow'
 import MacroRing from '@/components/MacroRing'
 import StoryCarousel from '@/components/StoryCarousel'
+import AddToDaySheet from '@/components/AddToDaySheet'
+import MealDetailModal, { type MealDetail, type MealDetailPrimaryAction } from '@/components/MealDetailModal'
 import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/withTimeout'
 import { istToday, istHour, addDaysISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
+import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/availability'
 import { Colors, Fonts } from '@/constants/colors'
 import { STORY_SLIDES, CHEF_NOTES } from '@/constants/homeContent'
 import { REFERRAL_MESSAGE } from '@/constants/links'
-import { CATEGORIES, CATEGORY_EMOJIS } from './menu'
+import { CATEGORIES, CATEGORY_EMOJIS } from '@/constants/categories'
 import Logo from '@/components/Logo'
 import Skeleton from '@/components/Skeleton'
 import WhatsAppIcon from '@/components/WhatsAppIcon'
@@ -57,15 +61,9 @@ type Subscription = {
   plans: { meals_total: number } | null
 }
 
-type Meal = {
-  id: string
-  name: string
-  category: string
-  price: number | null
-  kcal: number | null
-  protein: number | null
-  image_url: string | null
-}
+// MealDetail-compatible so Today's Special cards can open MealDetailModal —
+// the same component Menu uses for its own dish detail view.
+type Meal = MealDetail
 
 type UpcomingOrder = {
   id: string
@@ -105,6 +103,16 @@ function formatRelativeTime(iso: string) {
 
 function fmtDayLabel(iso: string): string {
   return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'UTC' })
+}
+
+// findNextAddTarget can legitimately land on tomorrow (both of today's slots
+// locked, or today has no orders at all) — the label must say so rather than
+// implying "today" unconditionally.
+function addTargetLabel(target: AddTarget): string {
+  const today = istToday()
+  const dayWord =
+    target.date === today ? "today's" : target.date === addDaysISO(today, 1) ? "tomorrow's" : `${fmtDayLabel(target.date)}'s`
+  return `Add to ${dayWord} ${target.slot}`
 }
 
 // Deterministic "random" seed from today's date, used to rotate the daily
@@ -151,10 +159,10 @@ export default function Home() {
   const [todayOrder, setTodayOrder] = useState<Order | null>(null)
   const [meals, setMeals] = useState<Meal[]>([])
   const [addTarget, setAddTarget] = useState<AddTarget | null>(null)
-  const [confirmMeal, setConfirmMeal] = useState<Meal | null>(null)
+  const [detailMeal, setDetailMeal] = useState<Meal | null>(null)
+  const [addSheetOpen, setAddSheetOpen] = useState(false)
   const [addedMealIds, setAddedMealIds] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
-  const [addError, setAddError] = useState('')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [fetchError, setFetchError] = useState(false)
@@ -163,6 +171,9 @@ export default function Home() {
   const notifications = useNotificationStore((s) => s.notifications)
   const markAllRead = useNotificationStore((s) => s.markAllRead)
   const unreadCount = notifications.filter((n) => !n.read).length
+  const unavailableMeals = useAvailabilityStore((s) => s.unavailableMeals)
+  const specials = useAvailabilityStore((s) => s.specials)
+  const ensureFreshAvailability = useAvailabilityStore((s) => s.ensureFresh)
 
   // Home has a green hero band under the status bar (every other screen is
   // light-background — see _layout.tsx's global style="dark" default). Tabs
@@ -174,6 +185,17 @@ export default function Home() {
       setStatusBarStyle('light')
       return () => setStatusBarStyle('dark')
     }, [])
+  )
+
+  // Home is a persistently-mounted tab users return to often — refetch
+  // whenever it regains focus, not just on first mount, so admin-set
+  // availability/specials from earlier in the day (or a stale IST-midnight
+  // rollover) don't linger. ensureFresh() itself is a no-op if the calendar
+  // day hasn't changed since the last load.
+  useFocusEffect(
+    useCallback(() => {
+      ensureFreshAvailability()
+    }, [ensureFreshAvailability])
   )
 
   async function handleReloadNow() {
@@ -263,11 +285,13 @@ export default function Home() {
   }, [user, authLoading])
 
   // Menu catalogue — public data, fetched once regardless of auth state so
-  // guests see category chips + daily picks too.
+  // guests see category chips + Today's Special too. description/carbs/fat/
+  // tags are pulled even though the pick cards themselves don't render them
+  // — MealDetail modal needs the full set when a card is tapped.
   useEffect(() => {
     supabase
       .from('meal_templates')
-      .select('id, name, category, price, kcal, protein, image_url')
+      .select('id, name, category, description, price, kcal, protein, carbs, fat, tags, image_url')
       .eq('is_active', true)
       .then(({ data }) => setMeals((data as Meal[]) ?? []))
   }, [])
@@ -278,28 +302,31 @@ export default function Home() {
     setRefreshing(false)
   }, [user])
 
-  async function handleQuickAdd() {
-    if (!confirmMeal || !addTarget) return
+  // One-tap add to the next open (date, slot) — no separate confirm dialog;
+  // the detail view itself (name, price, macros) is the confirmation, matching
+  // Menu's own "open detail, then act" flow. Errors surface via Alert since
+  // there's no dedicated error slot in MealDetailModal's generic CTA bar.
+  async function handleQuickAdd(meal: Meal) {
+    if (!addTarget) return
     setAdding(true)
-    setAddError('')
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not authenticated')
       const { data, error } = await supabase.functions.invoke('add-dish', {
-        body: { order_id: addTarget.refOrderId, meal_template_id: confirmMeal.id, meal_slot: addTarget.slot },
+        body: { order_id: addTarget.refOrderId, meal_template_id: meal.id, meal_slot: addTarget.slot },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
       if (error) throw error
       if (data?.error === 'insufficient_balance') {
-        setAddError('Insufficient wallet balance. Add money from My Plan first.')
+        Alert.alert('Insufficient balance', 'Add money from My Plan first, then try again.')
         return
       }
       if (data?.error) throw new Error(data.error)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-      setAddedMealIds((prev) => new Set(prev).add(confirmMeal.id))
-      setConfirmMeal(null)
+      setAddedMealIds((prev) => new Set(prev).add(meal.id))
+      setDetailMeal(null)
     } catch (e: any) {
-      setAddError(e?.message ?? 'Could not add dish. Try again.')
+      Alert.alert('Could not add dish', e?.message ?? 'Please try again.')
     } finally {
       setAdding(false)
     }
@@ -309,13 +336,54 @@ export default function Home() {
 
   const todayStr = istToday()
   const seed = seedFromDate(todayStr)
-  const picks: Meal[] = []
-  if (meals.length > 0) {
+
+  // Today's Special — admin-picked (daily_specials) takes priority; falls
+  // back to the seed rotation only when the admin hasn't set any for today,
+  // or every admin pick turned out unavailable/inactive/deleted. Honour
+  // exactly what the admin set otherwise: 1 pick shown as 1, not padded to 2
+  // with an algorithmic pick — mixing "chef's choice" with "algorithm" in
+  // one row reads worse than a single card.
+  function seedPicks(): Meal[] {
+    if (meals.length === 0) return []
     const i0 = seed % meals.length
-    picks.push(meals[i0])
+    const picks = [meals[i0]]
     if (meals.length > 1) picks.push(meals[(i0 + 1) % meals.length])
+    return picks
   }
+  const adminSpecialIds = specialsFor({ specials }, todayStr)
+  const adminPicks = adminSpecialIds
+    .map((id) => meals.find((m) => m.id === id))
+    .filter((m): m is Meal => !!m && isMealAvailable({ unavailableMeals }, todayStr, m.id))
+  const picks: Meal[] = adminPicks.length > 0 ? adminPicks : seedPicks()
+
   const chefNote = CHEF_NOTES[seed % CHEF_NOTES.length]
+
+  // CTA for whichever meal is open in the detail modal. Guests get sent to
+  // the full menu (no subscription to add against yet). Subscribers with no
+  // valid next slot — or whose target date has this meal marked unavailable
+  // — fall through to AddToDaySheet so they can pick a different day
+  // themselves, same escape hatch Menu's "Add to day" already uses.
+  function detailPrimaryAction(meal: Meal): MealDetailPrimaryAction {
+    if (!hasSubscription) {
+      return { label: 'See full menu', onPress: () => { setDetailMeal(null); router.push('/(app)/(tabs)/menu') } }
+    }
+    const targetUnavailable = addTarget && !isMealAvailable({ unavailableMeals }, addTarget.date, meal.id)
+    if (!addTarget || targetUnavailable) {
+      return {
+        label: 'Add to a day',
+        icon: <CalendarPlus size={17} color="#fff" />,
+        onPress: () => setAddSheetOpen(true),
+      }
+    }
+    const added = addedMealIds.has(meal.id)
+    return {
+      label: addTargetLabel(addTarget),
+      onPress: () => handleQuickAdd(meal),
+      loading: adding,
+      done: added,
+      disabled: added,
+    }
+  }
 
   if (loading) {
     return (
@@ -504,18 +572,24 @@ export default function Home() {
           </ScrollView>
         </Animated.View>
 
-        {/* Daily picks — quick-add to next unlocked delivery */}
+        {/* Today's Special — admin-picked via the Kitchen tab, falls back to
+            a seed rotation. Tapping a card opens the same detail view Menu
+            uses; "Add to cart" there targets the next open delivery. */}
         {picks.length > 0 && (
           <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
             <View style={styles.sectionLabelRow}>
               <Leaf size={13} color={Colors.primary} />
-              <Text style={styles.sectionLabel}>Fresh from the kitchen</Text>
+              <Text style={styles.sectionLabel}>Today's Special</Text>
             </View>
             <View style={{ gap: 12 }}>
               {picks.map((meal) => {
                 const added = addedMealIds.has(meal.id)
                 return (
-                  <View key={meal.id} style={styles.pickCard}>
+                  <Pressable
+                    key={meal.id}
+                    style={({ pressed }) => [styles.pickCard, pressed && { opacity: 0.9 }]}
+                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setDetailMeal(meal) }}
+                  >
                     {meal.image_url ? (
                       <Image source={{ uri: meal.image_url }} style={styles.pickImage} contentFit="cover" cachePolicy="memory-disk" transition={200} />
                     ) : (
@@ -530,22 +604,13 @@ export default function Home() {
                         <MacroRow protein={meal.protein} kcal={meal.kcal} size="sm" />
                       </View>
                     </View>
-                    {hasSubscription ? (
-                      addTarget && (
-                        <Pressable
-                          style={[styles.pickAddBtn, added && styles.pickAddBtnDone]}
-                          disabled={added}
-                          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setConfirmMeal(meal) }}
-                        >
-                          <Text style={[styles.pickAddText, added && styles.pickAddTextDone]}>{added ? 'Added ✓' : 'Add'}</Text>
-                        </Pressable>
-                      )
-                    ) : (
-                      <Pressable style={styles.pickAddBtn} onPress={() => router.push('/(app)/(tabs)/menu')}>
-                        <Text style={styles.pickAddText}>See menu</Text>
-                      </Pressable>
+                    {added && (
+                      <View style={styles.pickAddedBadge}>
+                        <Check size={12} color="#fff" strokeWidth={3} />
+                      </View>
                     )}
-                  </View>
+                    <ChevronRight size={18} color={Colors.textMuted} />
+                  </Pressable>
                 )
               })}
             </View>
@@ -655,40 +720,19 @@ export default function Home() {
         </Pressable>
       </Modal>
 
-      {/* Quick-add confirm sheet */}
-      <Modal
-        visible={!!confirmMeal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => { if (!adding) setConfirmMeal(null) }}
-      >
-        <Pressable style={styles.confirmOverlay} onPress={() => !adding && setConfirmMeal(null)}>
-          <Pressable style={styles.confirmCard} onPress={(e) => e.stopPropagation()}>
-            {confirmMeal && addTarget && (
-              <>
-                <Text style={styles.confirmTitle}>Add {confirmMeal.name}?</Text>
-                <Text style={styles.confirmBody}>
-                  To {fmtDayLabel(addTarget.date)}'s {addTarget.slot}
-                  {confirmMeal.price != null ? ` · ₹${(confirmMeal.price / 100).toFixed(0)}` : ''}
-                </Text>
-                <Text style={styles.confirmNote}>
-                  Billed from your wallet on delivery. Removable from My Plan until{' '}
-                  {addTarget.slot === 'lunch' ? '8 AM' : '1 PM'} on delivery day.
-                </Text>
-                {addError ? <Text style={styles.confirmError}>{addError}</Text> : null}
-                <View style={styles.confirmBtnRow}>
-                  <Pressable style={[styles.confirmBtn, styles.confirmBtnGhost]} onPress={() => setConfirmMeal(null)} disabled={adding}>
-                    <Text style={styles.confirmBtnGhostText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable style={styles.confirmBtn} onPress={handleQuickAdd} disabled={adding}>
-                    {adding ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.confirmBtnText}>Add dish</Text>}
-                  </Pressable>
-                </View>
-              </>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <MealDetailModal
+        meal={detailMeal}
+        onClose={() => setDetailMeal(null)}
+        primaryAction={detailMeal ? detailPrimaryAction(detailMeal) : undefined}
+      />
+
+      {detailMeal && (
+        <AddToDaySheet
+          visible={addSheetOpen}
+          onClose={() => setAddSheetOpen(false)}
+          meal={{ id: detailMeal.id, name: detailMeal.name }}
+        />
+      )}
     </View>
   )
 }
@@ -852,15 +896,10 @@ const styles = StyleSheet.create({
   pickImageFallback: { alignItems: 'center', justifyContent: 'center' },
   pickName: { fontFamily: Fonts.heading, fontSize: 15, color: Colors.ink900, lineHeight: 19, marginBottom: 2 },
   pickPrice: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.green700 },
-  pickAddBtn: {
-    backgroundColor: Colors.green700,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
+  pickAddedBadge: {
+    width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.green700,
+    alignItems: 'center', justifyContent: 'center',
   },
-  pickAddBtnDone: { backgroundColor: Colors.cream300 },
-  pickAddText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
-  pickAddTextDone: { color: Colors.ink500 },
 
   chefCard: {
     flexDirection: 'row',
@@ -922,20 +961,4 @@ const styles = StyleSheet.create({
   notifRowTitle: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
   notifRowBody: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginTop: 2, lineHeight: 18 },
   notifRowTime: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textLight, marginTop: 4 },
-
-  // Quick-add confirm sheet
-  confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  confirmCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%', maxWidth: 340 },
-  confirmTitle: { fontFamily: Fonts.heading, fontSize: 19, color: Colors.ink900, marginBottom: 8 },
-  confirmBody: { fontFamily: Fonts.bodyMed, fontSize: 14, color: Colors.ink600, marginBottom: 10 },
-  confirmNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, lineHeight: 17 },
-  confirmError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 8 },
-  confirmBtnRow: { flexDirection: 'row', gap: 12, marginTop: 18 },
-  confirmBtn: {
-    flex: 1, backgroundColor: Colors.green700, borderRadius: 999,
-    paddingVertical: 13, alignItems: 'center', justifyContent: 'center', minHeight: 46,
-  },
-  confirmBtnGhost: { backgroundColor: Colors.cream200 },
-  confirmBtnText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
-  confirmBtnGhostText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.ink600 },
 })
