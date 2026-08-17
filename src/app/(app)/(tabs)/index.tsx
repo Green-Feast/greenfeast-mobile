@@ -130,8 +130,9 @@ function findNextAddTarget(orders: UpcomingOrder[]): AddTarget | null {
     byDate.set(o.delivery_date, arr)
   }
   const dates = [...byDate.keys()].sort()
+  const slotRank = (slot: string) => (slot === 'lunch' ? 0 : slot === 'dinner' ? 1 : 2)
   for (const d of dates) {
-    const slotOrder = [...byDate.get(d)!].sort((a, b) => a.meal_slot.localeCompare(b.meal_slot))
+    const slotOrder = [...byDate.get(d)!].sort((a, b) => slotRank(a.meal_slot) - slotRank(b.meal_slot))
     for (const base of slotOrder) {
       const slot = base.meal_slot as 'lunch' | 'dinner'
       if (isSlotLocked(d, slot)) continue
