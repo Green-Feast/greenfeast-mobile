@@ -22,6 +22,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/inter'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/withTimeout'
 import { useAuthStore } from '@/store/auth'
 import { useOtaNotifications } from '@/hooks/useOtaNotifications'
 import { Colors } from '@/constants/colors'
@@ -29,13 +30,43 @@ import { LEGAL_LAST_UPDATED } from '@/constants/legal'
 
 SplashScreen.preventAutoHideAsync()
 
+// Ceilings for the two network waits that gate the whole app's first render.
+// Generous enough not to trip a genuinely slow-but-working connection, short
+// enough that a stalled one never looks like a permanent freeze.
+const SESSION_RESTORE_TIMEOUT_MS = 10000
+const PROFILE_LOOKUP_TIMEOUT_MS = 10000
+
 function AuthGate() {
   const router = useRouter()
   const segments = useSegments()
   const { session, phone, onboarded, loading, profileLoading, setSession, setProfileLoaded } = useAuthStore()
 
   useEffect(() => {
+    // Cold-start safety net. supabase-js emits INITIAL_SESSION (the only thing
+    // that flips `loading` to false) only after it has restored the session —
+    // and when the stored access token has expired, that restore refreshes it
+    // over the network first, with no timeout of its own. On the first launch
+    // after the app has sat idle for hours, a cold radio can leave that call
+    // pending indefinitely, so `loading` never flips and every tab sits on its
+    // skeleton forever. Killing the app and reopening "fixes" it only because
+    // the token is fresh by then and the restore needs no network at all.
+    //
+    // A null session here is safe: the redirect effect below leaves anyone
+    // already inside /(app)/ exactly where they are and just renders the guest
+    // state, and the listener above still applies the real session whenever it
+    // does land.
+    const restoreTimer = setTimeout(() => {
+      if (!useAuthStore.getState().loading) return
+      console.warn(
+        `[AuthGate] session restore did not settle in ${SESSION_RESTORE_TIMEOUT_MS}ms — ` +
+          'rendering signed-out; the auth listener will apply the session if it arrives'
+      )
+      setSession(null)
+      setProfileLoaded(null, false, false)
+    }, SESSION_RESTORE_TIMEOUT_MS)
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      clearTimeout(restoreTimer)
       // Unblock every tab's own data fetch (Home, My Plan, Account) the
       // moment the session itself is known — they only ever needed
       // `user.id`, not phone/onboarded, so there's no reason to make them
@@ -43,21 +74,25 @@ function AuthGate() {
       setSession(session)
 
       if (session) {
-        // A thrown/rejected lookup here (e.g. the fetch timeout in
-        // lib/supabase.ts firing on a bad connection) must never leave
-        // profileLoading stuck true forever — that would hang the redirect
-        // effect below indefinitely. Fall back to "unknown" values so the
-        // redirect logic can proceed; a genuinely returning user just retries
-        // once the network recovers.
+        // This lookup must never leave profileLoading stuck true — that would
+        // hang the redirect effect below indefinitely. Neither a rejection nor
+        // an indefinitely-pending request can do so: the timeout bounds the
+        // wait and the catch falls back to "unknown" values so the redirect
+        // logic can proceed. A genuinely returning user just retries once the
+        // network recovers.
         try {
-          const [{ data }, { count }] = await Promise.all([
-            supabase.from('users').select('phone, onboarded').eq('id', session.user.id).single(),
-            supabase
-              .from('subscriptions')
-              .select('id', { count: 'exact', head: true })
-              .eq('user_id', session.user.id)
-              .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)'),
-          ])
+          const [{ data }, { count }] = await withTimeout(
+            Promise.all([
+              supabase.from('users').select('phone, onboarded').eq('id', session.user.id).single(),
+              supabase
+                .from('subscriptions')
+                .select('id', { count: 'exact', head: true })
+                .eq('user_id', session.user.id)
+                .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)'),
+            ]),
+            PROFILE_LOOKUP_TIMEOUT_MS,
+            'profile lookup'
+          )
           setProfileLoaded(data?.phone ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
         } catch (err) {
           console.warn('[AuthGate] profile lookup failed:', err)
@@ -81,7 +116,10 @@ function AuthGate() {
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      clearTimeout(restoreTimer)
+      subscription.unsubscribe()
+    }
   }, [])
 
   useEffect(() => {

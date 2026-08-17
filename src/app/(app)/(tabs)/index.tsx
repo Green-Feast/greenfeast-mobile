@@ -23,6 +23,7 @@ import MacroRow from '@/components/MacroRow'
 import MacroRing from '@/components/MacroRing'
 import StoryCarousel from '@/components/StoryCarousel'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/withTimeout'
 import { istToday, istHour, addDaysISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
@@ -75,6 +76,8 @@ type UpcomingOrder = {
 }
 
 type AddTarget = { refOrderId: string; date: string; slot: 'lunch' | 'dinner' }
+
+const HOME_FETCH_TIMEOUT_MS = 15000
 
 const STATUS_LABELS: Record<string, string> = {
   scheduled: 'Scheduled', confirmed: 'Confirmed', preparing: 'Being prepared',
@@ -202,31 +205,37 @@ export default function Home() {
     const today = istToday()
 
     try {
-      const [userRes, subRes, orderRes, upcomingRes] = await Promise.all([
-        supabase.from('users').select('name').eq('id', user.id).single(),
-        supabase
-          .from('subscriptions')
-          .select('id, status, deliveries_remaining, plan_name, plans ( meals_total )')
-          .eq('user_id', user.id)
-          .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from('orders')
-          .select('id, delivery_date, status, meal_slot, meal_template_id, meal_templates ( name, category, kcal, protein, image_url )')
-          .eq('user_id', user.id)
-          .eq('delivery_date', today)
-          .not('status', 'in', '(cancelled,skipped)'),
-        supabase
-          .from('orders')
-          .select('id, delivery_date, meal_slot, extra_dish, status')
-          .eq('user_id', user.id)
-          .gte('delivery_date', today)
-          .lte('delivery_date', addDaysISO(today, 7))
-          .in('status', ['scheduled', 'confirmed'])
-          .order('delivery_date'),
-      ])
+      // Bounded so a stalled request surfaces the error state's Retry button
+      // rather than leaving the skeleton up indefinitely.
+      const [userRes, subRes, orderRes, upcomingRes] = await withTimeout(
+        Promise.all([
+          supabase.from('users').select('name').eq('id', user.id).single(),
+          supabase
+            .from('subscriptions')
+            .select('id, status, deliveries_remaining, plan_name, plans ( meals_total )')
+            .eq('user_id', user.id)
+            .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from('orders')
+            .select('id, delivery_date, status, meal_slot, meal_template_id, meal_templates ( name, category, kcal, protein, image_url )')
+            .eq('user_id', user.id)
+            .eq('delivery_date', today)
+            .not('status', 'in', '(cancelled,skipped)'),
+          supabase
+            .from('orders')
+            .select('id, delivery_date, meal_slot, extra_dish, status')
+            .eq('user_id', user.id)
+            .gte('delivery_date', today)
+            .lte('delivery_date', addDaysISO(today, 7))
+            .in('status', ['scheduled', 'confirmed'])
+            .order('delivery_date'),
+        ]),
+        HOME_FETCH_TIMEOUT_MS,
+        'home data'
+      )
 
       if (userRes.data?.name) setUserName(userRes.data.name)
       setSubscription((subRes.data as unknown as Subscription) ?? null)
