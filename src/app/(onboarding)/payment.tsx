@@ -15,6 +15,8 @@ import * as Haptics from 'expo-haptics'
 import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
 import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
 import { supabase } from '@/lib/supabase'
+import { setActiveCashfreeCallback } from '@/lib/cashfreeCallback'
+import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import { useAuthStore } from '@/store/auth'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
@@ -288,7 +290,15 @@ export default function PaymentScreen() {
         headers: { Authorization: `Bearer ${session?.access_token}` },
       })
 
-      if (res.error) throw new Error(res.error.message)
+      if (res.error) {
+        // res.error.message alone is always the generic "Edge Function
+        // returned a non-2xx status code" — every distinct failure this
+        // function can return (missing subscription, payments insert
+        // failed, Cashfree itself rejected the order, ...) collapsed into
+        // that one meaningless line. The real body only lives in
+        // error.context.json().
+        throw new Error(await extractFunctionErrorMessage(res.error, 'Could not start payment. Please try again.'))
+      }
 
       const cfSession = new CFSession(
         res.data.payment_session_id,
@@ -338,8 +348,14 @@ export default function PaymentScreen() {
         latest.current.handlePaymentFailure(error.getMessage() || 'Please try again.')
       },
     }
-    CFPaymentGatewayService.setCallback(callback)
-    return () => CFPaymentGatewayService.removeCallback()
+    // Not CFPaymentGatewayService.setCallback/removeCallback directly — see
+    // cashfreeCallback.ts. My Plan's own wallet-topup screen uses the same
+    // shared singleton and stays mounted underneath this one (expo-router
+    // keeps a pushed-from screen alive), so an out-of-order cleanup between
+    // the two could otherwise silently unhook whichever callback is actually
+    // live — this is what let a completed payment leave onboarding stuck
+    // spinning forever with no error and no success.
+    return setActiveCashfreeCallback(callback)
   }, [])
 
   async function handleDevSkip() {

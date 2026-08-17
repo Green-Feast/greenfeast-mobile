@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics'
 import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
 import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
 import { supabase } from '@/lib/supabase'
+import { setActiveCashfreeCallback } from '@/lib/cashfreeCallback'
 import { useAuthStore } from '@/store/auth'
 import { useAvailabilityStore, isMealAvailable, isAddonAvailable } from '@/store/availability'
 import { Colors, Fonts } from '@/constants/colors'
@@ -496,8 +497,15 @@ export default function SubscriptionScreen() {
         console.warn('Wallet top-up failed:', error.getMessage())
       },
     }
-    CFPaymentGatewayService.setCallback(callback)
-    return () => CFPaymentGatewayService.removeCallback()
+    // Not CFPaymentGatewayService.setCallback/removeCallback directly — see
+    // cashfreeCallback.ts. This effect runs unconditionally on every mount of
+    // this screen, including the SubscribeGate branch for a brand-new user —
+    // so it's already live and registered by the time onboarding's payment
+    // screen mounts on top of it (expo-router keeps this screen mounted
+    // underneath whatever gets pushed). Both screens share the same
+    // process-wide singleton; an out-of-order cleanup here could otherwise
+    // silently unhook onboarding's live listener instead of this one.
+    return setActiveCashfreeCallback(callback)
   }, [])
 
   async function createTopupOrder() {
