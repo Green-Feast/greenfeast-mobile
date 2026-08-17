@@ -5,11 +5,13 @@
 // anything added here shows up there too — same edge functions, same table.
 import { useEffect, useState } from 'react'
 import { View, Text, Pressable, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { X, Check, Minus, Plus } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import { useAvailabilityStore, isMealAvailable } from '@/store/availability'
 import { istToday, addDaysISO, isSlotLocked, isDayFullyLocked, dowMon0 } from '@/lib/ist'
 import { Colors, Fonts } from '@/constants/colors'
 
@@ -29,7 +31,10 @@ type Props = {
 
 export default function AddToDaySheet({ visible, onClose, meal }: Props) {
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const { user, hasSubscription } = useAuthStore()
+  const unavailableMeals = useAvailabilityStore((s) => s.unavailableMeals)
+  const ensureFreshAvailability = useAvailabilityStore((s) => s.ensureFresh)
   const [loading, setLoading] = useState(true)
   const [days, setDays] = useState<DayInfo[]>([])
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -38,6 +43,10 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+
+  useEffect(() => {
+    if (visible) ensureFreshAvailability()
+  }, [visible, ensureFreshAvailability])
 
   useEffect(() => {
     if (!visible) return
@@ -83,11 +92,14 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
         })
       }
       setDays(list)
-      // Default to the first day with an order and at least one open slot,
-      // preferring lunch — same-day cutoffs mean a day can have one slot
-      // locked and the other still open (e.g. today's lunch past 8 AM but
-      // dinner still open until 1 PM).
-      const firstOpen = list.find((d) => d.refOrderId && !isDayFullyLocked(d.date))
+      // Default to the first day with an order, at least one open slot, and
+      // this meal actually available — same-day cutoffs mean a day can have
+      // one slot locked and the other still open (e.g. today's lunch past
+      // 8 AM but dinner still open until 1 PM), and availability is on top
+      // of that: no point landing on a day where this dish can't be added.
+      const firstOpen = list.find(
+        (d) => d.refOrderId && !isDayFullyLocked(d.date) && isMealAvailable({ unavailableMeals }, d.date, meal.id)
+      )
       setSelectedDate(firstOpen?.date ?? null)
       if (firstOpen) setSlot(isSlotLocked(firstOpen.date, 'lunch') ? 'dinner' : 'lunch')
       setLoading(false)
@@ -97,6 +109,10 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
   async function handleAdd() {
     const day = days.find((d) => d.date === selectedDate)
     if (!day?.refOrderId) return
+    if (!isMealAvailable({ unavailableMeals }, day.date, meal.id)) {
+      setError(`Not available on ${day.label.toLowerCase()}.`)
+      return
+    }
     if (isSlotLocked(day.date, slot)) {
       setError(`Cannot add — ${slot} has already locked for this day.`)
       return
@@ -137,11 +153,12 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
 
   const selectedDay = days.find((d) => d.date === selectedDate)
   const selectedSlotLocked = !!selectedDate && isSlotLocked(selectedDate, slot)
+  const selectedMealUnavailable = !!selectedDate && !isMealAvailable({ unavailableMeals }, selectedDate, meal.id)
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={[styles.sheet, { paddingBottom: 24 + insets.bottom }]} onPress={(e) => e.stopPropagation()}>
           <View style={styles.handle} />
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>Add {meal.name}</Text>
@@ -181,7 +198,8 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
               <Text style={styles.sectionLabel}>Choose a day</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayRow}>
                 {days.map((d) => {
-                  const disabled = !d.refOrderId || isDayFullyLocked(d.date)
+                  const disabled =
+                    !d.refOrderId || isDayFullyLocked(d.date) || !isMealAvailable({ unavailableMeals }, d.date, meal.id)
                   const active = d.date === selectedDate
                   return (
                     <Pressable
@@ -235,11 +253,18 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
                 Billed on delivery. Removable from My Plan until {slot === 'lunch' ? '8 AM' : '1 PM'} on delivery day.
               </Text>
 
-              {!!error && <Text style={styles.error}>{error}</Text>}
+              {selectedMealUnavailable ? (
+                <Text style={styles.error}>Not available on {selectedDay?.label.toLowerCase()}.</Text>
+              ) : (
+                !!error && <Text style={styles.error}>{error}</Text>
+              )}
 
               <Pressable
-                style={[styles.primaryBtn, (!selectedDay?.refOrderId || selectedSlotLocked || submitting) && styles.primaryBtnDisabled]}
-                disabled={!selectedDay?.refOrderId || selectedSlotLocked || submitting}
+                style={[
+                  styles.primaryBtn,
+                  (!selectedDay?.refOrderId || selectedSlotLocked || selectedMealUnavailable || submitting) && styles.primaryBtnDisabled,
+                ]}
+                disabled={!selectedDay?.refOrderId || selectedSlotLocked || selectedMealUnavailable || submitting}
                 onPress={handleAdd}
               >
                 {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Add to cart</Text>}
@@ -259,7 +284,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 24,
-    paddingBottom: 40,
+    // paddingBottom overridden inline with insets.bottom — a bare 40 sat the
+    // CTA under the home indicator on iPhones with no bottom safe area.
     maxHeight: '85%',
   },
   handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center', marginBottom: 16 },
