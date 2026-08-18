@@ -57,6 +57,16 @@ of what changed. Newest first.
 - **Requires a new native build, not just an OTA update** — adds the Sign in
   with Apple entitlement (native config) and a new native
   `AppleAuthenticationButton`.
+- ⚠️ **The first Android build 8 artifact is dead — use the second one.** It
+  crashed the whole app process during onboarding ("API key not found" from
+  Google Maps). `react-native-maps`' config plugin *removes*
+  `com.google.android.geo.API_KEY` from the AndroidManifest when it isn't
+  passed `androidGoogleMapsApiKey` — it doesn't just skip Android — so the
+  iOS-only plugin config added in the 1.7.1-era iOS build work had been
+  silently deleting the Android key. Fixed by passing both keys; verified
+  against the regenerated manifest. Version deliberately not bumped: the
+  first artifact was never distributed, and both platforms stay on 1.8.0 for
+  the same feature set. iOS was never affected.
 - **Sign in with Apple now actually works.** The button and sign-in code
   already existed but had no native entitlement — `app.json` was missing
   `ios.usesAppleSignIn` and the `expo-apple-authentication` plugin, so
