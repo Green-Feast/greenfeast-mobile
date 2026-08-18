@@ -34,7 +34,7 @@ import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/avai
 import { Colors, Fonts } from '@/constants/colors'
 import { STORY_SLIDES, CHEF_NOTES } from '@/constants/homeContent'
 import { REFERRAL_MESSAGE } from '@/constants/links'
-import { CATEGORIES, CATEGORY_EMOJIS } from '@/constants/categories'
+import { CATEGORIES, CATEGORY_EMOJIS, CATEGORY_IMAGES } from '@/constants/categories'
 import Logo from '@/components/Logo'
 import Skeleton from '@/components/Skeleton'
 import WhatsAppIcon from '@/components/WhatsAppIcon'
@@ -548,7 +548,7 @@ export default function Home() {
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
             {CATEGORIES.filter((c) => c !== 'All').map((cat) => {
-              const catMeal = meals.find((m) => m.category === cat.toLowerCase())
+              const categoryImage = CATEGORY_IMAGES[cat.toLowerCase()]
               return (
                 <Pressable
                   key={cat}
@@ -559,8 +559,12 @@ export default function Home() {
                   }}
                 >
                   <View style={styles.categoryCircle}>
-                    {catMeal?.image_url ? (
-                      <Image source={{ uri: catMeal.image_url }} style={styles.categoryImg} contentFit="cover" cachePolicy="memory-disk" transition={200} />
+                    {categoryImage ? (
+                      // contentFit="contain" (not "cover") — these are square
+                      // transparent icons already sized to fit the circle, not
+                      // full-bleed photos; "cover" would zoom past the padding
+                      // each source image has around its actual icon content.
+                      <Image source={{ uri: categoryImage }} style={styles.categoryImg} contentFit="contain" cachePolicy="memory-disk" transition={200} />
                     ) : (
                       <Text style={styles.categoryEmoji}>{CATEGORY_EMOJIS[cat.toLowerCase()] ?? '🍽️'}</Text>
                     )}
