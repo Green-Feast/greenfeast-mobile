@@ -52,6 +52,71 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.8.0 — 2026-08-18
+- Build 8, OTA 0.
+- **Requires a new native build, not just an OTA update** — adds the Sign in
+  with Apple entitlement (native config) and a new native
+  `AppleAuthenticationButton`.
+- **Sign in with Apple now actually works.** The button and sign-in code
+  already existed but had no native entitlement — `app.json` was missing
+  `ios.usesAppleSignIn` and the `expo-apple-authentication` plugin, so
+  `signInAsync()` threw at runtime. Also swapped the hand-rolled button for
+  Apple's own `AppleAuthenticationButton` (their HIG requires it), and fixed
+  a real bug: `credential.fullName` is only ever returned on the *first*
+  authorization for a given Apple ID and was being discarded, so Apple
+  sign-ups got no `users.name` and Home's greeting rendered blank forever —
+  now persisted on first sign-in.
+- **Fixed the Cashfree onboarding payment bug** (worked fine for wallet
+  top-ups, got stuck spinning forever for a new subscription): the Cashfree
+  SDK's `CFPaymentGatewayService` is a process-wide singleton with exactly
+  one callback slot, and My Plan's wallet-topup screen stays mounted
+  underneath onboarding (expo-router keeps a pushed-from screen alive) —
+  whichever screen's cleanup fired last could silently unhook the other
+  screen's listener, so a completed payment had nothing left to tell the
+  onboarding screen. Both screens now go through a shared token-guarded
+  wrapper so a stale cleanup can't tear down a listener that's still live.
+  Also fixed the error message shown on failure: it was always the generic
+  "Edge Function returned a non-2xx status code" regardless of the actual
+  problem, because supabase-js never parses a non-2xx response body into
+  `data` — the real `{ error: "..." }` body only lives in
+  `error.context.json()`, which nothing was reading.
+- **Sign-in screen redesign**: progressive disclosure (Google/Apple/email
+  choice first, the email form only appears once chosen — removes the old
+  screen's dead space without a layout trick), implied consent (deleted the
+  checkbox — a pre-ticked box is the exact pattern regulators treat as
+  invalid; replaced with a plain notice under the buttons), a real
+  Google-branded button (was a blue "G" text glyph, not Google's mark), and
+  a taller top-anchored hero photo instead of a fixed 200pt banner that
+  cropped about half the bowl.
+- **Admin can now set per-date meal/add-on availability and "Today's
+  Special"** from the Kitchen tab. Subscribers see unavailable items greyed
+  out with a reason (Menu, My Plan's day cart, the add-to-day sheet) rather
+  than hidden — already-scheduled orders are never touched, only new
+  choices for that date. Home's daily picks are now admin-controlled
+  (falling back to the old rotation when nothing's set) and renamed to
+  "Today's Special"; tapping a card now opens the same full dish detail view
+  Menu uses (previously did nothing), with a real "Add to cart" that targets
+  the next open delivery by name (e.g. "Add to today's dinner").
+- **My Plan**: add-ons can now be added at more than one portion (a
+  stepper, same as the existing meal-portion control — previously capped at
+  one). Days that were never scheduled in your default plan (e.g. a weekday
+  you didn't select) can now have a dish added directly instead of being a
+  dead end with no way to open the day's editor.
+- **Menu tab** cards show a short description instead of the protein/kcal
+  badges (full nutrition still shown on the dish detail view).
+- Fixed a live pricing bug: every meal swap showed "+₹20" even when it was
+  actually the free counterpart-menu dish, because the app's own key had no
+  read permission on the table that determines free swaps (`switch-meal`
+  charged correctly server-side the whole time — only the displayed price
+  was wrong).
+- Various iOS-specific fixes found auditing for the platform: a carousel
+  that could permanently desync after a rotation/split-screen (stale
+  cached window width, never a Home-visible bug on a phone that's never
+  rotated, but a real one), a shadow missing its offset (rendered as a
+  symmetric halo on iOS instead of a cast shadow), a few tap targets under
+  Apple's 44pt minimum, and font-scaling caps on a handful of fixed-width
+  labels so very large accessibility text sizes don't clip them.
+
 ### 1.7.1 — 2026-08-13
 - Build 7, OTA 1.
 - Optimized app image loading performance:
