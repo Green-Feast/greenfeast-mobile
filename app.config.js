@@ -15,6 +15,15 @@
 // pod that no longer exists, which fails `pod install`. The bundled plugin writes
 // the correct pod line itself, so ios.config.googleMapsApiKey must stay unset —
 // setting both would run two competing Podfile mods.
+//
+// ⚠️ BOTH keys must be passed to that plugin, not just the iOS one. Its Android
+// mod is not "set the key if given, otherwise leave the manifest alone" — the
+// else-branch actively REMOVES `com.google.android.geo.API_KEY` from the
+// AndroidManifest (see node_modules/react-native-maps/plugin/build/android.js).
+// Passing iOS-only silently stripped the key that expo.android.config.googleMaps
+// had just added, and Google Maps then hard-crashes the whole app process with
+// "API key not found" from a background thread the moment a map initialises —
+// which is what shipped in build 8 (1.8.0).
 const appJson = require('./app.json')
 
 module.exports = () => {
@@ -33,7 +42,13 @@ module.exports = () => {
     },
     plugins: [
       ...expo.plugins,
-      ['react-native-maps', { iosGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY_IOS }],
+      [
+        'react-native-maps',
+        {
+          iosGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY_IOS,
+          androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY_ANDROID,
+        },
+      ],
     ],
   }
 }
