@@ -27,6 +27,7 @@ import AddToDaySheet from '@/components/AddToDaySheet'
 import MealDetailModal, { type MealDetail, type MealDetailPrimaryAction } from '@/components/MealDetailModal'
 import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/withTimeout'
+import { logColdStart } from '@/lib/coldStartLog'
 import { istToday, istHour, addDaysISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
@@ -227,6 +228,7 @@ export default function Home() {
     setFetchError(false)
     const today = istToday()
 
+    logColdStart('Home fetchData starting')
     try {
       // Bounded so a stalled request surfaces the error state's Retry button
       // rather than leaving the skeleton up indefinitely.
@@ -259,6 +261,7 @@ export default function Home() {
         HOME_FETCH_TIMEOUT_MS,
         'home data'
       )
+      logColdStart('Home fetchData resolved')
 
       if (userRes.data?.name) setUserName(userRes.data.name)
       setSubscription((subRes.data as unknown as Subscription) ?? null)

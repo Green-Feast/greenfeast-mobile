@@ -23,12 +23,14 @@ import {
 } from '@expo-google-fonts/inter'
 import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/withTimeout'
+import { logColdStart } from '@/lib/coldStartLog'
 import { useAuthStore } from '@/store/auth'
 import { useOtaNotifications } from '@/hooks/useOtaNotifications'
 import { Colors } from '@/constants/colors'
 import { LEGAL_LAST_UPDATED } from '@/constants/legal'
 
 SplashScreen.preventAutoHideAsync()
+logColdStart('module evaluated')
 
 // Ceilings for the two network waits that gate the whole app's first render.
 // Generous enough not to trip a genuinely slow-but-working connection, short
@@ -42,6 +44,7 @@ function AuthGate() {
   const { session, phone, onboarded, loading, profileLoading, setSession, setProfileLoaded } = useAuthStore()
 
   useEffect(() => {
+    logColdStart('AuthGate mounted, session-restore effect running')
     // Cold-start safety net. supabase-js emits INITIAL_SESSION (the only thing
     // that flips `loading` to false) only after it has restored the session —
     // and when the stored access token has expired, that restore refreshes it
@@ -66,6 +69,7 @@ function AuthGate() {
     }, SESSION_RESTORE_TIMEOUT_MS)
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      logColdStart(`onAuthStateChange fired: event=${_event} session=${session ? 'present' : 'null'}`)
       clearTimeout(restoreTimer)
       // Unblock every tab's own data fetch (Home, My Plan, Account) the
       // moment the session itself is known — they only ever needed
@@ -80,6 +84,7 @@ function AuthGate() {
         // wait and the catch falls back to "unknown" values so the redirect
         // logic can proceed. A genuinely returning user just retries once the
         // network recovers.
+        logColdStart('profile lookup starting')
         try {
           const [{ data }, { count }] = await withTimeout(
             Promise.all([
@@ -93,8 +98,10 @@ function AuthGate() {
             PROFILE_LOOKUP_TIMEOUT_MS,
             'profile lookup'
           )
+          logColdStart(`profile lookup resolved: phone=${data?.phone ? 'present' : 'null'} onboarded=${data?.onboarded}`)
           setProfileLoaded(data?.phone ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
         } catch (err) {
+          logColdStart(`profile lookup failed/timed out: ${err}`)
           console.warn('[AuthGate] profile lookup failed:', err)
           setProfileLoaded(null, false, false)
         }
@@ -127,6 +134,8 @@ function AuthGate() {
     // effect (unlike each tab's own fetch) waits on both.
     if (loading || profileLoading) return
 
+    logColdStart(`redirect effect evaluating: segments=${JSON.stringify(segments)} session=${session ? 'present' : 'null'} phone=${phone ? 'present' : 'null'} onboarded=${onboarded}`)
+
     const inAuthGroup = segments[0] === '(auth)'
     const inOnboardingGroup = segments[0] === '(onboarding)'
     const inAppGroup = segments[0] === '(app)'
@@ -138,19 +147,28 @@ function AuthGate() {
     if (!session) {
       // Guests can browse /(app)/ and authenticate via /(auth)/.
       // Anything else → send to tabs.
-      if (!inAppGroup && !inAuthGroup) router.replace('/(app)/(tabs)')
+      if (!inAppGroup && !inAuthGroup) {
+        logColdStart('redirect -> /(app)/(tabs) [no session]')
+        router.replace('/(app)/(tabs)')
+      }
       return
     }
 
     // Signed in but phone not yet verified — start onboarding
     if (!phone) {
-      if (!inOnboardingGroup) router.replace('/(onboarding)/name')
+      if (!inOnboardingGroup) {
+        logColdStart('redirect -> /(onboarding)/name [no phone]')
+        router.replace('/(onboarding)/name')
+      }
       return
     }
 
     // Phone verified but onboarding not complete — send to 3C (What Would You Like?)
     if (!onboarded) {
-      if (!inOnboardingGroup) router.replace('/(onboarding)/gate')
+      if (!inOnboardingGroup) {
+        logColdStart('redirect -> /(onboarding)/gate [not onboarded]')
+        router.replace('/(onboarding)/gate')
+      }
       return
     }
 
@@ -201,7 +219,10 @@ export default function RootLayout() {
   })
 
   useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync()
+    if (fontsLoaded) {
+      logColdStart('fonts loaded, hiding splash + mounting AuthGate')
+      SplashScreen.hideAsync()
+    }
   }, [fontsLoaded])
 
   if (!fontsLoaded) {
