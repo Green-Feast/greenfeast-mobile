@@ -9,6 +9,7 @@ import {
   Linking,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -23,6 +24,8 @@ import {
   ChevronUp,
   ChevronRight,
   RefreshCw,
+  AlertTriangle,
+  Trash2,
 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
@@ -88,6 +91,57 @@ export default function AccountScreen() {
   const [resetError, setResetError] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleteImpact, setDeleteImpact] = useState<{ walletBalance: number; hasActiveSub: boolean; deliveriesRemaining: number } | null>(null)
+  const [deleteImpactLoading, setDeleteImpactLoading] = useState(false)
+  const [deleteTypedText, setDeleteTypedText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  async function openDeleteConfirm() {
+    setDeleteConfirm(true)
+    setDeleteTypedText('')
+    setDeleteError('')
+    setDeleteImpactLoading(true)
+    try {
+      const [walletRes, subRes] = await Promise.all([
+        supabase.from('wallets').select('balance').eq('user_id', user!.id).maybeSingle(),
+        supabase.from('subscriptions').select('status, deliveries_remaining').eq('user_id', user!.id).in('status', ['active', 'paused']).maybeSingle(),
+      ])
+      setDeleteImpact({
+        walletBalance: walletRes.data?.balance ?? 0,
+        hasActiveSub: !!subRes.data,
+        deliveriesRemaining: subRes.data?.deliveries_remaining ?? 0,
+      })
+    } catch {
+      setDeleteImpact({ walletBalance: 0, hasActiveSub: false, deliveriesRemaining: 0 })
+    } finally {
+      setDeleteImpactLoading(false)
+    }
+  }
+
+  async function handleDeleteAccount() {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+
+      const { error } = await supabase.functions.invoke('delete-user-data', {
+        body: { deleteAuthUser: true },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (error) throw error
+
+      setDeleteConfirm(false)
+      await signOut()
+      router.replace('/(auth)/login' as any)
+    } catch (e) {
+      setDeleteError((e as any)?.message ?? 'Delete failed — please try again or contact support.')
+      setDeleting(false)
+    }
+  }
 
   async function fetchData() {
     if (!user) return
@@ -297,6 +351,16 @@ export default function AccountScreen() {
               <Text style={[styles.rowLabel, { color: Colors.danger }]}>Dev: Reset all data</Text>
             </Pressable>
           )}
+
+          {user && (
+            <Pressable
+              style={({ pressed }) => [styles.row, styles.rowDanger, pressed && styles.rowPressed]}
+              onPress={openDeleteConfirm}
+            >
+              <Trash2 size={18} color={Colors.danger} />
+              <Text style={[styles.rowLabel, { color: Colors.danger }]}>Delete my account</Text>
+            </Pressable>
+          )}
         </View>
 
         <Text style={styles.version}>GreenFeast v{APP_VERSION_STRING}</Text>
@@ -336,6 +400,74 @@ export default function AccountScreen() {
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={styles.modalBtnDangerText}>Reset</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {/* Delete account confirm */}
+      <Modal visible={deleteConfirm} transparent animationType="fade" onRequestClose={() => !deleting && setDeleteConfirm(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, styles.deleteModalCard]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.deleteWarnIcon}>
+                <AlertTriangle size={28} color={Colors.danger} />
+              </View>
+              <Text style={styles.modalTitle}>Delete your account?</Text>
+              <Text style={styles.modalDesc}>This permanently deletes your GreenFeast account and cannot be undone.</Text>
+
+              {deleteImpactLoading ? (
+                <ActivityIndicator color={Colors.danger} style={{ marginVertical: 12 }} />
+              ) : (
+                <View style={styles.deleteImpactBox}>
+                  {deleteImpact && deleteImpact.walletBalance > 0 && (
+                    <Text style={styles.deleteImpactLine}>
+                      • You'll <Text style={styles.deleteImpactBold}>lose ₹{deleteImpact.walletBalance.toFixed(2)}</Text> currently in your wallet. It cannot be refunded once your account is deleted.
+                    </Text>
+                  )}
+                  {deleteImpact?.hasActiveSub && (
+                    <Text style={styles.deleteImpactLine}>
+                      • Your <Text style={styles.deleteImpactBold}>active subscription will be cancelled</Text>, including {deleteImpact.deliveriesRemaining} remaining {deleteImpact.deliveriesRemaining === 1 ? 'delivery' : 'deliveries'}. Any deliveries already scheduled will not arrive.
+                    </Text>
+                  )}
+                  <Text style={styles.deleteImpactLine}>
+                    • Your profile, dietary info, saved addresses, and order history will all be permanently erased.
+                  </Text>
+                  <Text style={styles.deleteImpactLine}>
+                    • You will be signed out immediately and this cannot be reversed — there is no way for us to recover a deleted account.
+                  </Text>
+                </View>
+              )}
+
+              <Text style={styles.deleteTypeLabel}>Type <Text style={styles.deleteImpactBold}>DELETE</Text> to confirm</Text>
+              <TextInput
+                style={styles.deleteTypeInput}
+                value={deleteTypedText}
+                onChangeText={setDeleteTypedText}
+                placeholder="DELETE"
+                placeholderTextColor={Colors.ink400}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                editable={!deleting}
+              />
+
+              {deleteError ? <Text style={styles.resetError}>{deleteError}</Text> : null}
+            </ScrollView>
+
+            <View style={styles.modalButtons}>
+              <Pressable style={[styles.modalBtn, styles.modalBtnGhost]} onPress={() => setDeleteConfirm(false)} disabled={deleting}>
+                <Text style={styles.modalBtnGhostText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalBtn, styles.modalBtnDanger, deleteTypedText.trim().toUpperCase() !== 'DELETE' && styles.modalBtnDisabled]}
+                onPress={handleDeleteAccount}
+                disabled={deleting || deleteTypedText.trim().toUpperCase() !== 'DELETE'}
+              >
+                {deleting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.modalBtnDangerText}>Delete permanently</Text>
                 )}
               </Pressable>
             </View>
@@ -449,5 +581,22 @@ const styles = StyleSheet.create({
   modalBtnPrimaryText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
   modalBtnDanger: { backgroundColor: Colors.danger },
   modalBtnDangerText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
+  modalBtnDisabled: { opacity: 0.4 },
   resetError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginBottom: 12, textAlign: 'center' },
+
+  deleteModalCard: { maxWidth: 340, maxHeight: '80%' },
+  deleteWarnIcon: {
+    alignSelf: 'center', width: 52, height: 52, borderRadius: 26,
+    backgroundColor: Colors.dangerLight, alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+  },
+  deleteImpactBox: {
+    backgroundColor: Colors.dangerLight, borderRadius: 12, padding: 12, marginBottom: 16, gap: 8,
+  },
+  deleteImpactLine: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink900, lineHeight: 19 },
+  deleteImpactBold: { fontFamily: Fonts.bodyBold, color: Colors.danger },
+  deleteTypeLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink600, marginBottom: 8 },
+  deleteTypeInput: {
+    borderWidth: 1.5, borderColor: Colors.ink100, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.ink900, marginBottom: 12, letterSpacing: 1,
+  },
 })
