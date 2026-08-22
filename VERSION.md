@@ -52,6 +52,34 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.0 — 2026-08-22
+- Build 9, OTA 0.
+- **Real account deletion.** "Delete my account" in Account actually deletes
+  the auth identity (not just app data) — snapshotted first into a new
+  admin-only `deleted_accounts` archive, so support can still see order/
+  wallet history without the account being recoverable. Same Google/Apple ID
+  signing in again now creates a genuinely fresh account.
+- **Cold-start bug fix**, confirmed via on-device logcat: a slow profile
+  lookup on cold launch was defaulting `phone` to null on timeout, which
+  force-navigated returning users into onboarding's name screen. Fixed —
+  a timeout/failure never overwrites phone/onboarded anymore. Also added a
+  local cache of the last known profile state so a returning user's routing
+  resolves in ~150ms instead of waiting on the network at all.
+- **All dev-only bypass UI removed** — no more skip-login, skip-payment, or
+  fake-wallet-credit shortcuts in any build, including preview. Closed
+  testers now go through the real OTP/OAuth and Cashfree flows.
+- **Admin-editable menu catalogue.** New admin "Menu" page: create/edit/
+  archive dishes and categories, with an in-browser image pipeline
+  (auto-converts to optimized WebP at two sizes + a blur placeholder — no
+  more manual Python scripts + app release to change the menu). Two flags
+  per dish (`menu_visible`, `subscription_valid`) control whether it's
+  browsable and/or orderable independently — a dish can be takeaway-only,
+  shown with a Swiggy/Zomato link instead of Add-to-cart. Categories moved
+  from a hardcoded array to a real table; defaults preserve today's exact
+  menu with zero visible change until an admin edits something.
+- iOS-only global scale increase — deferred to a future release; not in this
+  build.
+
 ### 1.8.0 — 2026-08-18
 - Build 8, OTA 0.
 - **Requires a new native build, not just an OTA update** — adds the Sign in

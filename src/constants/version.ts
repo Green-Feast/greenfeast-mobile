@@ -16,7 +16,7 @@
  */
 export const APP_VERSION = {
   major: 1,
-  build: 8,
+  build: 9,
   ota: 0,
 } as const
 
