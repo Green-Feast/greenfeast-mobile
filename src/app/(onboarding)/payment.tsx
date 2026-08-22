@@ -20,7 +20,6 @@ import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import { useAuthStore } from '@/store/auth'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
-import { SHOW_DEV_SKIP } from '@/constants/dev'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 
@@ -358,26 +357,6 @@ export default function PaymentScreen() {
     return setActiveCashfreeCallback(callback)
   }, [])
 
-  async function handleDevSkip() {
-    setError('')
-    setPhase('creating')
-    try {
-      const subId = await createRecords()
-      setSubscriptionId(subId)
-      await activateSubscription(subId)
-      const { data: { session } } = await supabase.auth.getSession()
-      await supabase.functions.invoke('instantiate-orders', {
-        body: { subscription_id: subId },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      })
-      await fundWallet(subId) // gives the wallet real (test) money to exercise billing
-      setPhase('success')
-    } catch (e: any) {
-      setError(e?.message ?? 'Dev skip failed')
-      setPhase('summary')
-    }
-  }
-
   // ── Main summary screen ──────────────────────────────────────────────────
   return (
     <View style={styles.container}>
@@ -460,16 +439,6 @@ export default function PaymentScreen() {
         )}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        {SHOW_DEV_SKIP && (
-          <TouchableOpacity
-            style={styles.devBtn}
-            onPress={handleDevSkip}
-            disabled={phase === 'creating'}
-          >
-            <Text style={styles.devBtnText}>Dev: Skip Payment</Text>
-          </TouchableOpacity>
-        )}
       </ScrollView>
 
       {/* CTA */}
@@ -626,6 +595,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
-  devBtn: { marginTop: 16, alignItems: 'center', padding: 10 },
-  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink400, textDecorationLine: 'underline' },
 })

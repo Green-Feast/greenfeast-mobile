@@ -159,7 +159,6 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showAddMoney, setShowAddMoney] = useState(false)
-  const [funding, setFunding] = useState(false)
   const [freeMealIds, setFreeMealIds] = useState<Set<string>>(new Set())
   const [topupAmountPaise, setTopupAmountPaise] = useState(50000) // ₹500 default
   const [topupCustom, setTopupCustom] = useState('')
@@ -534,29 +533,6 @@ export default function SubscriptionScreen() {
       console.error('createTopupOrder:', e)
     } finally {
       setCreatingTopup(false)
-    }
-  }
-
-  async function handleAddMoneyDev() {
-    if (!user) return
-    const amount = topupCustom ? Math.round(parseFloat(topupCustom) * 100) : topupAmountPaise
-    if (!amount || amount < 10000) return
-    setFunding(true)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) throw new Error('Not authenticated')
-      await supabase.rpc('wallet_credit', {
-        p_user: user.id,
-        p_amount: amount,
-        p_reason: 'Wallet top-up',
-        p_reference_id: `dev-topup-${Date.now()}`,
-      })
-      setShowAddMoney(false)
-      await fetchAll()
-    } catch {
-      /* silent */
-    } finally {
-      setFunding(false)
     }
   }
 
@@ -1530,20 +1506,6 @@ export default function SubscriptionScreen() {
                   : <Text style={s.addMoneyBtnText}>Add money</Text>}
               </Pressable>
 
-              {__DEV__ && (
-                <Pressable
-                  style={({ pressed }) => [s.addMoneyBtn, s.addMoneyBtnDev, pressed && { opacity: 0.8 }]}
-                  onPress={handleAddMoneyDev}
-                  disabled={funding}
-                >
-                  {funding ? (
-                    <ActivityIndicator size="small" color={Colors.primary} />
-                  ) : (
-                    <Text style={s.addMoneyBtnDevText}>Dev: Fake credit</Text>
-                  )}
-                </Pressable>
-              )}
-
               <Pressable
                 style={({ pressed }) => [s.viewTransactionsBtn, pressed && { opacity: 0.75 }]}
                 onPress={() => { setShowAddMoney(false); fetchTransactions(); setShowTransactions(true) }}
@@ -1732,8 +1694,6 @@ const s = StyleSheet.create({
     alignItems: 'center', marginBottom: 10,
   },
   addMoneyBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: '#fff' },
-  addMoneyBtnDev: { backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primary },
-  addMoneyBtnDevText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
   viewTransactionsBtn: {
     borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 4,
     borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: 'transparent',

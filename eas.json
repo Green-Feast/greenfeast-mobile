@@ -20,8 +20,7 @@
       },
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://amwwjcwoumhbdxaxvexj.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_kxDMXb9_79bl9LoWVwcF0A_o2Q_uTXM",
-        "EXPO_PUBLIC_DEV_SKIP": "1"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_kxDMXb9_79bl9LoWVwcF0A_o2Q_uTXM"
       }
     },
     "production": {

@@ -31,7 +31,6 @@ import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
-import { SHOW_DEV_SKIP } from '@/constants/dev'
 import { APP_VERSION_STRING } from '@/constants/version'
 import { REFERRAL_MESSAGE } from '@/constants/links'
 import Skeleton from '@/components/Skeleton'
@@ -58,37 +57,11 @@ export default function AccountScreen() {
     router.replace('/(auth)/login' as any)
   }
 
-  async function handleDevReset() {
-    setResetConfirm(false)
-    setResetting(true)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) throw new Error('Not authenticated')
-
-      // Call edge function to delete all user data
-      const { error } = await supabase.functions.invoke('delete-user-data', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-
-      if (error) throw error
-
-      // Clear local state and redirect to onboarding
-      await signOut()
-      router.replace('/(onboarding)/health')
-    } catch (e) {
-      setResetError((e as any)?.message ?? 'Reset failed')
-      setResetting(false)
-    }
-  }
-
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [faqExpanded, setFaqExpanded] = useState(false)
   const [openFaq, setOpenFaq] = useState<number | null>(null)
   const [logoutConfirm, setLogoutConfirm] = useState(false)
-  const [resetConfirm, setResetConfirm] = useState(false)
-  const [resetting, setResetting] = useState(false)
-  const [resetError, setResetError] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
@@ -342,16 +315,6 @@ export default function AccountScreen() {
             </Pressable>
           )}
 
-          {user && SHOW_DEV_SKIP && (
-            <Pressable
-              style={({ pressed }) => [styles.row, styles.rowDanger, pressed && styles.rowPressed]}
-              onPress={() => setResetConfirm(true)}
-            >
-              <RefreshCw size={18} color={Colors.danger} />
-              <Text style={[styles.rowLabel, { color: Colors.danger }]}>Dev: Reset all data</Text>
-            </Pressable>
-          )}
-
           {user && (
             <Pressable
               style={({ pressed }) => [styles.row, styles.rowDanger, pressed && styles.rowPressed]}
@@ -384,28 +347,6 @@ export default function AccountScreen() {
         </View>
       </Modal>
 
-      {/* Dev reset confirm */}
-      <Modal visible={resetConfirm} transparent animationType="fade" onRequestClose={() => !resetting && setResetConfirm(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>🧹 Reset all data?</Text>
-            <Text style={styles.modalDesc}>This will delete your subscriptions, orders, profile, and dietary info. You'll start the onboarding fresh.</Text>
-            {resetError && <Text style={styles.resetError}>{resetError}</Text>}
-            <View style={styles.modalButtons}>
-              <Pressable style={[styles.modalBtn, styles.modalBtnGhost]} onPress={() => setResetConfirm(false)} disabled={resetting}>
-                <Text style={styles.modalBtnGhostText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalBtnDanger]} onPress={handleDevReset} disabled={resetting}>
-                {resetting ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.modalBtnDangerText}>Reset</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
       {/* Delete account confirm */}
       <Modal visible={deleteConfirm} transparent animationType="fade" onRequestClose={() => !deleting && setDeleteConfirm(false)}>
         <View style={styles.modalOverlay}>

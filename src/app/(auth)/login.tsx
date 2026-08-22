@@ -29,7 +29,6 @@ import { makeRedirectUri } from 'expo-auth-session'
 import * as AppleAuthentication from 'expo-apple-authentication'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
-import { SHOW_DEV_LOGIN, DEV_LOGIN_EMAIL, DEV_LOGIN_PASSWORD } from '@/constants/dev'
 import Logo from '@/components/Logo'
 import GoogleIcon from '@/components/GoogleIcon'
 
@@ -395,17 +394,6 @@ export default function LoginScreen() {
         )}
 
         <View style={styles.consentWrap}>{consentNotice}</View>
-
-        {SHOW_DEV_LOGIN && DEV_LOGIN_EMAIL && (
-          <TouchableOpacity
-            style={styles.devBtn}
-            onPress={async () => {
-              await supabase.auth.signInWithPassword({ email: DEV_LOGIN_EMAIL, password: DEV_LOGIN_PASSWORD })
-            }}
-          >
-            <Text style={styles.devBtnText}>Dev: Skip Login</Text>
-          </TouchableOpacity>
-        )}
       </ScrollView>
     </KeyboardAvoidingView>
   )
@@ -562,6 +550,4 @@ const styles = StyleSheet.create({
     color: Colors.green700,
     textDecorationLine: 'underline',
   },
-  devBtn: { alignItems: 'center', padding: 10 },
-  devBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink300, textDecorationLine: 'underline' },
 })

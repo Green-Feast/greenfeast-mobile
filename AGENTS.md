@@ -69,11 +69,11 @@ reflect the latest commits, that's expected, not a bug to fix.
   identical to "updates download but never apply," with zero errors in
   `Updates.readLogEntriesAsync()`; the giveaways are the Expo dashboard's "Known crashes"
   count on the update, a brief grey flash on the first launch attempt, and
-  `UpdatesErrorRecovery: falling back to older update` in logcat. The six required vars now
+  `UpdatesErrorRecovery: falling back to older update` in logcat. The required vars now
   live in the EAS **preview** environment (`eas env:list --environment preview` to verify);
-  the **production** environment must get the same vars (minus `EXPO_PUBLIC_DEV_SKIP`)
-  **before** the first production OTA is ever published. Note: a blacklisted update is dead
-  on that device — publish a new (fixed) update rather than expecting the old one to retry.
+  the **production** environment must get the same vars **before** the first production OTA
+  is ever published. Note: a blacklisted update is dead on that device — publish a new
+  (fixed) update rather than expecting the old one to retry.
 - `tsconfig.json`'s `@/assets/*` path alias maps to the **project-root** `assets/` folder,
   not `src/assets/` — the more general `@/*` → `./src/*` alias does NOT cover it. Any asset
   `require()`d via `@/assets/...` must physically live in root `assets/`, or Metro fails to
