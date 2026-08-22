@@ -38,10 +38,53 @@ logColdStart('module evaluated')
 const SESSION_RESTORE_TIMEOUT_MS = 10000
 const PROFILE_LOOKUP_TIMEOUT_MS = 10000
 
+// Profile lookup can fail on a slow/cold connection independently of session
+// restore (confirmed on-device: session restore settling in ~150ms while
+// this same-priority query still stalls past its own timeout). Extracted so
+// it can be retried without duplicating the query/timeout/error-handling.
+async function fetchProfile(userId: string) {
+  logColdStart('profile lookup starting')
+  const [{ data }, { count }] = await withTimeout(
+    Promise.all([
+      supabase.from('users').select('phone, onboarded').eq('id', userId).single(),
+      supabase
+        .from('subscriptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)'),
+    ]),
+    PROFILE_LOOKUP_TIMEOUT_MS,
+    'profile lookup'
+  )
+  logColdStart(`profile lookup resolved: phone=${data?.phone ? 'present' : 'null'} onboarded=${data?.onboarded}`)
+  useAuthStore.getState().setProfileLoaded(data?.phone ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
+}
+
+const PROFILE_LOOKUP_RETRY_DELAY_MS = 3000
+const PROFILE_LOOKUP_MAX_ATTEMPTS = 2
+
+// A timeout/network error is not evidence someone is a new user — it's
+// evidence we don't know yet. One quick retry covers a merely-slow first
+// request; if that also fails, give up and mark it failed rather than ever
+// defaulting phone/onboarded to "confirmed absent".
+async function fetchProfileWithRetry(userId: string, attempt = 0) {
+  try {
+    await fetchProfile(userId)
+  } catch (err) {
+    logColdStart(`profile lookup failed/timed out (attempt ${attempt + 1}/${PROFILE_LOOKUP_MAX_ATTEMPTS}): ${err}`)
+    console.warn('[AuthGate] profile lookup failed:', err)
+    if (attempt + 1 < PROFILE_LOOKUP_MAX_ATTEMPTS) {
+      setTimeout(() => fetchProfileWithRetry(userId, attempt + 1), PROFILE_LOOKUP_RETRY_DELAY_MS)
+    } else {
+      useAuthStore.getState().setProfileLookupFailed()
+    }
+  }
+}
+
 function AuthGate() {
   const router = useRouter()
   const segments = useSegments()
-  const { session, phone, onboarded, loading, profileLoading, setSession, setProfileLoaded } = useAuthStore()
+  const { session, phone, onboarded, loading, profileLoading, profileLookupFailed, cachedUserId, hasHydrated, setSession, setProfileLoaded, beginProfileLookup } = useAuthStore()
 
   useEffect(() => {
     logColdStart('AuthGate mounted, session-restore effect running')
@@ -78,33 +121,12 @@ function AuthGate() {
       setSession(session)
 
       if (session) {
-        // This lookup must never leave profileLoading stuck true — that would
-        // hang the redirect effect below indefinitely. Neither a rejection nor
-        // an indefinitely-pending request can do so: the timeout bounds the
-        // wait and the catch falls back to "unknown" values so the redirect
-        // logic can proceed. A genuinely returning user just retries once the
-        // network recovers.
-        logColdStart('profile lookup starting')
-        try {
-          const [{ data }, { count }] = await withTimeout(
-            Promise.all([
-              supabase.from('users').select('phone, onboarded').eq('id', session.user.id).single(),
-              supabase
-                .from('subscriptions')
-                .select('id', { count: 'exact', head: true })
-                .eq('user_id', session.user.id)
-                .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)'),
-            ]),
-            PROFILE_LOOKUP_TIMEOUT_MS,
-            'profile lookup'
-          )
-          logColdStart(`profile lookup resolved: phone=${data?.phone ? 'present' : 'null'} onboarded=${data?.onboarded}`)
-          setProfileLoaded(data?.phone ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
-        } catch (err) {
-          logColdStart(`profile lookup failed/timed out: ${err}`)
-          console.warn('[AuthGate] profile lookup failed:', err)
-          setProfileLoaded(null, false, false)
-        }
+        // Re-arm profileLoading even if an earlier lookup (for a previous
+        // session event) already flipped it false — otherwise the redirect
+        // effect below acts on stale phone/onboarded defaults the instant
+        // this new session lands, before its own lookup has resolved.
+        beginProfileLookup()
+        await fetchProfileWithRetry(session.user.id)
 
         // Record Terms/Privacy consent exactly once per account, the moment
         // any session is first established. Safe to run unconditionally on
@@ -130,11 +152,25 @@ function AuthGate() {
   }, [])
 
   useEffect(() => {
-    // Redirect decisions need phone/onboarded, not just the session, so this
-    // effect (unlike each tab's own fetch) waits on both.
-    if (loading || profileLoading) return
+    // hasHydrated gates on reading the persisted profile cache back in —
+    // near-instant (AsyncStorage), but still async, and `phone === null`
+    // before it resolves is indistinguishable from "confirmed no phone".
+    if (loading || !hasHydrated) return
 
-    logColdStart(`redirect effect evaluating: segments=${JSON.stringify(segments)} session=${session ? 'present' : 'null'} phone=${phone ? 'present' : 'null'} onboarded=${onboarded}`)
+    const currentUserId = session?.user?.id ?? null
+    // Trustworthy for routing either because the persisted cache belongs to
+    // exactly this signed-in user (instant — lets a returning user route
+    // straight to Home before any network call lands) or because the live
+    // profile lookup for this session has actually completed. A timeout or
+    // failure is neither: see fetchProfileWithRetry/setProfileLookupFailed
+    // below — those never touch phone/onboarded, so a mismatched-user cache
+    // (or no cache at all) plus a stalled lookup correctly falls through to
+    // "not trusted yet" rather than being misread as "confirmed no phone".
+    const profileTrusted =
+      (cachedUserId !== null && cachedUserId === currentUserId) ||
+      (!profileLoading && !profileLookupFailed)
+
+    logColdStart(`redirect effect evaluating: segments=${JSON.stringify(segments)} session=${session ? 'present' : 'null'} phone=${phone ? 'present' : 'null'} onboarded=${onboarded} profileTrusted=${profileTrusted}`)
 
     const inAuthGroup = segments[0] === '(auth)'
     const inOnboardingGroup = segments[0] === '(onboarding)'
@@ -153,6 +189,14 @@ function AuthGate() {
       }
       return
     }
+
+    // Signed in, but we don't yet have trustworthy phone/onboarded for THIS
+    // user — either the cache belongs to someone else (or doesn't exist)
+    // and the live lookup hasn't resolved, or it resolved and failed. Never
+    // force onboarding off that — it would wrongly bounce a real returning
+    // user. Stay exactly where they are; a later successful lookup (retry,
+    // or reopening the app) corrects the route then.
+    if (!profileTrusted) return
 
     // Signed in but phone not yet verified — start onboarding
     if (!phone) {
@@ -180,7 +224,7 @@ function AuthGate() {
     if (inAuthGroup || (inOnboardingGroup && IDENTITY_SCREENS.includes(segments[1] ?? ''))) {
       router.replace('/(app)/(tabs)')
     }
-  }, [session, phone, onboarded, loading, profileLoading, segments])
+  }, [session, phone, onboarded, loading, profileLoading, profileLookupFailed, cachedUserId, hasHydrated, segments])
 
   // Stack instead of Slot so the whole app has one real navigation history —
   // back/swipe-back always returns to the literal previous screen, matching
