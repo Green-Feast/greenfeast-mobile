@@ -19,15 +19,13 @@ import { supabase } from '@/lib/supabase'
 import { istToday } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useAvailabilityStore, isMealAvailable } from '@/store/availability'
+import { useCategoriesStore, categoryEmoji } from '@/store/categories'
 import { Colors, Fonts } from '@/constants/colors'
 import { SWIGGY_URL, ZOMATO_URL, KITCHEN_MAPS_URL, isConfigured } from '@/constants/links'
-import { CATEGORIES, CATEGORY_EMOJIS } from '@/constants/categories'
 import Skeleton from '@/components/Skeleton'
 import AddToDaySheet from '@/components/AddToDaySheet'
 import MealDetailModal, { type MealDetail } from '@/components/MealDetailModal'
 import * as Haptics from 'expo-haptics'
-
-export { CATEGORIES, CATEGORY_EMOJIS }
 
 // short_description is card-only — the detail modal keeps showing the full
 // description, where the longer ingredient lists are genuinely useful.
@@ -50,17 +48,22 @@ export default function MenuScreen() {
   const today = istToday()
   const unavailableMeals = useAvailabilityStore((s) => s.unavailableMeals)
   const ensureFreshAvailability = useAvailabilityStore((s) => s.ensureFresh)
+  const categories = useCategoriesStore((s) => s.categories)
+  const loadCategories = useCategoriesStore((s) => s.load)
 
-  // Category deeplink from Home (e.g. /(app)/(tabs)/menu?category=Bowl).
+  // Category deeplink from Home (e.g. /(app)/(tabs)/menu?category=bowl) —
+  // Home pushes the category's id (lowercase slug), matched case-insensitively
+  // in case anything ever links in with different casing.
   useEffect(() => {
     if (!params.category) return
-    const match = CATEGORIES.find((c) => c.toLowerCase() === params.category!.toLowerCase())
-    if (match) setActiveCategory(match)
-  }, [params.category])
+    const match = categories.find((c) => c.id.toLowerCase() === params.category!.toLowerCase())
+    if (match) setActiveCategory(match.id)
+  }, [params.category, categories])
 
   useEffect(() => {
     ensureFreshAvailability()
-  }, [ensureFreshAvailability])
+    loadCategories()
+  }, [ensureFreshAvailability, loadCategories])
 
   useEffect(() => {
     if (authLoading) return
@@ -68,13 +71,14 @@ export default function MenuScreen() {
       try {
         const { data } = await supabase
           .from('meal_templates')
-          .select('id, name, category, description, short_description, price, kcal, protein, carbs, fat, tags, image_url')
+          .select('id, name, category, description, short_description, price, kcal, protein, carbs, fat, tags, image_url, thumb_url, blur_data_url')
           .eq('is_active', true)
+          .eq('menu_visible', true)
           .order('category')
         const list = (data ?? []) as Meal[]
         setMeals(list)
         // Warm the image cache so cards render instantly on re-entry.
-        Image.prefetch(list.map((m) => m.image_url).filter(Boolean) as string[])
+        Image.prefetch(list.map((m) => m.thumb_url ?? m.image_url).filter(Boolean) as string[])
       } catch {
         // transient/network — leave the list empty rather than spinning forever
       } finally {
@@ -84,7 +88,7 @@ export default function MenuScreen() {
   }, [authLoading])
 
   const filtered =
-    activeCategory === 'All' ? meals : meals.filter((m) => m.category === activeCategory.toLowerCase())
+    activeCategory === 'All' ? meals : meals.filter((m) => m.category === activeCategory)
 
   return (
     <View style={styles.container}>
@@ -96,15 +100,15 @@ export default function MenuScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.tabs}
         >
-          {CATEGORIES.map((cat) => {
-            const active = activeCategory === cat
+          {[{ id: 'All', name: 'All' }, ...categories].map((cat) => {
+            const active = activeCategory === cat.id
             return (
               <Pressable
-                key={cat}
+                key={cat.id}
                 style={[styles.tab, active && styles.tabActive]}
-                onPress={() => setActiveCategory(cat)}
+                onPress={() => setActiveCategory(cat.id)}
               >
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{cat}</Text>
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>{cat.name}</Text>
               </Pressable>
             )
           })}
@@ -142,17 +146,18 @@ export default function MenuScreen() {
                   setSelected(item)
                 }}
               >
-                {item.image_url ? (
+                {item.thumb_url || item.image_url ? (
                   <Image
-                    source={{ uri: item.image_url }}
+                    source={{ uri: item.thumb_url ?? item.image_url ?? undefined }}
                     style={styles.cardImage}
                     contentFit="cover"
                     cachePolicy="memory-disk"
+                    placeholder={item.blur_data_url ? { uri: item.blur_data_url } : undefined}
                     transition={150}
                   />
                 ) : (
                   <View style={styles.cardEmoji}>
-                    <Text style={styles.emojiText}>{CATEGORY_EMOJIS[item.category] ?? '🍽️'}</Text>
+                    <Text style={styles.emojiText}>{categoryEmoji(categories, item.category)}</Text>
                   </View>
                 )}
                 {!available && (

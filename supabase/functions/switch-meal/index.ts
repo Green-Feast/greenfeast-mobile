@@ -74,6 +74,18 @@ Deno.serve(async (req) => {
       return json({ error: 'This dish is not available on that date.' }, 400)
     }
 
+    // subscription_valid gates a dish out of subscription flows entirely
+    // (menu-visible-but-takeaway-only dishes) — same "client check is UX
+    // only" reasoning as above.
+    const { data: dish } = await supabase
+      .from('meal_templates')
+      .select('is_active, subscription_valid')
+      .eq('id', meal_template_id)
+      .maybeSingle()
+    if (!dish || !dish.is_active || !dish.subscription_valid) {
+      return json({ error: 'This dish is not available for subscription orders.' }, 400)
+    }
+
     // Load subscription to find its menu_type
     const { data: sub } = await supabase
       .from('subscriptions')

@@ -32,10 +32,10 @@ import { istToday, istHour, addDaysISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/availability'
+import { useCategoriesStore, categoryEmoji } from '@/store/categories'
 import { Colors, Fonts } from '@/constants/colors'
 import { STORY_SLIDES, CHEF_NOTES } from '@/constants/homeContent'
 import { REFERRAL_MESSAGE } from '@/constants/links'
-import { CATEGORIES, CATEGORY_EMOJIS, CATEGORY_IMAGES } from '@/constants/categories'
 import Logo from '@/components/Logo'
 import Skeleton from '@/components/Skeleton'
 import WhatsAppIcon from '@/components/WhatsAppIcon'
@@ -175,6 +175,12 @@ export default function Home() {
   const unavailableMeals = useAvailabilityStore((s) => s.unavailableMeals)
   const specials = useAvailabilityStore((s) => s.specials)
   const ensureFreshAvailability = useAvailabilityStore((s) => s.ensureFresh)
+  const categories = useCategoriesStore((s) => s.categories)
+  const loadCategories = useCategoriesStore((s) => s.load)
+
+  useEffect(() => {
+    loadCategories()
+  }, [loadCategories])
 
   // Home has a green hero band under the status bar (every other screen is
   // light-background — see _layout.tsx's global style="dark" default). Tabs
@@ -294,8 +300,9 @@ export default function Home() {
   useEffect(() => {
     supabase
       .from('meal_templates')
-      .select('id, name, category, description, price, kcal, protein, carbs, fat, tags, image_url')
+      .select('id, name, category, description, price, kcal, protein, carbs, fat, tags, image_url, thumb_url, blur_data_url')
       .eq('is_active', true)
+      .eq('menu_visible', true)
       .then(({ data }) => setMeals((data as Meal[]) ?? []))
   }, [])
 
@@ -491,7 +498,7 @@ export default function Home() {
                   />
                 ) : (
                   <View style={[styles.todayImage, styles.todayImageFallback]}>
-                    <Text style={{ fontSize: 26 }}>{CATEGORY_EMOJIS[todayOrder.meal_templates.category] ?? '🍽️'}</Text>
+                    <Text style={{ fontSize: 26 }}>{categoryEmoji(categories, todayOrder.meal_templates.category)}</Text>
                   </View>
                 )}
                 <View style={{ flex: 1 }}>
@@ -550,32 +557,29 @@ export default function Home() {
             <Text style={styles.sectionLabel}>Browse by category</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-            {CATEGORIES.filter((c) => c !== 'All').map((cat) => {
-              const categoryImage = CATEGORY_IMAGES[cat.toLowerCase()]
-              return (
-                <Pressable
-                  key={cat}
-                  style={({ pressed }) => [styles.categoryItem, pressed && { opacity: 0.8 }]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    router.push(`/(app)/(tabs)/menu?category=${cat}` as any)
-                  }}
-                >
-                  <View style={styles.categoryCircle}>
-                    {categoryImage ? (
-                      // contentFit="contain" (not "cover") — these are square
-                      // transparent icons already sized to fit the circle, not
-                      // full-bleed photos; "cover" would zoom past the padding
-                      // each source image has around its actual icon content.
-                      <Image source={{ uri: categoryImage }} style={styles.categoryImg} contentFit="contain" cachePolicy="memory-disk" transition={200} />
-                    ) : (
-                      <Text style={styles.categoryEmoji}>{CATEGORY_EMOJIS[cat.toLowerCase()] ?? '🍽️'}</Text>
-                    )}
-                  </View>
-                  <Text style={styles.categoryLabel}>{cat}</Text>
-                </Pressable>
-              )
-            })}
+            {categories.map((cat) => (
+              <Pressable
+                key={cat.id}
+                style={({ pressed }) => [styles.categoryItem, pressed && { opacity: 0.8 }]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  router.push(`/(app)/(tabs)/menu?category=${cat.id}` as any)
+                }}
+              >
+                <View style={styles.categoryCircle}>
+                  {cat.imageUrl ? (
+                    // contentFit="contain" (not "cover") — these are square
+                    // transparent icons already sized to fit the circle, not
+                    // full-bleed photos; "cover" would zoom past the padding
+                    // each source image has around its actual icon content.
+                    <Image source={{ uri: cat.imageUrl }} style={styles.categoryImg} contentFit="contain" cachePolicy="memory-disk" transition={200} />
+                  ) : (
+                    <Text style={styles.categoryEmoji}>{cat.emoji ?? '🍽️'}</Text>
+                  )}
+                </View>
+                <Text style={styles.categoryLabel}>{cat.name}</Text>
+              </Pressable>
+            ))}
           </ScrollView>
         </Animated.View>
 
@@ -601,7 +605,7 @@ export default function Home() {
                       <Image source={{ uri: meal.image_url }} style={styles.pickImage} contentFit="cover" cachePolicy="memory-disk" transition={200} />
                     ) : (
                       <View style={[styles.pickImage, styles.pickImageFallback]}>
-                        <Text style={{ fontSize: 26 }}>{CATEGORY_EMOJIS[meal.category] ?? '🍽️'}</Text>
+                        <Text style={{ fontSize: 26 }}>{categoryEmoji(categories, meal.category)}</Text>
                       </View>
                     )}
                     <View style={{ flex: 1 }}>

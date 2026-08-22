@@ -204,6 +204,7 @@ export default function PaymentScreen() {
       .from('meal_templates')
       .select('id')
       .eq('is_active', true)
+      .eq('subscription_valid', true)
       .limit(1)
       .single()
 

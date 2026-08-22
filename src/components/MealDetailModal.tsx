@@ -14,7 +14,7 @@ import { X, MapPin } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { Colors, Fonts } from '@/constants/colors'
 import { SWIGGY_URL, ZOMATO_URL, KITCHEN_MAPS_URL, isConfigured } from '@/constants/links'
-import { CATEGORY_EMOJIS } from '@/constants/categories'
+import { useCategoriesStore, categoryEmoji } from '@/store/categories'
 import MacroRow from '@/components/MacroRow'
 import MacroRing from '@/components/MacroRing'
 import SwiggyIcon from '@/components/SwiggyIcon'
@@ -31,6 +31,12 @@ export type MealDetail = {
   fat: number | null
   tags: string[] | null
   image_url: string | null
+  // Optional — only populated by queries written after migration 041.
+  // Absent (undefined) is treated as "orderable", matching every dish's
+  // actual default, so callers on an older cached response never break.
+  thumb_url?: string | null
+  blur_data_url?: string | null
+  subscription_valid?: boolean
 }
 
 export type MealDetailPrimaryAction = {
@@ -57,6 +63,10 @@ function formatPrice(paise: number | null) {
 
 function ModalContent({ meal, onClose, unavailableReason, primaryAction, showBrandRow = true }: Props & { meal: MealDetail }) {
   const insets = useSafeAreaInsets()
+  const categories = useCategoriesStore((s) => s.categories)
+  // undefined (queries predating migration 041) reads as orderable — every
+  // dish's actual default — never treated as takeaway-only by accident.
+  const isOrderable = meal.subscription_valid !== false
 
   return (
     <View style={styles.detailScreen}>
@@ -67,10 +77,12 @@ function ModalContent({ meal, onClose, unavailableReason, primaryAction, showBra
             style={styles.detailImage}
             contentFit="cover"
             cachePolicy="memory-disk"
+            placeholder={meal.blur_data_url ? { uri: meal.blur_data_url } : undefined}
+            transition={150}
           />
         ) : (
           <View style={styles.detailImageEmoji}>
-            <Text style={styles.emojiText}>{CATEGORY_EMOJIS[meal.category] ?? '🍽️'}</Text>
+            <Text style={styles.emojiText}>{categoryEmoji(categories, meal.category)}</Text>
           </View>
         )}
         <Pressable
@@ -125,7 +137,12 @@ function ModalContent({ meal, onClose, unavailableReason, primaryAction, showBra
 
       {/* CTA bar */}
       <View style={[styles.detailCtaBar, { paddingBottom: 12 + insets.bottom }]}>
-        {primaryAction && (
+        {!isOrderable && (
+          <Text style={styles.takeawayOnlyNote}>
+            Not part of the subscription — order it directly from Swiggy or Zomato instead.
+          </Text>
+        )}
+        {primaryAction && isOrderable && (
           <Pressable
             style={[styles.addDayBtn, primaryAction.disabled && styles.addDayBtnDisabled]}
             disabled={primaryAction.disabled || primaryAction.loading}
@@ -213,6 +230,7 @@ const styles = StyleSheet.create({
   },
   addDayBtnDisabled: { opacity: 0.5 },
   addDayBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: '#fff' },
+  takeawayOnlyNote: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, textAlign: 'center' },
   brandRow: { flexDirection: 'row', gap: 10 },
   brandBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,

@@ -243,6 +243,7 @@ export default function SubscriptionScreen() {
       .from('meal_templates')
       .select('id, name, category, kcal, protein, image_url')
       .eq('is_active', true)
+      .eq('subscription_valid', true)
       .order('category')
       .then(({ data }) => setAllMeals((data as MealTemplate[]) ?? []))
     supabase
