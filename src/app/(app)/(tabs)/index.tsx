@@ -303,7 +303,14 @@ export default function Home() {
       .select('id, name, category, description, price, kcal, protein, carbs, fat, tags, image_url, thumb_url, blur_data_url')
       .eq('is_active', true)
       .eq('menu_visible', true)
-      .then(({ data }) => setMeals((data as Meal[]) ?? []))
+      .then(({ data }) => {
+        const list = (data as Meal[]) ?? []
+        setMeals(list)
+        // Warm the cache for the specials cards and category row — same
+        // reasoning as Menu's own prefetch (menu.tsx), just never applied
+        // to Home before.
+        Image.prefetch(list.map((m) => m.thumb_url ?? m.image_url).filter(Boolean) as string[])
+      })
   }, [])
 
   const onRefresh = useCallback(async () => {
@@ -601,8 +608,15 @@ export default function Home() {
                     style={({ pressed }) => [styles.pickCard, pressed && { opacity: 0.9 }]}
                     onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setDetailMeal(meal) }}
                   >
-                    {meal.image_url ? (
-                      <Image source={{ uri: meal.image_url }} style={styles.pickImage} contentFit="cover" cachePolicy="memory-disk" transition={200} />
+                    {meal.thumb_url || meal.image_url ? (
+                      <Image
+                        source={{ uri: meal.thumb_url ?? meal.image_url ?? undefined }}
+                        style={styles.pickImage}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        placeholder={meal.blur_data_url ? { uri: meal.blur_data_url } : undefined}
+                        transition={200}
+                      />
                     ) : (
                       <View style={[styles.pickImage, styles.pickImageFallback]}>
                         <Text style={{ fontSize: 26 }}>{categoryEmoji(categories, meal.category)}</Text>
