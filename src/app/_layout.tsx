@@ -25,10 +25,15 @@ import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/withTimeout'
 import { logColdStart } from '@/lib/coldStartLog'
 import { runColdStartProbe } from '@/lib/coldStartProbe'
+import { initSentry, setSentryUser } from '@/lib/sentry'
 import { useAuthStore } from '@/store/auth'
 import { useOtaNotifications } from '@/hooks/useOtaNotifications'
 import { Colors } from '@/constants/colors'
 import { LEGAL_LAST_UPDATED } from '@/constants/legal'
+
+// Before anything else — a crash during boot is exactly what this needs to
+// catch, and that window closes as soon as the first component renders.
+initSentry()
 
 SplashScreen.preventAutoHideAsync()
 logColdStart('module evaluated')
@@ -116,6 +121,8 @@ function AuthGate() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       logColdStart(`onAuthStateChange fired: event=${_event} session=${session ? 'present' : 'null'}`)
       clearTimeout(restoreTimer)
+      // Scope errors to whoever's signed in — id only, no PII.
+      setSentryUser(session?.user?.id ?? null)
       // Unblock every tab's own data fetch (Home, My Plan, Account) the
       // moment the session itself is known — they only ever needed
       // `user.id`, not phone/onboarded, so there's no reason to make them

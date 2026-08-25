@@ -11,6 +11,7 @@
     "@expo/ui": "~56.0.18",
     "@msg91comm/sendotp-react-native": "^2.1.0",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@sentry/react-native": "~7.11.0",
     "@supabase/supabase-js": "^2.107.0",
     "cashfree-pg-api-contract": "^2.1.1",
     "expo": "~56.0.12",
