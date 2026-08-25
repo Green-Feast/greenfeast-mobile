@@ -402,25 +402,16 @@ export default function Home() {
     }
   }
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <View style={[styles.hero, { paddingTop: insets.top + 20 }]}>
-          <Logo size={40} />
-          <Skeleton width={140} height={13} style={[styles.skeletonHero, { marginTop: 20, marginBottom: 4 }]} />
-          <Skeleton width="70%" height={30} style={styles.skeletonHero} />
-          <Skeleton width="50%" height={30} style={[styles.skeletonHero, { marginBottom: 12 }]} />
-          <Skeleton width="75%" height={14} style={[styles.skeletonHero, { marginBottom: 4 }]} />
-          <Skeleton width="55%" height={14} style={styles.skeletonHero} />
-          <Skeleton width={160} height={46} borderRadius={999} style={[styles.skeletonHero, { marginTop: 24 }]} />
-        </View>
-        <View style={styles.section}>
-          <Skeleton width={100} height={10} style={{ marginBottom: 16 }} />
-          <Skeleton height={96} borderRadius={16} />
-        </View>
-      </View>
-    )
-  }
+  // NOTE: there is deliberately no full-screen `if (loading)` skeleton here.
+  // The user-scoped fetch below can stall for 10s+ on a cold start whenever
+  // the stored access token has expired (supabase-js refreshes it first, and
+  // every query queues behind that) — gating the whole screen on it meant
+  // staring at a skeleton for the entire stall. Everything that doesn't need
+  // that fetch — hero, category row, Today's Special, stories — now paints
+  // immediately, and only the cards that genuinely need user data show their
+  // own small placeholder. Measured on-device: fresh token ~600ms end to end,
+  // expired token ~10s, and this is the difference between those being
+  // invisible and being the whole experience.
 
   if (fetchError) {
     return (
@@ -491,7 +482,9 @@ export default function Home() {
               <Leaf size={13} color={Colors.primary} />
               <Text style={styles.sectionLabel}>Today's delivery</Text>
             </View>
-            {todayOrder ? (
+            {loading ? (
+              <Skeleton height={96} borderRadius={16} />
+            ) : todayOrder ? (
               <Pressable
                 style={({ pressed }) => [styles.todayCard, pressed && { opacity: 0.9 }]}
                 onPress={() => router.push('/(app)/(tabs)/subscription')}
