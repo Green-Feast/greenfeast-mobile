@@ -90,6 +90,14 @@ export const useAuthStore = create<AuthState>()(
         } catch {
           // ignore — we still wipe local session below
         }
+        // readHomeCache already refuses to replay another user's payload, but
+        // don't leave the previous account's meal/order data sitting on disk.
+        try {
+          const { useHomeCacheStore } = require('./homeCache') as typeof import('./homeCache')
+          useHomeCacheStore.getState().clear()
+        } catch {
+          // non-fatal — the cachedUserId guard still prevents cross-user reads
+        }
         set({
           session: null, user: null, phone: null, onboarded: false, hasSubscription: false,
           loading: false, profileLoading: false, profileLookupFailed: false, cachedUserId: null,

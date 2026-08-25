@@ -33,6 +33,7 @@ import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/availability'
 import { useCategoriesStore, categoryEmoji } from '@/store/categories'
+import { useHomeCacheStore, readHomeCache } from '@/store/homeCache'
 import { Colors, Fonts } from '@/constants/colors'
 import { STORY_SLIDES, CHEF_NOTES } from '@/constants/homeContent'
 import { REFERRAL_MESSAGE } from '@/constants/links'
@@ -177,6 +178,8 @@ export default function Home() {
   const ensureFreshAvailability = useAvailabilityStore((s) => s.ensureFresh)
   const categories = useCategoriesStore((s) => s.categories)
   const loadCategories = useCategoriesStore((s) => s.load)
+  const homeCacheHydrated = useHomeCacheStore((s) => s.hasHydrated)
+  const saveHomeCache = useHomeCacheStore((s) => s.save)
 
   useEffect(() => {
     loadCategories()
@@ -279,9 +282,18 @@ export default function Home() {
       if (orderRes.error) console.warn('[Home] today order fetch error:', orderRes.error.message)
       const rows = (orderRes.data as unknown as Order[]) ?? []
       const preferredSlot = istHour() < SLOT_CUTOFF_HOUR.dinner ? 'lunch' : 'dinner'
-      setTodayOrder(rows.find((r) => r.meal_slot === preferredSlot) ?? rows[0] ?? null)
+      const resolvedTodayOrder = rows.find((r) => r.meal_slot === preferredSlot) ?? rows[0] ?? null
+      setTodayOrder(resolvedTodayOrder)
 
       setAddTarget(findNextAddTarget((upcomingRes.data as unknown as UpcomingOrder[]) ?? []))
+
+      // Seed the next cold start — see store/homeCache.ts.
+      saveHomeCache({
+        userId: user.id,
+        userName: userRes.data?.name ?? '',
+        subscription: (subRes.data as unknown as Subscription) ?? null,
+        todayOrder: resolvedTodayOrder,
+      })
     } catch {
       setFetchError(true)
     }
@@ -289,9 +301,20 @@ export default function Home() {
 
   useEffect(() => {
     if (authLoading) return
-    setLoading(true)
+
+    // Paint last-known state immediately rather than waiting on the network.
+    // The fetch below still runs and overwrites this the moment it lands; the
+    // point is only that a stalled request never leaves the screen empty.
+    // `loading` stays true only when there was nothing cached to show.
+    const cached = homeCacheHydrated ? readHomeCache(user?.id) : null
+    if (cached) {
+      if (cached.userName) setUserName(cached.userName)
+      setSubscription(cached.subscription as Subscription | null)
+      setTodayOrder(cached.todayOrder as Order | null)
+    }
+    setLoading(!cached?.todayOrderIsFresh)
     fetchData().finally(() => setLoading(false))
-  }, [user, authLoading])
+  }, [user, authLoading, homeCacheHydrated])
 
   // Menu catalogue — public data, fetched once regardless of auth state so
   // guests see category chips + Today's Special too. description/carbs/fat/
