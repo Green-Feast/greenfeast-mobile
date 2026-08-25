@@ -72,6 +72,14 @@
           "locationAlwaysAndWhenInUsePermission": "GreenFeast needs your location to set your delivery address.",
           "locationWhenInUsePermission": "GreenFeast needs your location to set your delivery address."
         }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "react-native",
+          "organization": "green-feast"
+        }
       ]
     ],
     "experiments": {

@@ -54,3 +54,5 @@ assets/Greenfeast menu.csv
 
 # design handoff bundle from claude.ai/design (prototypes, not app source)
 greenfeast-design-system/
+
+.env.local

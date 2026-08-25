@@ -49,23 +49,17 @@ module.exports = () => {
           androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY_ANDROID,
         },
       ],
-      // Crash/error reporting. org+project only control source-map upload at
-      // build time (so stack traces are readable instead of minified); the
-      // plugin falls back to SENTRY_ORG / SENTRY_PROJECT env vars when these
-      // are undefined, and the upload itself needs SENTRY_AUTH_TOKEN. None of
-      // those are committed — same reasoning as the Maps keys above. A build
-      // without them still works, you just get minified stack traces.
+      // NOTE: the Sentry plugin is registered in app.json, NOT here — it is
+      // spread in via `...expo.plugins` above. Do not add it here as well:
+      // '@sentry/react-native' and '@sentry/react-native/expo' resolve to the
+      // same plugin (app.plugin.js just re-exports ./expo), so listing both
+      // applies its native mods twice.
       //
-      // The DSN is separate and lives in EXPO_PUBLIC_SENTRY_DSN (read at
-      // runtime in src/lib/sentry.ts) — it's a public value by design, unlike
-      // the auth token.
-      [
-        '@sentry/react-native',
-        {
-          organization: process.env.SENTRY_ORG,
-          project: process.env.SENTRY_PROJECT,
-        },
-      ],
+      // org/project live in app.json as plain values because, unlike the Maps
+      // keys above, they are not secrets. The one real credential —
+      // SENTRY_AUTH_TOKEN, used only for source-map upload — stays in the
+      // environment and is never committed. Builds without it still report
+      // crashes, just with minified stack traces.
     ],
   }
 }
