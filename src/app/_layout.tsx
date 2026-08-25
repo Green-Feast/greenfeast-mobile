@@ -24,6 +24,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/withTimeout'
 import { logColdStart } from '@/lib/coldStartLog'
+import { runColdStartProbe } from '@/lib/coldStartProbe'
 import { useAuthStore } from '@/store/auth'
 import { useOtaNotifications } from '@/hooks/useOtaNotifications'
 import { Colors } from '@/constants/colors'
@@ -31,6 +32,7 @@ import { LEGAL_LAST_UPDATED } from '@/constants/legal'
 
 SplashScreen.preventAutoHideAsync()
 logColdStart('module evaluated')
+runColdStartProbe()
 
 // Ceilings for the two network waits that gate the whole app's first render.
 // Generous enough not to trip a genuinely slow-but-working connection, short
