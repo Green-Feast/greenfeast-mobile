@@ -323,7 +323,7 @@ export default function Home() {
   useEffect(() => {
     supabase
       .from('meal_templates')
-      .select('id, name, category, description, price, kcal, protein, carbs, fat, tags, image_url, thumb_url, blur_data_url')
+      .select('id, name, category, description, price, kcal, protein, carbs, fat, fibre, tags, image_url, thumb_url, blur_data_url')
       .eq('is_active', true)
       .eq('menu_visible', true)
       .then(({ data }) => {

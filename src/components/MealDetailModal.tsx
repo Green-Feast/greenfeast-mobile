@@ -31,12 +31,14 @@ export type MealDetail = {
   fat: number | null
   tags: string[] | null
   image_url: string | null
-  // Optional — only populated by queries written after migration 041.
-  // Absent (undefined) is treated as "orderable", matching every dish's
-  // actual default, so callers on an older cached response never break.
+  // Optional — only populated by queries written after migration 041/042.
+  // Absent (undefined) is treated as "orderable"/"no fibre data", matching
+  // every dish's actual default, so callers on an older cached response
+  // never break.
   thumb_url?: string | null
   blur_data_url?: string | null
   subscription_valid?: boolean
+  fibre?: number | null
 }
 
 export type MealDetailPrimaryAction = {
@@ -119,7 +121,7 @@ function ModalContent({ meal, onClose, unavailableReason, primaryAction, showBra
                   { value: (meal.fat ?? 0) * 9, color: Colors.macroFat },
                 ]}
               />
-              <MacroRow protein={meal.protein} carbs={meal.carbs} fat={meal.fat} kcal={meal.kcal} size="md" />
+              <MacroRow protein={meal.protein} carbs={meal.carbs} fat={meal.fat} fibre={meal.fibre} kcal={meal.kcal} size="md" />
             </View>
           )}
 

@@ -71,7 +71,7 @@ export default function MenuScreen() {
       try {
         const { data } = await supabase
           .from('meal_templates')
-          .select('id, name, category, description, short_description, price, kcal, protein, carbs, fat, tags, image_url, thumb_url, blur_data_url')
+          .select('id, name, category, description, short_description, price, kcal, protein, carbs, fat, fibre, tags, image_url, thumb_url, blur_data_url')
           .eq('is_active', true)
           .eq('menu_visible', true)
           .order('category')
