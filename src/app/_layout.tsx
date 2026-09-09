@@ -189,6 +189,14 @@ function AuthGate() {
     const inLegalGroup = (segments[0] as string) === '(legal)'
     if (inLegalGroup) return
 
+    // The password-reset screen has to survive the very session its own
+    // recovery link creates. Without this exemption the "fully onboarded"
+    // branch at the bottom would replace the route with /(app)/(tabs) the
+    // instant the code exchange lands — before the subscriber can type a new
+    // password. It is the only (auth) screen a signed-in user legitimately
+    // needs to stay on.
+    if (inAuthGroup && (segments[1] as string) === 'reset-password') return
+
     if (!session) {
       // Guests can browse /(app)/ and authenticate via /(auth)/.
       // Anything else → send to tabs.

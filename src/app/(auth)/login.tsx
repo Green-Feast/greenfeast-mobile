@@ -368,6 +368,15 @@ export default function LoginScreen() {
               />
             </View>
 
+            {view === 'email-signin' && (
+              <TouchableOpacity
+                style={styles.forgotPasswordBtn}
+                onPress={() => router.push('/(auth)/forgot-password' as any)}
+              >
+                <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity style={styles.emailBtn} onPress={handleEmailAuth} disabled={emailLoading}>
               {emailLoading ? (
                 <ActivityIndicator color="#fff" />
@@ -500,6 +509,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emailOutlineBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.ink900 },
+
+  forgotPasswordBtn: { alignItems: 'flex-end', paddingVertical: 2 },
+  forgotPasswordText: { fontFamily: Fonts.bodyMed, fontSize: 13, color: Colors.green700 },
 
   createAccountBtn: { alignItems: 'center', paddingVertical: 4 },
   createAccountText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500 },

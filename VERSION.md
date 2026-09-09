@@ -52,6 +52,21 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.1 — 2026-09-09
+- Build 9, OTA 1.
+- **Password reset added.** Email/password subscribers previously had no way
+  back into a forgotten account — there was no "Forgot password?" anywhere in
+  the app, and Google/Apple sign-in was the only recoverable path. Sign-in now
+  links to a reset screen that emails a recovery link, and a new
+  `/reset-password` route lets them set a new password from it.
+- Two things had to change in the root layout for that to actually work:
+  its always-mounted deep-link listener already exchanges any incoming
+  `?code=`, so the reset screen must not exchange it a second time (PKCE
+  codes are single-use); and the redirect effect now exempts
+  `/reset-password`, since the session created by the recovery link would
+  otherwise bounce an onboarded user straight to the tabs before they could
+  type anything.
+
 ### 1.9.0 — 2026-08-22
 - Build 9, OTA 0.
 - **Real account deletion.** "Delete my account" in Account actually deletes
