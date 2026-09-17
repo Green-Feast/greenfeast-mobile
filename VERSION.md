@@ -52,6 +52,23 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.2 — 2026-09-17
+- Build 9, OTA 2.
+- **Account deletion actually works now.** `orders.user_id` and
+  `wallet_transactions.user_id` were still `ON DELETE NO ACTION`, so
+  `auth.admin.deleteUser()` hit a foreign key violation for any account that
+  had ever placed an order — surfaced in the app as the opaque "Edge Function
+  returned a non-2xx status code". Migration 040 had fixed exactly this for
+  `payments` and missed these two. Migration 043 cascades both. The admin
+  dashboard never hit this because `wipeUserData()` deletes those rows by hand
+  first; the in-app self-service path had no such workaround.
+- **Delete confirmation no longer under-reports what's being lost.** The
+  impact summary used `.maybeSingle()` on active subscriptions, which resolves
+  to `{ data: null, error }` — not a throw — when an account has more than one.
+  The catch never fired, so the dialog claimed "no active subscription" while
+  silently hiding real deliveries about to be cancelled. It now sums every
+  active/paused subscription.
+
 ### 1.9.1 — 2026-09-09
 - Build 9, OTA 1.
 - **Password reset added.** Email/password subscribers previously had no way

@@ -80,12 +80,18 @@ export default function AccountScreen() {
     try {
       const [walletRes, subRes] = await Promise.all([
         supabase.from('wallets').select('balance').eq('user_id', user!.id).maybeSingle(),
-        supabase.from('subscriptions').select('status, deliveries_remaining').eq('user_id', user!.id).in('status', ['active', 'paused']).maybeSingle(),
+        supabase.from('subscriptions').select('status, deliveries_remaining').eq('user_id', user!.id).in('status', ['active', 'paused']),
       ])
+      // Sum every active/paused subscription rather than expecting exactly one.
+      // maybeSingle() resolves to { data: null, error } — not a throw — when a
+      // user has more than one, so the catch below never fired and this warning
+      // silently claimed "no active subscription". On an irreversible delete,
+      // under-reporting what's about to be lost is the worst way to be wrong.
+      const activeSubs = subRes.data ?? []
       setDeleteImpact({
         walletBalance: walletRes.data?.balance ?? 0,
-        hasActiveSub: !!subRes.data,
-        deliveriesRemaining: subRes.data?.deliveries_remaining ?? 0,
+        hasActiveSub: activeSubs.length > 0,
+        deliveriesRemaining: activeSubs.reduce((sum, s) => sum + (s.deliveries_remaining ?? 0), 0),
       })
     } catch {
       setDeleteImpact({ walletBalance: 0, hasActiveSub: false, deliveriesRemaining: 0 })
