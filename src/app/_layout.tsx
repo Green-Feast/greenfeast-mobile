@@ -53,7 +53,7 @@ async function fetchProfile(userId: string) {
   logColdStart('profile lookup starting')
   const [{ data }, { count }] = await withTimeout(
     Promise.all([
-      supabase.from('users').select('phone, onboarded').eq('id', userId).single(),
+      supabase.from('users').select('phone, name, onboarded').eq('id', userId).single(),
       supabase
         .from('subscriptions')
         .select('id', { count: 'exact', head: true })
@@ -64,7 +64,7 @@ async function fetchProfile(userId: string) {
     'profile lookup'
   )
   logColdStart(`profile lookup resolved: phone=${data?.phone ? 'present' : 'null'} onboarded=${data?.onboarded}`)
-  useAuthStore.getState().setProfileLoaded(data?.phone ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
+  useAuthStore.getState().setProfileLoaded(data?.phone ?? null, data?.name ?? null, data?.onboarded ?? false, (count ?? 0) > 0)
 }
 
 const PROFILE_LOOKUP_RETRY_DELAY_MS = 3000
@@ -91,7 +91,7 @@ async function fetchProfileWithRetry(userId: string, attempt = 0) {
 function AuthGate() {
   const router = useRouter()
   const segments = useSegments()
-  const { session, phone, onboarded, loading, profileLoading, profileLookupFailed, cachedUserId, hasHydrated, setSession, setProfileLoaded, beginProfileLookup } = useAuthStore()
+  const { session, phone, name, onboarded, loading, profileLoading, profileLookupFailed, cachedUserId, hasHydrated, setSession, setProfileLoaded, beginProfileLookup } = useAuthStore()
 
   useEffect(() => {
     logColdStart('AuthGate mounted, session-restore effect running')
@@ -115,7 +115,7 @@ function AuthGate() {
           'rendering signed-out; the auth listener will apply the session if it arrives'
       )
       setSession(null)
-      setProfileLoaded(null, false, false)
+      setProfileLoaded(null, null, false, false)
     }, SESSION_RESTORE_TIMEOUT_MS)
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -150,7 +150,7 @@ function AuthGate() {
           .is('terms_accepted_at', null)
           .then(() => {})
       } else {
-        setProfileLoaded(null, false, false)
+        setProfileLoaded(null, null, false, false)
       }
     })
 
@@ -215,11 +215,24 @@ function AuthGate() {
     // or reopening the app) corrects the route then.
     if (!profileTrusted) return
 
-    // Signed in but phone not yet verified — start onboarding
+    // Signed in but phone not yet verified — start onboarding.
+    //
+    // Skip the name screen entirely when a name already exists. Sign in with
+    // Apple supplies the subscriber's name through Authentication Services,
+    // and App Store guideline 4 forbids asking for it again — this is what
+    // that rule comes down to in routing terms.
+    //
+    // The `nameArrivedLate` case matters because Apple's name is written
+    // after the session lands, so the redirect can already have sent someone
+    // to the name screen by the time we learn their name. Without it they'd
+    // sit on a screen asking for something we now have.
     if (!phone) {
-      if (!inOnboardingGroup) {
-        logColdStart('redirect -> /(onboarding)/name [no phone]')
-        router.replace('/(onboarding)/name')
+      const onNameScreen = inOnboardingGroup && (segments[1] as string) === 'name'
+      const nameArrivedLate = !!name && onNameScreen
+      if (!inOnboardingGroup || nameArrivedLate) {
+        const target = name ? '/(onboarding)/phone' : '/(onboarding)/name'
+        logColdStart(`redirect -> ${target} [no phone, name=${name ? 'present' : 'null'}]`)
+        router.replace(target as any)
       }
       return
     }
@@ -241,7 +254,7 @@ function AuthGate() {
     if (inAuthGroup || (inOnboardingGroup && IDENTITY_SCREENS.includes(segments[1] ?? ''))) {
       router.replace('/(app)/(tabs)')
     }
-  }, [session, phone, onboarded, loading, profileLoading, profileLookupFailed, cachedUserId, hasHydrated, segments])
+  }, [session, phone, name, onboarded, loading, profileLoading, profileLookupFailed, cachedUserId, hasHydrated, segments])
 
   // Stack instead of Slot so the whole app has one real navigation history —
   // back/swipe-back always returns to the literal previous screen, matching

@@ -28,6 +28,7 @@ import { makeRedirectUri } from 'expo-auth-session'
 // own habit of not trusting an untested native-adjacent assumption blindly.
 import * as AppleAuthentication from 'expo-apple-authentication'
 import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import Logo from '@/components/Logo'
 import GoogleIcon from '@/components/GoogleIcon'
@@ -138,10 +139,27 @@ export default function LoginScreen() {
         // fullName is only ever returned on the FIRST authorization for this
         // Apple ID — every later sign-in gets null. Persist it now or the
         // account has no name forever (Home's greeting silently renders
-        // blank), since nothing else captures it later.
-        const givenName = credential.fullName?.givenName
-        if (givenName && data.user) {
-          await supabase.from('users').update({ name: givenName }).eq('id', data.user.id).is('name', null)
+        // blank), since nothing else captures it later. Apple's identity
+        // token carries no name either, so this client-side credential is
+        // genuinely the only chance to capture it.
+        const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+          .filter(Boolean)
+          .join(' ')
+          .trim()
+        if (fullName && data.user) {
+          const { data: updated } = await supabase
+            .from('users')
+            .update({ name: fullName })
+            .eq('id', data.user.id)
+            .is('name', null)
+            .select('name')
+            .maybeSingle()
+          // Push straight into the store rather than waiting on another
+          // profile lookup. AuthGate's lookup for this session has very
+          // likely already read name=null and routed to the onboarding name
+          // screen; this is what lets that redirect correct itself instead
+          // of asking for a name Sign in with Apple just handed us.
+          if (updated?.name) useAuthStore.getState().setName(updated.name)
         }
       }
     } catch (err: any) {

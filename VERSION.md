@@ -52,6 +52,25 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.3 — 2026-09-19
+- Build 9, OTA 3.
+- **Sign in with Apple no longer asks for a name Apple already gave us**
+  (App Store guideline 4 rejection). Onboarding routed on `phone` alone, so
+  every new account hit "What should we call you?" even when the name had
+  been captured and written successfully. Routing is now name-aware: with a
+  name on file, onboarding starts at the phone step instead.
+- Three things had to line up for that to work. `public.users` is created by
+  a trigger holding only `id`, and Apple's identity token carries no name, so
+  the client-side credential is the single chance to capture it — it now
+  stores given + family name rather than given alone. The auth store tracks
+  `name` so the redirect can see it. And because Apple's name is written
+  after the session lands, the redirect can already have pushed someone to
+  the name screen before we know their name; it now moves them forward when
+  the name arrives late instead of stranding them there.
+- Note: Apple returns `fullName` only on the FIRST authorization per Apple
+  ID. On any later sign-in it is null, and with no name on file the name
+  screen legitimately appears — the framework genuinely has nothing to give.
+
 ### 1.9.2 — 2026-09-17
 - Build 9, OTA 2.
 - **Account deletion actually works now.** `orders.user_id` and

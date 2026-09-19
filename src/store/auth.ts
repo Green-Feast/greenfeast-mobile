@@ -9,6 +9,12 @@ interface AuthState {
   session: Session | null
   user: User | null
   phone: string | null
+  // Sign in with Apple hands us the subscriber's name once, on the very
+  // first authorization, and never again. Tracking it here is what lets
+  // AuthGate skip the onboarding name screen instead of asking for
+  // something the Authentication Services framework already provided —
+  // required by App Store guideline 4.
+  name: string | null
   onboarded: boolean
   hasSubscription: boolean
   // Session-restore only. Every tab's own data fetch waits on this alone —
@@ -43,9 +49,10 @@ interface AuthState {
   // effect act on stale phone/onboarded defaults before the fresh lookup for
   // *this* session has a chance to resolve.
   beginProfileLookup: () => void
-  setProfileLoaded: (phone: string | null, onboarded: boolean, hasSubscription: boolean) => void
+  setProfileLoaded: (phone: string | null, name: string | null, onboarded: boolean, hasSubscription: boolean) => void
   setProfileLookupFailed: () => void
   setPhone: (phone: string | null) => void
+  setName: (name: string | null) => void
   setOnboarded: (onboarded: boolean) => void
   setHasSubscription: (hasSubscription: boolean) => void
   setHasHydrated: (hydrated: boolean) => void
@@ -58,6 +65,7 @@ export const useAuthStore = create<AuthState>()(
       session: null,
       user: null,
       phone: null,
+      name: null,
       onboarded: false,
       hasSubscription: false,
       loading: true,
@@ -68,9 +76,9 @@ export const useAuthStore = create<AuthState>()(
       setSession: (session) =>
         set({ session, user: session?.user ?? null, loading: false }),
       beginProfileLookup: () => set({ profileLoading: true, profileLookupFailed: false }),
-      setProfileLoaded: (phone, onboarded, hasSubscription) =>
+      setProfileLoaded: (phone, name, onboarded, hasSubscription) =>
         set({
-          phone, onboarded, hasSubscription,
+          phone, name, onboarded, hasSubscription,
           profileLoading: false, profileLookupFailed: false,
           // Marks this data as belonging to whoever's currently signed in —
           // this is what gets persisted, and what a future cold start's
@@ -79,6 +87,7 @@ export const useAuthStore = create<AuthState>()(
         }),
       setProfileLookupFailed: () => set({ profileLoading: false, profileLookupFailed: true }),
       setPhone: (phone) => set({ phone }),
+      setName: (name) => set({ name }),
       setOnboarded: (onboarded) => set({ onboarded }),
       setHasSubscription: (hasSubscription) => set({ hasSubscription }),
       setHasHydrated: (hydrated) => set({ hasHydrated: hydrated }),
@@ -99,7 +108,7 @@ export const useAuthStore = create<AuthState>()(
           // non-fatal — the cachedUserId guard still prevents cross-user reads
         }
         set({
-          session: null, user: null, phone: null, onboarded: false, hasSubscription: false,
+          session: null, user: null, phone: null, name: null, onboarded: false, hasSubscription: false,
           loading: false, profileLoading: false, profileLookupFailed: false, cachedUserId: null,
         })
       },
@@ -113,6 +122,7 @@ export const useAuthStore = create<AuthState>()(
       // another place for it to go stale or leak.
       partialize: (state) => ({
         phone: state.phone,
+        name: state.name,
         onboarded: state.onboarded,
         hasSubscription: state.hasSubscription,
         cachedUserId: state.cachedUserId,

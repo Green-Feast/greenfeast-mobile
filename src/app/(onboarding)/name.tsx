@@ -8,6 +8,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
@@ -53,6 +54,9 @@ export default function OnboardingNameScreen() {
       setLoading(false)
       return
     }
+    // Keep the store in step with the row we just wrote — AuthGate routes on
+    // it, and leaving it null here would make this screen reappear.
+    useAuthStore.getState().setName(name.trim())
     router.push('/(onboarding)/phone')
   }
 
