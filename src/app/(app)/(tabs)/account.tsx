@@ -19,6 +19,7 @@ import {
   LogOut,
   LogIn,
   FileText,
+  Phone,
   Shield,
   ChevronDown,
   ChevronUp,
@@ -32,7 +33,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { APP_VERSION_STRING } from '@/constants/version'
-import { REFERRAL_MESSAGE } from '@/constants/links'
+import { REFERRAL_MESSAGE, supportWhatsAppUrl } from '@/constants/links'
 import Skeleton from '@/components/Skeleton'
 import WhatsAppIcon from '@/components/WhatsAppIcon'
 
@@ -264,10 +265,19 @@ export default function AccountScreen() {
         <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
           <Pressable
             style={({ pressed }) => [styles.row, styles.rowBorder, pressed && styles.rowPressed]}
-            onPress={() => Linking.openURL('https://wa.me/918829040566')}
+            onPress={() => Linking.openURL(supportWhatsAppUrl('Account > WhatsApp Support'))}
           >
             <MessageCircle size={18} color={Colors.whatsapp} />
             <Text style={styles.rowLabel}>WhatsApp Support</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.row, styles.rowBorder, pressed && styles.rowPressed]}
+            onPress={() => router.push('/(legal)/contact' as any)}
+          >
+            <Phone size={18} color={Colors.ink500} />
+            <Text style={[styles.rowLabel, { flex: 1 }]}>Contact Us</Text>
+            <ChevronRight size={16} color={Colors.ink400} />
           </Pressable>
 
           <Pressable
@@ -299,6 +309,15 @@ export default function AccountScreen() {
           >
             <FileText size={18} color={Colors.ink500} />
             <Text style={[styles.rowLabel, { flex: 1 }]}>Terms & Conditions</Text>
+            <ChevronRight size={16} color={Colors.ink400} />
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.row, styles.rowBorder, pressed && styles.rowPressed]}
+            onPress={() => router.push('/(legal)/refunds' as any)}
+          >
+            <RefreshCw size={18} color={Colors.ink500} />
+            <Text style={[styles.rowLabel, { flex: 1 }]}>Refunds & Cancellations</Text>
             <ChevronRight size={16} color={Colors.ink400} />
           </Pressable>
 

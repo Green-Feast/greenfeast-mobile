@@ -11,5 +11,26 @@ export function isConfigured(url: string): boolean {
   return !!url && !url.includes('TODO')
 }
 
+import { APP_VERSION_STRING } from '@/constants/version'
+
+export const SUPPORT_WHATSAPP_NUMBER = '918829040566'
+export const SUPPORT_PHONE_DISPLAY = '+91 88290 40566'
+export const SUPPORT_EMAIL = 'greenfeast.tech@gmail.com'
+export const OPS_EMAIL = 'greenfeast.ops@gmail.com'
+export const BUSINESS_NAME = 'Green Feast'
+export const BUSINESS_OPERATOR = 'Vinayak Rawat (proprietor)'
+export const BUSINESS_ADDRESS = '3 NA 22, Jawahar Nagar, Jaipur, Rajasthan 302004'
+
+// Every WhatsApp support entry point goes through here so the team can tell
+// at a glance that the chat started inside the app. `topic` says which screen
+// or action it came from.
+export function supportWhatsAppUrl(topic = 'General support'): string {
+  const text =
+    `Hi GreenFeast! I'm messaging from the GreenFeast app (v${APP_VERSION_STRING}).\n` +
+    `Topic: ${topic}\n\n` +
+    `Please describe your question below:\n`
+  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`
+}
+
 export const REFERRAL_MESSAGE =
   "I've been getting my meals from GreenFeast — fresh, macro-balanced food delivered daily in Jaipur. Thought you'd like it too: https://greenfeast.in"

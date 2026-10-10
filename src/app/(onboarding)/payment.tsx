@@ -20,6 +20,8 @@ import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import { useAuthStore } from '@/store/auth'
 import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
+import { APP_VERSION_STRING } from '@/constants/version'
+import { SUPPORT_WHATSAPP_NUMBER } from '@/constants/links'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 
@@ -473,9 +475,11 @@ export default function PaymentScreen() {
                 // very end of the flow, so the user never has to come back.
                 if (method === 'cod') {
                   const msg = encodeURIComponent(
-                    `Hi GreenFeast! I just set up my ${store.planName || ''} plan on Cash on Delivery. Please confirm my order.`
+                    `Hi GreenFeast! I'm messaging from the GreenFeast app (v${APP_VERSION_STRING}).\n` +
+                    `Topic: Cash on Delivery confirmation\n\n` +
+                    `I just set up my ${store.planName || ''} plan on Cash on Delivery. Please confirm my order.`
                   )
-                  Linking.openURL(`https://wa.me/918829040566?text=${msg}`).catch(() => {})
+                  Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${msg}`).catch(() => {})
                 }
                 store.reset()
                 router.replace('/(app)/(tabs)')

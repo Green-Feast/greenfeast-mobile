@@ -52,6 +52,25 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.4 — 2026-10-10
+- Build 9, OTA 4.
+- **Contact Us and Refunds & Cancellations pages added** (Account tab, next to
+  Terms and Privacy). Cashfree's production whitelisting review requires a
+  Contact Us page, a Terms page and a Refunds & Cancellations page inside the
+  app; only Terms existed, with refund rules as one paragraph inside it. The
+  refund policy is wallet-credit only, with a 2-hour claim window, 1-business-day
+  response, and failed or duplicate online payments reversed by the payment
+  provider to the original method. Terms and Privacy "Contact" sections now
+  point to the Contact Us page.
+- **Every WhatsApp support entry point now opens with a pre-written message**
+  stating it came from the app, with the app version and the screen it was
+  tapped from (shared `supportWhatsAppUrl` helper in `links.ts`). The Cash on
+  Delivery confirmation message carries the same header.
+- Published per platform (`--platform ios`, then `--platform android`),
+  because `eas update`'s default web export fails on
+  `react-native-cashfree-pg-sdk` (its `../package.json` import does not
+  resolve under the web bundler).
+
 ### 1.9.3 — 2026-09-19
 - Build 9, OTA 3.
 - **Sign in with Apple no longer asks for a name Apple already gave us**

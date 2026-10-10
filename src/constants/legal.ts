@@ -33,7 +33,7 @@ To the fullest extent permitted by law, GreenFeast is not liable for indirect or
 We may update these Terms from time to time. Continued use of the Service after changes take effect constitutes acceptance of the revised Terms.
 
 9. Contact
-Questions about these Terms can be sent via the WhatsApp Support link in the app.`
+Questions about these Terms can be sent through the Contact Us page in the app. Our refund and cancellation rules are set out in full under Refunds & Cancellations.`
 
 export const PRIVACY_TEXT = `Last updated: ${LEGAL_LAST_UPDATED}
 
@@ -68,4 +68,44 @@ The Service is not directed to children under 18.
 We may update this Privacy Policy from time to time. We'll reflect the current version's date at the top of this page.
 
 9. Contact
-Questions about this Privacy Policy can be sent via the WhatsApp Support link in the app.`
+Questions about this Privacy Policy can be sent through the Contact Us page in the app.`
+
+
+export const REFUNDS_TEXT = `Last updated: ${LEGAL_LAST_UPDATED}
+
+This page explains when GreenFeast refunds an order, how refunds are paid, and how to cancel or change your plan.
+
+1. How refunds are paid
+Approved refunds are credited to your GreenFeast wallet, not to your original payment method. Wallet credit is added as soon as we approve the claim and can be used for your upcoming deliveries and top-ups. Wallet balance cannot be withdrawn to a bank account or transferred to another person.
+
+2. When you are eligible for a refund
+- Undelivered order: your meal did not arrive on the scheduled day.
+- Major quality issue: the food is spoiled, unsafe to eat, contains something that should not be there, or is spilt or damaged to the point it cannot be eaten.
+- Wrong item: you received a different meal or add-on from the one you ordered.
+- Missing item: part of your order, such as a meal, add-on or smoothie, was not in the delivery.
+
+3. When a refund is not available
+- Change of mind, or a meal you simply did not enjoy.
+- Delivery inside the window shown in the app, even if it felt late.
+- Nobody available to receive the order, an unreachable phone number, or an incorrect address or landmark.
+- Deliveries you skipped, paused or cancelled after the cutoff (8 AM for lunch, 1 PM for dinner, both on the delivery day).
+- Allergens or dietary restrictions that were not recorded in your profile.
+- Normal variation in portion size, colour or appearance.
+
+4. How to request a refund
+Contact us from the app (Account > Contact Us, or WhatsApp Support) as soon as possible, and within 2 hours of delivery for quality issues, wrong items and missing items. Include your registered phone number and a clear photo of the food and its packaging. For an undelivered order, tell us the same day.
+
+5. How quickly we respond
+We review every claim within 1 business day. If it is approved, the credit appears in your wallet immediately.
+
+6. Cancelling, pausing and skipping
+You can pause, skip or cancel from the My Plan section of the app before the cutoff times in section 3. Skipped or paused deliveries are not made. If we cancel a delivery ourselves, it is credited to your wallet.
+
+7. Failed or duplicate payments
+If a payment fails but the money leaves your account, or you are charged twice, the payment provider reverses it to your original payment method, usually within 5 to 7 business days. If it has not arrived after that, contact us with your order or transaction ID and we will follow it up with the provider.
+
+8. Account deletion
+If you delete your account, any remaining wallet balance is forfeited and cannot be refunded, as shown on the deletion screen.
+
+9. Contact
+Questions about refunds can be sent through the Contact Us page in the app.`

@@ -9,6 +9,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.greenfeast.app",
+      "buildNumber": "2",
       "supportsTablet": false,
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -33,6 +34,7 @@
     },
     "android": {
       "package": "com.greenfeast.app",
+      "versionCode": 2,
       "usesCleartextTraffic": true,
       "softwareKeyboardLayoutMode": "resize",
       "googleServicesFile": "./google-services.json",
