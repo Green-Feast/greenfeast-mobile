@@ -20,6 +20,7 @@ import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
 import { supabase } from '@/lib/supabase'
 import { setActiveCashfreeCallback } from '@/lib/cashfreeCallback'
 import { useAuthStore } from '@/store/auth'
+import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { useAvailabilityStore, isMealAvailable, isAddonAvailable } from '@/store/availability'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
@@ -173,7 +174,7 @@ export default function SubscriptionScreen() {
     if (!user) return
     const today = istToday()
 
-    const { data: subData } = await supabase
+    const { data: subData, error: subErr } = await supabase
       .from('subscriptions')
       .select('id, status, payment_method, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, menu_type, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
@@ -181,6 +182,10 @@ export default function SubscriptionScreen() {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+
+    // Network failure (e.g. a background auto-refresh on a flaky connection):
+    // keep what's on screen rather than blanking the plan.
+    if (subErr) return
 
     const s = (subData as unknown as SubData) ?? null
     setSub(s)
@@ -212,7 +217,9 @@ export default function SubscriptionScreen() {
         .eq('subscription_id', s.id)
         .gte('delivery_date', today)
         .lte('delivery_date', endStr)
-        .in('status', ['scheduled', 'confirmed', 'preparing'])
+        // Delivered / out-for-delivery stay in so today's finished slot still
+        // shows what was delivered instead of "No lunch".
+        .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery', 'delivered'])
         .order('delivery_date'),
       supabase
         .from('wallets')
@@ -231,6 +238,7 @@ export default function SubscriptionScreen() {
         .eq('subscription_id', s.id),
     ])
 
+    if (ordersRes.error || walletRes.error) return
     setWeekOrders((ordersRes.data as unknown as OrderItem[]) ?? [])
     setWalletBalance(walletRes.data?.balance ?? null)
     setAddresses((addrRes.data as AddressData[]) ?? [])
@@ -302,6 +310,10 @@ export default function SubscriptionScreen() {
       setFreeMealIds(new Set((data ?? []).map((m: any) => m.meal_template_id).filter(Boolean)))
     })()
   }, [selectedDay, selectedSlot, sub, weekOrders])
+
+  // Silent background refresh: tab focus, app foreground, every 5 min.
+  const refreshAvailability = useAvailabilityStore((st) => st.refresh)
+  useAutoRefresh(() => Promise.all([fetchAll(), refreshAvailability()]), { enabled: !authLoading && !!user })
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -638,7 +650,10 @@ export default function SubscriptionScreen() {
   // or once the kitchen has already started on it — unlocking "today" under
   // the new same-day cutoff would otherwise expose Skip/Swap/Remove on a meal
   // that's already `preparing`.
-  const heroLocked = isSlotLocked(selectedDay, selectedSlot) || heroBase?.status === 'preparing'
+  const heroDone = heroOrders.length > 0 && heroOrders.every(o => o.status === 'delivered')
+  const heroLocked =
+    isSlotLocked(selectedDay, selectedSlot) ||
+    heroOrders.some(o => o.status === 'preparing' || o.status === 'out_for_delivery' || o.status === 'delivered')
   const heroIsToday = selectedDay === todayStr
 
   // Day modal data (same slot).
@@ -668,7 +683,8 @@ export default function SubscriptionScreen() {
   const dayMealsAddons = dayAllOrders.reduce((sum, o) => sum + orderBase(o) + addonLinesCost(o), 0)
   const daySwapFees = dayAllOrders.reduce((sum, o) => sum + feeCost(o), 0)
   const dayTotal = dayMealsAddons + daySwapFees
-  const lowBalance = walletBalance !== null && dayTotal > walletBalance
+  // Delivered meals are already paid for, so they can't make the balance "low".
+  const lowBalance = walletBalance !== null && !heroDone && dayTotal > walletBalance
   const dayOrderAddonIds = new Set((dayOrder?.order_addons ?? []).filter(l => l.kind === 'addon' && l.addon_id).map(l => l.addon_id))
   const dayOrderAddonQty = new Map(
     (dayOrder?.order_addons ?? []).filter(l => l.kind === 'addon' && l.addon_id).map(l => [l.addon_id as string, l.quantity ?? 1])
@@ -861,7 +877,7 @@ export default function SubscriptionScreen() {
                 onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setAddMode(false); setShowDayModal(true) }}
               >
                 <SlidersHorizontal size={15} color="#fff" strokeWidth={2} />
-                <Text style={s.heroCustomizeText}>Customize →</Text>
+                <Text style={s.heroCustomizeText}>{heroLocked ? 'View details →' : 'Customize →'}</Text>
               </Pressable>
             </View>
           </View>

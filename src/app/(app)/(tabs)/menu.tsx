@@ -1,7 +1,7 @@
 // Full menu browse — 2-column image-card grid matching the onboarding
 // "Explore our menu" aesthetic. Category pills live in a fixed header so they
 // never get clipped, and images are cached via expo-image.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { ExternalLink, MapPin, CalendarPlus } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { istToday } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
+import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { useAvailabilityStore, isMealAvailable } from '@/store/availability'
 import { useCategoriesStore, categoryEmoji } from '@/store/categories'
 import { Colors, Fonts } from '@/constants/colors'
@@ -65,27 +66,35 @@ export default function MenuScreen() {
     loadCategories()
   }, [ensureFreshAvailability, loadCategories])
 
+  const loadMeals = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('meal_templates')
+        .select('id, name, category, description, short_description, price, kcal, protein, carbs, fat, fibre, tags, image_url, thumb_url, blur_data_url')
+        .eq('is_active', true)
+        .eq('menu_visible', true)
+        .order('category')
+      // A failed refresh keeps the menu already on screen.
+      if (error) return
+      const list = (data ?? []) as Meal[]
+      setMeals(list)
+      // Warm the image cache so cards render instantly on re-entry.
+      Image.prefetch(list.map((m) => m.thumb_url ?? m.image_url).filter(Boolean) as string[])
+    } catch {
+      // transient/network — leave the list empty rather than spinning forever
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (authLoading) return
-    ;(async () => {
-      try {
-        const { data } = await supabase
-          .from('meal_templates')
-          .select('id, name, category, description, short_description, price, kcal, protein, carbs, fat, fibre, tags, image_url, thumb_url, blur_data_url')
-          .eq('is_active', true)
-          .eq('menu_visible', true)
-          .order('category')
-        const list = (data ?? []) as Meal[]
-        setMeals(list)
-        // Warm the image cache so cards render instantly on re-entry.
-        Image.prefetch(list.map((m) => m.thumb_url ?? m.image_url).filter(Boolean) as string[])
-      } catch {
-        // transient/network — leave the list empty rather than spinning forever
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [authLoading])
+    loadMeals()
+  }, [authLoading, loadMeals])
+
+  // Silent background refresh: tab focus, app foreground, every 5 min.
+  const refreshAvailability = useAvailabilityStore((s) => s.refresh)
+  useAutoRefresh(() => Promise.all([loadMeals(), refreshAvailability()]), { enabled: !authLoading })
 
   const filtered =
     activeCategory === 'All' ? meals : meals.filter((m) => m.category === activeCategory)

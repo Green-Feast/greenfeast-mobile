@@ -19,6 +19,7 @@ type AvailabilityState = {
   loaded: boolean
   loadWindow: (from: string, to: string) => Promise<void>
   ensureFresh: () => Promise<void>
+  refresh: () => Promise<void>
 }
 
 export const useAvailabilityStore = create<AvailabilityState>((set, get) => ({
@@ -94,6 +95,13 @@ export const useAvailabilityStore = create<AvailabilityState>((set, get) => ({
     const today = istToday()
     if (anchorDate === today) return
     await loadWindow(today, addDaysISO(today, WINDOW_DAYS))
+  },
+
+  // Unconditional refetch — used by useAutoRefresh so admin Kitchen changes
+  // made during the day reach an app that has stayed open.
+  refresh: async () => {
+    const today = istToday()
+    await get().loadWindow(today, addDaysISO(today, WINDOW_DAYS))
   },
 }))
 

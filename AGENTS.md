@@ -86,6 +86,13 @@ reflect the latest commits, that's expected, not a bug to fix.
   `KeyboardAwareScreen`/`useAutoFocus` wrapper in `src/components/keyboard/`, used across all
   onboarding text-input screens. Native dependency — needs a rebuild (not OTA-able) when it
   or its config changes.
+- **`instantiate-orders` and `cashfree-webhook` must be deployed with `--no-verify-jwt`**
+  (`npx supabase functions deploy instantiate-orders --no-verify-jwt`). Both are called with
+  non-JWT credentials (the nightly Vercel cron sends `INTERNAL_FN_SECRET`; Cashfree sends a
+  signed webhook), and both do their own auth in code. With the gateway's JWT check on, the
+  cron got `401 Invalid JWT` before the function ran — orders were only ever created when a
+  subscriber happened to open My Plan (its auto-sync sends a real user JWT). Found and fixed
+  2026-10-10. There is no `supabase/config.toml`, so the flag must be passed on every deploy.
 
 # UI/UX design system
 

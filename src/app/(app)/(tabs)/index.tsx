@@ -31,6 +31,7 @@ import { logColdStart } from '@/lib/coldStartLog'
 import { istToday, istHour, addDaysISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
+import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/availability'
 import { useCategoriesStore, categoryEmoji } from '@/store/categories'
 import { useHomeCacheStore, readHomeCache } from '@/store/homeCache'
@@ -232,9 +233,11 @@ export default function Home() {
     }
   }
 
-  async function fetchData() {
+  // `silent` = background auto-refresh: a failure keeps the current screen
+  // instead of swapping it for the error/Retry state.
+  async function fetchData(silent = false) {
     if (!user) return
-    setFetchError(false)
+    if (!silent) setFetchError(false)
     const today = istToday()
 
     logColdStart('Home fetchData starting')
@@ -295,7 +298,7 @@ export default function Home() {
         todayOrder: resolvedTodayOrder,
       })
     } catch {
-      setFetchError(true)
+      if (!silent) setFetchError(true)
     }
   }
 
@@ -335,6 +338,10 @@ export default function Home() {
         Image.prefetch(list.map((m) => m.thumb_url ?? m.image_url).filter(Boolean) as string[])
       })
   }, [])
+
+  // Silent background refresh: tab focus, app foreground, every 5 min.
+  const refreshAvailability = useAvailabilityStore((s) => s.refresh)
+  useAutoRefresh(() => Promise.all([fetchData(true), refreshAvailability()]), { enabled: !authLoading && !!user })
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)

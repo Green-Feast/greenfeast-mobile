@@ -52,6 +52,20 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.5 — 2026-10-10
+- Build 9, OTA 5.
+- **Home, My Plan and Menu refresh themselves.** New `useAutoRefresh` hook
+  silently reloads on tab focus, when the app returns to the foreground, and
+  every 5 minutes while the tab is open (30 s minimum gap). iOS users rarely
+  close the app, so admin changes (menu swaps, delivered status, wallet
+  debits) previously stayed invisible until a pull-to-refresh or relaunch.
+  A failed background refresh now keeps the current screen instead of
+  blanking My Plan or showing Home's error state.
+- **My Plan shows delivered meals.** Delivered and out-for-delivery orders are
+  now loaded, so a finished slot shows its cart with a Delivered badge instead
+  of "No lunch on …". Such slots are locked (no Skip/Swap) and no longer count
+  toward the low-balance warning.
+
 ### 1.9.4 — 2026-10-10
 - Build 9, OTA 4.
 - **Contact Us and Refunds & Cancellations pages added** (Account tab, next to
