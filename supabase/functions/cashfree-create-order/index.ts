@@ -30,11 +30,13 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { subscription_id, amount_paise } = await req.json()
+    // amount_paise from the app is ignored — the price is computed below. It
+    // used to be charged as sent, so a modified client could pay Rs 1 for a plan.
+    const { subscription_id, amount_paise: clientAmount } = await req.json()
 
-    if (!subscription_id || !amount_paise) {
+    if (!subscription_id) {
       return new Response(
-        JSON.stringify({ error: 'subscription_id and amount_paise are required' }),
+        JSON.stringify({ error: 'subscription_id is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -59,15 +61,30 @@ Deno.serve(async (req) => {
     // Verify the subscription belongs to this user
     const { data: sub, error: subErr } = await supabase
       .from('subscriptions')
-      .select('id, plan_id')
+      .select('id, plan_id, plans ( base_price, meals_total )')
       .eq('id', subscription_id)
       .eq('user_id', user.id)
       .single()
-    if (subErr || !sub) {
+    const plan = (sub as any)?.plans as { base_price: number; meals_total: number } | null
+    if (subErr || !sub || !plan) {
       return new Response(
         JSON.stringify({ error: 'Subscription not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // Server-side price, same formula the app displays (payment.tsx grandTotal):
+    // plan base price + sum(add-on price per meal) x meals in the plan.
+    const { data: subAddons } = await supabase
+      .from('subscription_addons')
+      .select('addons ( price_per_meal )')
+      .eq('subscription_id', subscription_id)
+    const addonPerMeal = (subAddons ?? []).reduce(
+      (sum: number, row: any) => sum + (row.addons?.price_per_meal ?? 0), 0
+    )
+    const amount_paise = plan.base_price + addonPerMeal * plan.meals_total
+    if (clientAmount != null && clientAmount !== amount_paise) {
+      console.warn('cashfree-create-order: app showed', clientAmount, 'but plan costs', amount_paise, subscription_id)
     }
 
     const { data: userRow } = await supabase

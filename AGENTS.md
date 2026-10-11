@@ -102,6 +102,16 @@ reflect the latest commits, that's expected, not a bug to fix.
   restaurant — never edit or delete them), so our endpoint also receives restaurant payments:
   `cashfree-webhook` ignores any order id that isn't `sub_…` or `topup_…`. Our orders do not set
   `order_meta.notify_url`, so the app does not depend on the restaurant's settings.
+- **Money rules since migration 044 (2026-10-12 security fixes).** Customers can only UPDATE
+  `orders.address_id` (column grant + `orders_guard_customer_update` trigger: open slot, own
+  address) and cannot write `order_addons` at all — any new client-side write to orders or cart
+  lines must go through an edge function. Delivery billing always recomputes the price
+  (`recompute_order_cart`), never trusts `cart_total`. Wallets are credited only from money
+  actually received: Cashfree payments via `cashfree-webhook` (`fund-subscription-wallet` only
+  credits a payment already marked paid), and cash-on-delivery via the admin's "Mark cash
+  received" (`markCodPaid`). A CoD plan still `pending` is delivered on credit, so its wallet
+  can go negative until the cash is marked. Plan prices are computed server-side
+  (`cashfree-create-order`); the amount the app sends is ignored.
 
 # UI/UX design system
 

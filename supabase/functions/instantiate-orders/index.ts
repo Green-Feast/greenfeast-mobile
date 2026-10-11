@@ -6,9 +6,16 @@ function toISO(date: Date): string {
   return date.toISOString().split('T')[0]
 }
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+// Same cutoffs as is_slot_locked (migration 031): 8 AM lunch, 1 PM dinner, IST.
+const SLOT_CUTOFF_HOUR: Record<'lunch' | 'dinner', number> = { lunch: 8, dinner: 13 }
+
+// The 14-day window starts from today's IST date. It used the UTC date, which
+// at the nightly 1 AM IST run is still yesterday — so the window started a day
+// in the past.
 function next14Days(): Date[] {
   const dates: Date[] = []
-  const today = new Date()
+  const today = new Date(Date.now() + IST_OFFSET_MS)
   today.setUTCHours(0, 0, 0, 0)
   for (let i = 0; i < 14; i++) {
     const d = new Date(today)
@@ -93,6 +100,9 @@ async function processSubscription(supabase: any, subId: string): Promise<number
   }
 
   let created = 0
+  const istNow = new Date(Date.now() + IST_OFFSET_MS)
+  const todayIST = toISO(istNow)
+  const istHour = istNow.getUTCHours()
 
   for (const date of next14Days()) {
     const dow = DOW_NAMES[date.getUTCDay()]
@@ -111,6 +121,10 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     if ((sub.meals_dinner ?? 0) > 0) slots.push('dinner')
 
     for (const slot of slots) {
+      // A slot already past today's cutoff is locked for the kitchen: creating
+      // it now (e.g. a 3 PM signup getting today's lunch) is a meal nobody cooks.
+      if (dateStr === todayIST && istHour >= SLOT_CUTOFF_HOUR[slot]) continue
+
       // Try weekly_menu first (by menu_type + day_of_week + meal_slot),
       // fall back to subscription_schedule (by day_of_week)
       let mealTemplateId = weeklyMenuMap[dowNum]?.[slot]

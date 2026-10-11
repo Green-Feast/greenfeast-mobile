@@ -1,9 +1,13 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-// Credits a subscription's wallet with the plan's grand total (base + add-ons),
-// computed SERVER-SIDE from the catalogue so the amount can never be inflated by
-// the client. Idempotent via wallet_credit(reference_id = subscription_id), so the
-// app's optimistic call and the Cashfree webhook can both fire safely.
+// Credits a subscription's wallet with the money actually received for it
+// through Cashfree — the amount of its paid payments row, never a catalogue
+// price. It used to credit the plan's price for ANY subscription the caller
+// owned, paid or not, and customers can create subscriptions themselves: free
+// wallet money on demand (2026-10-11 audit). Cash-on-delivery plans are credited
+// by the admin's "Mark cash received" instead. The webhook credits the same
+// payment itself (same reference), so this is only the app's optimistic call;
+// idempotent via wallet_credit(reference_id = subscription_id).
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -30,7 +34,7 @@ Deno.serve(async (req) => {
     // Resolve the subscription + plan. Non-service callers may only fund their own.
     const { data: sub } = await supabase
       .from('subscriptions')
-      .select('id, user_id, plan_name, plans ( base_price, meals_total )')
+      .select('id, user_id, plan_name')
       .eq('id', subscriptionId)
       .single()
 
@@ -45,21 +49,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    const plan = (sub as any).plans as { base_price: number; meals_total: number } | null
-    if (!plan) {
-      return new Response(JSON.stringify({ error: 'Plan not found' }), { status: 404, headers: corsHeaders })
-    }
-
-    // Add-on total = Σ(price_per_meal) × meals_total
-    const { data: subAddons } = await supabase
-      .from('subscription_addons')
-      .select('addons ( price_per_meal )')
+    // Only a Cashfree payment the webhook has confirmed counts (cash payments
+    // have no cf_order_id and are credited by the admin action).
+    const { data: paid } = await supabase
+      .from('payments')
+      .select('amount')
       .eq('subscription_id', subscriptionId)
+      .eq('status', 'paid')
+      .not('cf_order_id', 'is', null)
+      .order('created_at')
+      .limit(1)
+      .maybeSingle()
 
-    const addonPerMeal = (subAddons ?? []).reduce(
-      (s: number, row: any) => s + (row.addons?.price_per_meal ?? 0), 0
-    )
-    const amount = plan.base_price + addonPerMeal * plan.meals_total
+    if (!paid || !(paid.amount > 0)) {
+      return new Response(
+        JSON.stringify({ error: 'No confirmed payment for this subscription yet' }),
+        { status: 409, headers: corsHeaders }
+      )
+    }
+    const amount = paid.amount
 
     const { error: rpcErr } = await supabase.rpc('wallet_credit', {
       p_user: sub.user_id,

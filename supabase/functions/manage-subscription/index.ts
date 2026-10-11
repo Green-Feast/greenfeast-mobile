@@ -5,8 +5,28 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// IST calendar date. A UTC date is still "yesterday" between midnight and
+// 5:30 AM IST, which let a pause/cancel reach back into the previous day.
 function today(): string {
-  return new Date().toISOString().split('T')[0]
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
+}
+
+type OrderRef = { id: string; delivery_date: string; meal_slot: string }
+
+// Today's slots that are past their cutoff are already on the kitchen sheet:
+// pause / resume / cancel must leave those orders alone. Cancelling one meant a
+// cooked meal that was never billed; reviving one meant a meal the kitchen
+// never planned for.
+async function withoutLockedToday(supabase: any, rows: OrderRef[]): Promise<string[]> {
+  const t = today()
+  const locked = new Set<string>()
+  for (const slot of ['lunch', 'dinner']) {
+    const { data } = await supabase.rpc('is_slot_locked', { p_date: t, p_slot: slot })
+    if (data) locked.add(slot)
+  }
+  return rows
+    .filter((o) => !(o.delivery_date === t && locked.has(o.meal_slot)))
+    .map((o) => o.id)
 }
 
 Deno.serve(async (req) => {
@@ -60,13 +80,22 @@ Deno.serve(async (req) => {
         .update({ status: 'paused', pause_from, pause_until })
         .eq('id', subscription_id)
 
-      await supabase
+      const { data: inRange } = await supabase
         .from('orders')
-        .update({ status: 'cancelled' })
+        .select('id, delivery_date, meal_slot')
         .eq('subscription_id', subscription_id)
         .gte('delivery_date', pause_from)
         .lte('delivery_date', pause_until)
         .in('status', ['scheduled', 'confirmed'])
+      const toCancel = await withoutLockedToday(supabase, (inRange ?? []) as OrderRef[])
+      if (toCancel.length > 0) {
+        // skip_reason 'pause' marks these as the pause's own cancellations, so
+        // resume revives exactly these (and not, say, a dish the user removed).
+        await supabase
+          .from('orders')
+          .update({ status: 'cancelled', skip_reason: 'pause' })
+          .in('id', toCancel)
+      }
 
       return json({ ok: true, action: 'paused', pause_from, pause_until })
     }
@@ -85,12 +114,24 @@ Deno.serve(async (req) => {
       // subscription, orders only reach 'cancelled' via pause (skips use
       // 'skipped'), so this safely restores the schedule. Without this, the
       // re-instantiate below hits the unique constraint and leaves them cancelled.
-      await supabase
+      // Only the pause's own cancellations: skip_reason 'pause', or — for
+      // pauses made before that marker existed — base meals with no reason.
+      // Extra dishes the user removed are 'cancelled' too and must stay gone
+      // (reviving them billed the user for dishes they had removed).
+      const { data: paused } = await supabase
         .from('orders')
-        .update({ status: 'scheduled' })
+        .select('id, delivery_date, meal_slot')
         .eq('subscription_id', subscription_id)
         .gte('delivery_date', today())
         .eq('status', 'cancelled')
+        .or('skip_reason.eq.pause,and(skip_reason.is.null,extra_dish.eq.false)')
+      const toRevive = await withoutLockedToday(supabase, (paused ?? []) as OrderRef[])
+      if (toRevive.length > 0) {
+        await supabase
+          .from('orders')
+          .update({ status: 'scheduled', skip_reason: null })
+          .in('id', toRevive)
+      }
 
       // Re-instantiate the next 14 days now that the pause is cleared
       const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -157,12 +198,16 @@ Deno.serve(async (req) => {
         .update({ status: 'cancelled' })
         .eq('id', subscription_id)
 
-      await supabase
+      const { data: upcoming } = await supabase
         .from('orders')
-        .update({ status: 'cancelled' })
+        .select('id, delivery_date, meal_slot')
         .eq('subscription_id', subscription_id)
         .gte('delivery_date', today())
         .in('status', ['scheduled', 'confirmed'])
+      const toCancel = await withoutLockedToday(supabase, (upcoming ?? []) as OrderRef[])
+      if (toCancel.length > 0) {
+        await supabase.from('orders').update({ status: 'cancelled' }).in('id', toCancel)
+      }
 
       return json({ ok: true, action: 'cancelled' })
     }

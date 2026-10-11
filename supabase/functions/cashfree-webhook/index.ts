@@ -63,13 +63,9 @@ Deno.serve(async (req) => {
 
       const { data: paymentRow, error: payErr } = await supabase
         .from('payments')
-        .update({
-          status: 'paid',
-          cf_payment_id: String(payment.cf_payment_id),
-        })
+        .select('id, subscription_id, user_id, amount')
         .eq('cf_order_id', order.order_id)
-        .select('subscription_id, user_id, amount')
-        .single()
+        .maybeSingle()
 
       // If this lookup fails we credit nobody and activate nothing — the
       // customer has paid and gets silence. Log loudly and 500 so Cashfree
@@ -89,6 +85,36 @@ Deno.serve(async (req) => {
       // everywhere else, so convert on the way in.
       const capturedPaise = Math.round((payment.payment_amount ?? 0) * 100)
 
+      // A plan payment must cover the price set when the order was created
+      // (payments.amount, computed server-side by cashfree-create-order). Should
+      // never happen now; if it does, activate and credit nothing and leave it
+      // for a human. Marked 'failed' (payment id kept) so the app's
+      // fund-subscription-wallet call, which needs a 'paid' row, can't credit
+      // it either.
+      if (paymentRow.subscription_id && capturedPaise < paymentRow.amount) {
+        console.error(
+          'cashfree-webhook: UNDERPAID plan payment', order.order_id,
+          'captured', capturedPaise, 'expected', paymentRow.amount
+        )
+        await supabase
+          .from('payments')
+          .update({ status: 'failed', cf_payment_id: String(payment.cf_payment_id) })
+          .eq('id', paymentRow.id)
+        return new Response(JSON.stringify({ ok: true, held: 'underpaid' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      const { error: markErr } = await supabase
+        .from('payments')
+        .update({ status: 'paid', cf_payment_id: String(payment.cf_payment_id) })
+        .eq('id', paymentRow.id)
+      if (markErr) {
+        console.error('cashfree-webhook: could not mark payment paid:', markErr.message)
+        return new Response(JSON.stringify({ error: 'mark paid failed' }), { status: 500 })
+      }
+
       // Wallet top-up: no subscription, credit the captured amount directly.
       if (!paymentRow.subscription_id) {
         const { error: creditErr } = await supabase.rpc('wallet_credit', {
@@ -107,7 +133,7 @@ Deno.serve(async (req) => {
       if (paymentRow.subscription_id) {
         const { data: sub } = await supabase
           .from('subscriptions')
-          .select('plan_id, plan_name, plans ( base_price, meals_total )')
+          .select('plan_id, plan_name')
           .eq('id', paymentRow.subscription_id)
           .single()
 
@@ -134,32 +160,19 @@ Deno.serve(async (req) => {
         // Fund the wallet here directly rather than over HTTP via
         // fund-subscription-wallet: that function sits behind the gateway's JWT
         // check, and this runtime's SUPABASE_SERVICE_ROLE_KEY is an sb_secret_…
-        // key, not a JWT, so that call was always rejected and onboarding
-        // wallets only got funded by the app's own call. Same server-side
-        // amount (plan base + add-ons × meals) and the same reference
-        // (subscription_id) as fund-subscription-wallet, so whichever of the two
-        // lands second is a no-op.
-        const plan = (sub as any)?.plans as { base_price: number; meals_total: number } | null
-        if (plan) {
-          const { data: subAddons } = await supabase
-            .from('subscription_addons')
-            .select('addons ( price_per_meal )')
-            .eq('subscription_id', paymentRow.subscription_id)
-          const addonPerMeal = (subAddons ?? []).reduce(
-            (sum: number, row: any) => sum + (row.addons?.price_per_meal ?? 0), 0
-          )
-          const { error: fundErr } = await supabase.rpc('wallet_credit', {
-            p_user: paymentRow.user_id,
-            p_amount: plan.base_price + addonPerMeal * plan.meals_total,
-            p_reason: `Plan payment — ${(sub as any)?.plan_name ?? 'Subscription'}`,
-            p_reference_id: paymentRow.subscription_id,
-          })
-          if (fundErr) {
-            console.error('cashfree-webhook: plan wallet credit failed:', fundErr.message)
-            return new Response(JSON.stringify({ error: 'credit failed' }), { status: 500 })
-          }
-        } else {
-          console.error('cashfree-webhook: no plan for subscription', paymentRow.subscription_id)
+        // key, not a JWT, so that call was always rejected. Credits the amount
+        // this order was created for (= what was just captured, checked above)
+        // with the same reference (subscription_id) as fund-subscription-wallet,
+        // so whichever of the two lands second is a no-op.
+        const { error: fundErr } = await supabase.rpc('wallet_credit', {
+          p_user: paymentRow.user_id,
+          p_amount: paymentRow.amount,
+          p_reason: `Plan payment — ${(sub as any)?.plan_name ?? 'Subscription'}`,
+          p_reference_id: paymentRow.subscription_id,
+        })
+        if (fundErr) {
+          console.error('cashfree-webhook: plan wallet credit failed:', fundErr.message)
+          return new Response(JSON.stringify({ error: 'credit failed' }), { status: 500 })
         }
       }
     }
@@ -174,6 +187,9 @@ Deno.serve(async (req) => {
           cf_payment_id: payment?.cf_payment_id ? String(payment.cf_payment_id) : null,
         })
         .eq('cf_order_id', order.order_id)
+        // An order can have several attempts, and webhooks can arrive out of
+        // order: a failed attempt's event must not overwrite a later success.
+        .eq('status', 'created')
       if (failErr) {
         console.error('cashfree-webhook: could not mark payment failed:', failErr.message)
       }
