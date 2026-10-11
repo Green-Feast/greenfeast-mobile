@@ -105,6 +105,22 @@ function fmtDate(dateStr: string | null) {
   if (!dateStr) return '—'
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
+// For full timestamps (wallet_transactions.created_at), not YYYY-MM-DD dates —
+// fmtDate's 'T00:00:00' suffix turns a timestamp into "Invalid Date". Postgres
+// returns microseconds (…:47.962139+00:00); trimmed to milliseconds so every
+// JS engine parses it.
+function fmtTimestamp(ts: string | null) {
+  if (!ts) return '—'
+  const d = new Date(
+    ts.replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1').replace(/([+-]\d{2})$/, '$1:00')
+  )
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+    timeZone: 'Asia/Kolkata',
+  })
+}
 function fmtDateLong(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
 }
@@ -1449,7 +1465,7 @@ export default function SubscriptionScreen() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={s.transactionReason}>{t.reason}</Text>
-                      <Text style={s.transactionDate}>{fmtDate(t.created_at)}</Text>
+                      <Text style={s.transactionDate}>{fmtTimestamp(t.created_at)}</Text>
                     </View>
                     <Text style={[s.transactionAmount, t.type === 'credit' ? s.transactionCredit : s.transactionDebit]}>
                       {t.type === 'credit' ? '+' : '−'}₹{fmt(t.amount)}

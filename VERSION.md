@@ -52,6 +52,12 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.6 — 2026-10-11
+- Build 9, OTA 6.
+- **Wallet transactions show real dates.** The list ran full timestamps through
+  the date-only formatter, which produced "Invalid Date" on every row. Rows now
+  show date and time in IST (e.g. "10 Oct 2026, 3:36 pm"), newest first.
+
 ### 1.9.5 — 2026-10-10
 - Build 9, OTA 5.
 - **Home, My Plan and Menu refresh themselves.** New `useAutoRefresh` hook
