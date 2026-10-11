@@ -60,6 +60,7 @@ export default function AccountScreen() {
 
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [customerCode, setCustomerCode] = useState('')
   const [faqExpanded, setFaqExpanded] = useState(false)
   const [openFaq, setOpenFaq] = useState<number | null>(null)
   const [logoutConfirm, setLogoutConfirm] = useState(false)
@@ -127,11 +128,12 @@ export default function AccountScreen() {
     if (!user) return
     setError(false)
     try {
-      const userRes = await supabase.from('users').select('name, phone').eq('id', user.id).maybeSingle()
+      const userRes = await supabase.from('users').select('name, phone, customer_code').eq('id', user.id).maybeSingle()
       if (userRes.error && !userRes.data) throw userRes.error
       const metaName = (user.user_metadata?.full_name as string) ?? (user.user_metadata?.name as string) ?? ''
       setName(userRes.data?.name || metaName || '')
       setPhone(userRes.data?.phone || user.email || '')
+      setCustomerCode(userRes.data?.customer_code ?? '')
     } catch {
       setError(true)
     }
@@ -230,6 +232,8 @@ export default function AccountScreen() {
               <View>
                 <Text style={styles.profileName}>{name || '—'}</Text>
                 <Text style={styles.profilePhone}>{phone || '—'}</Text>
+                {/* Permanent customer ID (GF-000123) — quote it to support. */}
+                {customerCode ? <Text style={styles.profileCode}>Customer ID {customerCode}</Text> : null}
               </View>
             </View>
           </View>
@@ -474,6 +478,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarText: { fontFamily: Fonts.bodyBold, fontSize: 18, color: '#fff' },
+  profileCode: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500, marginTop: 4, letterSpacing: 0.3 },
   profileName: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.ink900 },
   profilePhone: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, marginTop: 2 },
 

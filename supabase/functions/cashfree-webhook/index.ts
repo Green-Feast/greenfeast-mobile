@@ -44,6 +44,59 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
+    // Refund outcomes for bank refunds started from the admin (admin-refund).
+    // Our refund ids start with gf_; anything else is the restaurant's.
+    if (event.type === 'REFUND_STATUS_WEBHOOK') {
+      const refund = event?.data?.refund ?? {}
+      const refundId: string = refund.refund_id ?? ''
+      if (!refundId.startsWith('gf_')) {
+        return new Response(JSON.stringify({ ok: true, ignored: true }), { status: 200 })
+      }
+      const { data: row } = await supabase
+        .from('refunds')
+        .select('id, user_id, amount, status')
+        .eq('cf_refund_id', refundId)
+        .maybeSingle()
+      if (!row) {
+        console.error('cashfree-webhook: no refunds row for', refundId)
+        return new Response(JSON.stringify({ error: 'refund row not found' }), { status: 500 })
+      }
+      const cfStatus = String(refund.refund_status ?? '').toUpperCase()
+      const amountText = `₹${(row.amount / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+
+      if (cfStatus === 'SUCCESS' && row.status !== 'completed') {
+        await supabase.from('refunds').update({ status: 'completed' }).eq('id', row.id)
+        await supabase.rpc('notify_user', {
+          p_user: row.user_id,
+          p_title: 'Refund processed',
+          p_body: `${amountText} has been refunded to your original payment method. It can take a few working days to show in your account.`,
+          p_type: 'custom',
+        })
+      } else if ((cfStatus === 'FAILED' || cfStatus === 'CANCELLED') && row.status === 'pending') {
+        // The wallet was debited when the refund started — give it back.
+        const { error: creditErr } = await supabase.rpc('wallet_credit', {
+          p_user: row.user_id,
+          p_amount: row.amount,
+          p_reason: 'Refund to bank failed — amount returned to wallet',
+          p_reference_id: `refund_fail_${row.id}`,
+        })
+        if (creditErr) {
+          console.error('cashfree-webhook: refund reversal failed:', creditErr.message)
+          return new Response(JSON.stringify({ error: 'reversal failed' }), { status: 500 })
+        }
+        await supabase.from('refunds')
+          .update({ status: 'failed', failure_note: refund.status_description ?? cfStatus })
+          .eq('id', row.id)
+        await supabase.rpc('notify_user', {
+          p_user: row.user_id,
+          p_title: 'Refund could not be processed',
+          p_body: `Your bank refund of ${amountText} didn't go through, so the amount is back in your GreenFeast wallet. Contact us if you need help.`,
+          p_type: 'custom',
+        })
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    }
+
     // The Cashfree account is shared with the restaurant's Petpooja POS. If an
     // account-wide endpoint ever points here, its payments would arrive too —
     // acknowledge and ignore anything that isn't one of our own order ids

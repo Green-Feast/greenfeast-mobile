@@ -112,6 +112,15 @@ reflect the latest commits, that's expected, not a bug to fix.
   received" (`markCodPaid`). A CoD plan still `pending` is delivered on credit, so its wallet
   can go negative until the cash is marked. Plan prices are computed server-side
   (`cashfree-create-order`); the amount the app sends is ignored.
+- **Scheduled jobs live in the database (pg_cron, UTC), not only on Vercel.** Migration 045:
+  `enforce_slot_balance('lunch'|'dinner')` at 8 AM / 1 PM IST skips orders the wallet can't
+  cover before the kitchen cooks them; `warn_low_balance()` at 8 PM IST warns about tomorrow.
+  Both notify through `notify_user()` (in-app row + Expo push via pg_net). List jobs with
+  `select * from cron.job`. Order creation is still the Vercel cron (1 AM IST).
+- **Refunds** go through the admin Money tab: to wallet (store credit, `refundToWallet`) or to
+  the bank via Cashfree (`admin-refund` edge function, `--no-verify-jwt`, INTERNAL_FN_SECRET),
+  which debits the wallet first and is completed/reversed by `REFUND_STATUS_WEBHOOK`. Ledger:
+  `refunds` table. Every user has a permanent `users.customer_code` (GF-000001…).
 
 # UI/UX design system
 
