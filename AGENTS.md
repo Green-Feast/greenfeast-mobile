@@ -93,6 +93,15 @@ reflect the latest commits, that's expected, not a bug to fix.
   cron got `401 Invalid JWT` before the function ran — orders were only ever created when a
   subscriber happened to open My Plan (its auto-sync sends a real user JWT). Found and fixed
   2026-10-10. There is no `supabase/config.toml`, so the flag must be passed on every deploy.
+- **Cashfree webhooks: GreenFeast has its own account-level endpoint** (Cashfree → Developers →
+  Webhooks, production: `…/functions/v1/cashfree-webhook`, version 2026-01-01, events success /
+  failed / user-dropped payment). It is configured per environment — a missing production
+  endpoint meant the first production top-up (2026-10-11) was paid but never credited; add the
+  same endpoint under Test mode if sandbox is ever used again. The Cashfree account is shared
+  with the restaurant's Petpooja POS (its endpoint and the `NOTIFY_URL` rows belong to the
+  restaurant — never edit or delete them), so our endpoint also receives restaurant payments:
+  `cashfree-webhook` ignores any order id that isn't `sub_…` or `topup_…`. Our orders do not set
+  `order_meta.notify_url`, so the app does not depend on the restaurant's settings.
 
 # UI/UX design system
 

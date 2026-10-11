@@ -44,6 +44,19 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
+    // The Cashfree account is shared with the restaurant's Petpooja POS. If an
+    // account-wide endpoint ever points here, its payments would arrive too —
+    // acknowledge and ignore anything that isn't one of our own order ids
+    // (sub_… from cashfree-create-order, topup_… from wallet-topup) instead of
+    // 500-ing and making Cashfree retry it forever.
+    const orderId: string = event?.data?.order?.order_id ?? ''
+    if (!orderId.startsWith('sub_') && !orderId.startsWith('topup_')) {
+      return new Response(JSON.stringify({ ok: true, ignored: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     if (event.type === 'PAYMENT_SUCCESS_WEBHOOK') {
       const order = event.data.order
       const payment = event.data.payment
@@ -78,18 +91,23 @@ Deno.serve(async (req) => {
 
       // Wallet top-up: no subscription, credit the captured amount directly.
       if (!paymentRow.subscription_id) {
-        await supabase.rpc('wallet_credit', {
+        const { error: creditErr } = await supabase.rpc('wallet_credit', {
           p_user: paymentRow.user_id,
           p_amount: capturedPaise,
           p_reason: 'Wallet top-up',
           p_reference_id: String(payment.cf_payment_id),
         })
+        // 500 → Cashfree retries; the credit is idempotent on cf_payment_id.
+        if (creditErr) {
+          console.error('cashfree-webhook: top-up credit failed:', creditErr.message)
+          return new Response(JSON.stringify({ error: 'credit failed' }), { status: 500 })
+        }
       }
 
       if (paymentRow.subscription_id) {
         const { data: sub } = await supabase
           .from('subscriptions')
-          .select('plan_id')
+          .select('plan_id, plan_name, plans ( base_price, meals_total )')
           .eq('id', paymentRow.subscription_id)
           .single()
 
@@ -113,16 +131,36 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ subscription_id: paymentRow.subscription_id }),
         }).catch(err => console.error('Failed to trigger instantiate-orders:', err))
 
-        // Fund the wallet (authoritative server-side credit; idempotent on
-        // subscription_id, so the app's optimistic call won't double-count).
-        await fetch(`${SUPABASE_URL}/functions/v1/fund-subscription-wallet`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SERVICE_KEY}`,
-          },
-          body: JSON.stringify({ subscription_id: paymentRow.subscription_id }),
-        }).catch(err => console.error('Failed to trigger fund-subscription-wallet:', err))
+        // Fund the wallet here directly rather than over HTTP via
+        // fund-subscription-wallet: that function sits behind the gateway's JWT
+        // check, and this runtime's SUPABASE_SERVICE_ROLE_KEY is an sb_secret_…
+        // key, not a JWT, so that call was always rejected and onboarding
+        // wallets only got funded by the app's own call. Same server-side
+        // amount (plan base + add-ons × meals) and the same reference
+        // (subscription_id) as fund-subscription-wallet, so whichever of the two
+        // lands second is a no-op.
+        const plan = (sub as any)?.plans as { base_price: number; meals_total: number } | null
+        if (plan) {
+          const { data: subAddons } = await supabase
+            .from('subscription_addons')
+            .select('addons ( price_per_meal )')
+            .eq('subscription_id', paymentRow.subscription_id)
+          const addonPerMeal = (subAddons ?? []).reduce(
+            (sum: number, row: any) => sum + (row.addons?.price_per_meal ?? 0), 0
+          )
+          const { error: fundErr } = await supabase.rpc('wallet_credit', {
+            p_user: paymentRow.user_id,
+            p_amount: plan.base_price + addonPerMeal * plan.meals_total,
+            p_reason: `Plan payment — ${(sub as any)?.plan_name ?? 'Subscription'}`,
+            p_reference_id: paymentRow.subscription_id,
+          })
+          if (fundErr) {
+            console.error('cashfree-webhook: plan wallet credit failed:', fundErr.message)
+            return new Response(JSON.stringify({ error: 'credit failed' }), { status: 500 })
+          }
+        } else {
+          console.error('cashfree-webhook: no plan for subscription', paymentRow.subscription_id)
+        }
       }
     }
 
