@@ -121,6 +121,13 @@ reflect the latest commits, that's expected, not a bug to fix.
   the bank via Cashfree (`admin-refund` edge function, `--no-verify-jwt`, INTERNAL_FN_SECRET),
   which debits the wallet first and is completed/reversed by `REFUND_STATUS_WEBHOOK`. Ledger:
   `refunds` table. Every user has a permanent `users.customer_code` (GF-000001…).
+- **Renewals create a new subscription.** A plan is finished when `deliveries_remaining` hits 0;
+  order creation never schedules past it and the cutoff check skips leftovers
+  (`plan_finished`). My Plan's renew sheet (`RenewPlanSheet`) offers repeat / edit (via the
+  `renew-subscription` function, which copies the plan into a new pending subscription with
+  `renewed_from`), redo onboarding, or cancel. Payment goes through `cashfree-create-order` like a
+  first purchase; on activation `retire_previous_subscriptions()` expires the finished plan,
+  cancels its leftover orders and passes on its delivery batches.
 
 # UI/UX design system
 

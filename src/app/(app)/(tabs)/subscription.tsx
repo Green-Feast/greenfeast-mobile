@@ -25,6 +25,9 @@ import { useAvailabilityStore, isMealAvailable, isAddonAvailable } from '@/store
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
+import RenewPlanSheet, { type RenewConfig, type RenewPaymentState, type RenewPlanOption } from '@/components/RenewPlanSheet'
+import { useOnboardingStore } from '@/store/onboarding'
+import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import MacroRow from '@/components/MacroRow'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -33,6 +36,9 @@ type SubData = {
   id: string
   status: string
   payment_method: string
+  plan_id: string | null
+  meals_lunch: number | null
+  meals_dinner: number | null
   plan_name: string | null
   deliveries_remaining: number
   start_date: string | null
@@ -176,6 +182,15 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showAddMoney, setShowAddMoney] = useState(false)
+  // Renewal (plan's meals used up): sheet + payment progress. The Cashfree
+  // callback below is shared with wallet top-ups; paymentPurpose says which
+  // one a returning payment belongs to.
+  const [showRenew, setShowRenew] = useState(false)
+  const [renewState, setRenewState] = useState<RenewPaymentState>('idle')
+  const [renewMessage, setRenewMessage] = useState('')
+  const [plansCatalog, setPlansCatalog] = useState<RenewPlanOption[]>([])
+  const paymentPurpose = useRef<'topup' | 'renewal'>('topup')
+  const renewFromSubId = useRef<string | null>(null)
   const [freeMealIds, setFreeMealIds] = useState<Set<string>>(new Set())
   const [topupAmountPaise, setTopupAmountPaise] = useState(50000) // ₹500 default
   const [topupCustom, setTopupCustom] = useState('')
@@ -192,7 +207,7 @@ export default function SubscriptionScreen() {
 
     const { data: subData, error: subErr } = await supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, menu_type, plans ( name, meals_total, days_per_week, base_price )')
+      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, menu_type, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
       .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
       .order('created_at', { ascending: false })
@@ -275,6 +290,12 @@ export default function SubscriptionScreen() {
       .select('id, name, price_per_meal')
       .eq('is_active', true)
       .then(({ data }) => setAllAddons((data as AddonCatalog[]) ?? []))
+    supabase
+      .from('plans')
+      .select('id, name, base_price, meals_total')
+      .eq('is_active', true)
+      .order('base_price')
+      .then(({ data }) => setPlansCatalog((data as RenewPlanOption[]) ?? []))
   }, [])
 
   useEffect(() => {
@@ -509,12 +530,43 @@ export default function SubscriptionScreen() {
   // The native SDK's callback is registered once per mount and can't take
   // fresh props/state each render — a ref keeps it reading the latest
   // fetch functions instead of a stale closure from mount time.
-  const latestTopupHandlers = useRef({ fetchAll, fetchTransactions })
-  latestTopupHandlers.current = { fetchAll, fetchTransactions }
+  // After a renewal payment: the webhook activates the new plan within a few
+  // seconds. Poll until it shows up (renewed_from = the finished plan).
+  async function confirmRenewal() {
+    setRenewState('confirming')
+    setRenewMessage('')
+    const fromId = renewFromSubId.current
+    for (let i = 0; i < 15; i++) {
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('id')
+        .eq('renewed_from', fromId ?? '')
+        .eq('status', 'active')
+        .maybeSingle()
+      if (data) {
+        await fetchAll()
+        setRenewState('done')
+        setRenewMessage('Your new plan is active and your meals are being scheduled.')
+        return
+      }
+      await new Promise((r) => setTimeout(r, 2000))
+    }
+    await fetchAll()
+    setRenewState('done')
+    setRenewMessage('Payment received — your new plan will show up here in a minute.')
+  }
+
+  const latestTopupHandlers = useRef({ fetchAll, fetchTransactions, confirmRenewal })
+  latestTopupHandlers.current = { fetchAll, fetchTransactions, confirmRenewal }
 
   useEffect(() => {
     const callback: CFCallback = {
       onVerify: () => {
+        if (paymentPurpose.current === 'renewal') {
+          paymentPurpose.current = 'topup'
+          latestTopupHandlers.current.confirmRenewal()
+          return
+        }
         // Optimistic refresh — the webhook is the authoritative credit,
         // this just reflects it in the UI as soon as possible.
         latestTopupHandlers.current.fetchAll()
@@ -522,6 +574,12 @@ export default function SubscriptionScreen() {
         setShowTransactions(true)
       },
       onError: (error: CFErrorResponse) => {
+        if (paymentPurpose.current === 'renewal') {
+          paymentPurpose.current = 'topup'
+          setRenewState('failed')
+          setRenewMessage(error.getMessage() || 'The payment was not completed. Nothing was charged.')
+          return
+        }
         console.warn('Wallet top-up failed:', error.getMessage())
       },
     }
@@ -535,6 +593,64 @@ export default function SubscriptionScreen() {
     // silently unhook onboarding's live listener instead of this one.
     return setActiveCashfreeCallback(callback)
   }, [])
+
+  async function startRenewal(cfg: RenewConfig) {
+    if (!sub) return
+    setRenewState('starting')
+    setRenewMessage('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Please sign in again.')
+      const headers = { Authorization: `Bearer ${session.access_token}` }
+
+      const renewal = await supabase.functions.invoke('renew-subscription', {
+        body: { from_subscription_id: sub.id, ...cfg },
+        headers,
+      })
+      if (renewal.error) throw new Error(await extractFunctionErrorMessage(renewal.error, 'Could not start the renewal.'))
+
+      const order = await supabase.functions.invoke('cashfree-create-order', {
+        body: { subscription_id: renewal.data.subscription_id },
+        headers,
+      })
+      if (order.error) throw new Error(await extractFunctionErrorMessage(order.error, 'Could not start the payment.'))
+
+      paymentPurpose.current = 'renewal'
+      renewFromSubId.current = sub.id
+      setRenewState('paying')
+      CFPaymentGatewayService.doWebPayment(new CFSession(
+        order.data.payment_session_id,
+        order.data.order_id,
+        order.data.environment === 'production' ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX
+      ))
+    } catch (e: any) {
+      paymentPurpose.current = 'topup'
+      setRenewState('failed')
+      setRenewMessage(e?.message ?? 'Something went wrong. Please try again.')
+    }
+  }
+
+  async function cancelFinishedPlan() {
+    if (!sub) return
+    const { data: { session } } = await supabase.auth.getSession()
+    const { error } = await supabase.functions.invoke('manage-subscription', {
+      body: { action: 'cancel', subscription_id: sub.id },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    })
+    if (error) {
+      setRenewState('failed')
+      setRenewMessage(await extractFunctionErrorMessage(error, 'Could not cancel the plan. Please try again.'))
+      return
+    }
+    setShowRenew(false)
+    await fetchAll()
+  }
+
+  function redoOnboarding() {
+    setShowRenew(false)
+    useOnboardingStore.getState().reset()
+    router.push('/(onboarding)/health' as any)
+  }
 
   async function createTopupOrder() {
     if (!user) return
@@ -696,6 +812,18 @@ export default function SubscriptionScreen() {
     (o.order_addons ?? []).filter(l => l.kind === 'addon').reduce((sum, l) => sum + (l.unit_price ?? 0) * (l.quantity ?? 1), 0)
   const feeCost = (o: OrderItem) =>
     (o.switch_fee_paise ?? 0) + (o.order_addons ?? []).filter(l => l.kind === 'fee').reduce((sum, l) => sum + (l.unit_price ?? 0) * (l.quantity ?? 1), 0)
+  // Cost of the next slot that's still open (not past cutoff) — for the
+  // low-wallet banner.
+  const nextOpen = weekOrders
+    .filter((o) => (o.status === 'scheduled' || o.status === 'confirmed') && !isSlotLocked(o.delivery_date, o.meal_slot as 'lunch' | 'dinner'))
+    .sort((a, b) => a.delivery_date.localeCompare(b.delivery_date) || (a.meal_slot === 'lunch' ? 0 : 1) - (b.meal_slot === 'lunch' ? 0 : 1))[0]
+  const nextMealCost = nextOpen
+    ? weekOrders
+        .filter((o) => o.delivery_date === nextOpen.delivery_date && o.meal_slot === nextOpen.meal_slot
+          && (o.status === 'scheduled' || o.status === 'confirmed'))
+        .reduce((sum, o) => sum + orderBase(o) + addonLinesCost(o) + feeCost(o), 0)
+    : 0
+
   const dayMealsAddons = dayAllOrders.reduce((sum, o) => sum + orderBase(o) + addonLinesCost(o), 0)
   const daySwapFees = dayAllOrders.reduce((sum, o) => sum + feeCost(o), 0)
   const dayTotal = dayMealsAddons + daySwapFees
@@ -977,14 +1105,17 @@ export default function SubscriptionScreen() {
           )}
         </View>
 
-        {/* RENEWAL ALERT */}
-        {remaining === 0 && (
+        {/* LOW WALLET — meals left on the plan, but not the money for the next one */}
+        {remaining > 0 && nextMealCost > 0 && walletBalance !== null && walletBalance < nextMealCost && (
           <View style={s.renewalAlert}>
             <View style={s.renewalAlertContent}>
-              <AlertCircle size={20} color={Colors.accent} style={{ marginRight: 10 }} />
+              <Wallet size={20} color={Colors.accent} style={{ marginRight: 10 }} />
               <View style={{ flex: 1 }}>
-                <Text style={s.renewalAlertTitle}>Plan expired</Text>
-                <Text style={s.renewalAlertText}>Renew to keep receiving meals</Text>
+                <Text style={s.renewalAlertTitle}>Your wallet is running low</Text>
+                <Text style={s.renewalAlertText}>
+                  Your next meal costs ₹{fmt(nextMealCost)} and your wallet has ₹{fmt(Math.max(walletBalance, 0))}.
+                  Top up before the cutoff so it isn't skipped.
+                </Text>
               </View>
             </View>
             <View style={s.renewalAlertBtns}>
@@ -992,19 +1123,54 @@ export default function SubscriptionScreen() {
                 style={({ pressed }) => [s.renewalAlertBtn, s.renewalAlertBtnPrimary, pressed && { opacity: 0.85 }]}
                 onPress={() => setShowAddMoney(true)}
               >
-                <Text style={s.renewalAlertBtnText}>Renew plan</Text>
+                <Text style={s.renewalAlertBtnText}>Add money</Text>
               </Pressable>
+            </View>
+          </View>
+        )}
+
+        {/* PLAN FINISHED — renew (repeat / edit / new plan) or cancel */}
+        {remaining === 0 && (
+          <View style={s.renewalAlert}>
+            <View style={s.renewalAlertContent}>
+              <AlertCircle size={20} color={Colors.accent} style={{ marginRight: 10 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.renewalAlertTitle}>Your plan's meals are used up</Text>
+                <Text style={s.renewalAlertText}>Renew to keep your meals coming.</Text>
+              </View>
+            </View>
+            <View style={s.renewalAlertBtns}>
               <Pressable
-                style={({ pressed }) => [s.renewalAlertBtn, s.renewalAlertBtnGhost, pressed && { opacity: 0.7 }]}
-                onPress={() => router.push('/(app)/plan-settings')}
+                style={({ pressed }) => [s.renewalAlertBtn, s.renewalAlertBtnPrimary, pressed && { opacity: 0.85 }]}
+                onPress={() => { setRenewState('idle'); setRenewMessage(''); setShowRenew(true) }}
               >
-                <Text style={s.renewalAlertBtnGhostText}>Change plan</Text>
+                <Text style={s.renewalAlertBtnText}>Renew plan</Text>
               </Pressable>
             </View>
           </View>
         )}
 
       </ScrollView>
+
+      <RenewPlanSheet
+        visible={showRenew}
+        onClose={() => { if (renewState === 'done') setRenewState('idle'); setShowRenew(false) }}
+        planName={sub.plan_name}
+        current={{
+          plan_id: sub.plan_id ?? 'plan15',
+          meals_lunch: sub.meals_lunch ?? 1,
+          meals_dinner: sub.meals_dinner ?? 0,
+          addon_ids: subAddons.map((a) => a.addon_id),
+        }}
+        plans={plansCatalog}
+        addons={allAddons}
+        walletBalance={walletBalance}
+        paymentState={renewState}
+        paymentMessage={renewMessage}
+        onRenew={startRenewal}
+        onRedoOnboarding={redoOnboarding}
+        onCancelPlan={cancelFinishedPlan}
+      />
 
       {/* Skip confirm dialog */}
       <Modal

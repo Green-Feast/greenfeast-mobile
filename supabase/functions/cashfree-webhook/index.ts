@@ -198,6 +198,14 @@ Deno.serve(async (req) => {
           .eq('id', paymentRow.subscription_id)
           .eq('status', 'pending') // idempotent guard — don't overwrite if already active
 
+        // A renewal (or a new plan after the old one ran out) closes the
+        // customer's finished plan and inherits its delivery batch. Before
+        // instantiate-orders below, so the new orders get that batch.
+        const { error: retireErr } = await supabase.rpc('retire_previous_subscriptions', {
+          p_new_sub: paymentRow.subscription_id,
+        })
+        if (retireErr) console.error('cashfree-webhook: retire_previous_subscriptions failed:', retireErr.message)
+
         // Instantiate orders for next 14 days now that subscription is active
         const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
         const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!

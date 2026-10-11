@@ -28,7 +28,7 @@ function next14Days(): Date[] {
 async function processSubscription(supabase: any, subId: string): Promise<number> {
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id')
+    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining')
     .eq('id', subId)
     .single()
 
@@ -99,6 +99,19 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     return ingredientCache[templateId]
   }
 
+  // Never schedule more meals than the plan has left: what's already
+  // scheduled counts against deliveries_remaining, and once it's used up the
+  // plan is finished until it's renewed. A pending CoD plan isn't activated
+  // yet (counter still 0), so its allowance is the plan size.
+  const allowance = sub.status === 'pending' ? (plan?.meals_total ?? 0) : (sub.deliveries_remaining ?? 0)
+  const { data: upcoming } = await supabase
+    .from('orders')
+    .select('quantity')
+    .eq('subscription_id', subId)
+    .gte('delivery_date', toISO(new Date(Date.now() + IST_OFFSET_MS)))
+    .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery'])
+  let capacity = allowance - (upcoming ?? []).reduce((s: number, o: any) => s + (o.quantity ?? 1), 0)
+
   let created = 0
   const istNow = new Date(Date.now() + IST_OFFSET_MS)
   const todayIST = toISO(istNow)
@@ -132,6 +145,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       if (!mealTemplateId) continue
 
       const slotQty = slot === 'lunch' ? (sub.meals_lunch ?? 1) : (sub.meals_dinner ?? 1)
+      if (slotQty > capacity) continue
 
       const { data: order, error: insertErr } = await supabase
         .from('orders')
@@ -184,6 +198,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       }
 
       created++
+      capacity -= slotQty
     }
   }
 
