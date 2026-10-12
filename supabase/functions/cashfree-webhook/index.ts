@@ -192,19 +192,25 @@ Deno.serve(async (req) => {
 
         const deliveries = DELIVERIES_BY_PLAN[sub?.plan_id ?? ''] ?? 0
 
-        await supabase
-          .from('subscriptions')
-          .update({ status: 'active', deliveries_remaining: deliveries })
-          .eq('id', paymentRow.subscription_id)
-          .eq('status', 'pending') // idempotent guard — don't overwrite if already active
-
-        // A renewal (or a new plan after the old one ran out) closes the
-        // customer's finished plan and inherits its delivery batch. Before
-        // instantiate-orders below, so the new orders get that batch.
+        // A renewal (or a new plan after the old one ran out) first closes the
+        // customer's finished plan — only one live plan per customer is
+        // allowed (migration 049) — and inherits its delivery batch, before
+        // instantiate-orders below so the new orders get that batch.
         const { error: retireErr } = await supabase.rpc('retire_previous_subscriptions', {
           p_new_sub: paymentRow.subscription_id,
         })
         if (retireErr) console.error('cashfree-webhook: retire_previous_subscriptions failed:', retireErr.message)
+
+        const { error: activateErr } = await supabase
+          .from('subscriptions')
+          .update({ status: 'active', deliveries_remaining: deliveries })
+          .eq('id', paymentRow.subscription_id)
+          .eq('status', 'pending') // idempotent guard — don't overwrite if already active
+        if (activateErr) {
+          // e.g. the customer still has another live plan with meals left.
+          console.error('cashfree-webhook: could not activate', paymentRow.subscription_id, activateErr.message)
+        }
+
 
         // Instantiate orders for next 14 days now that subscription is active
         const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!

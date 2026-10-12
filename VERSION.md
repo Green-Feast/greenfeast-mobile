@@ -52,6 +52,22 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.7 — 2026-10-12
+- Build 9, OTA 7.
+- **Plan renewal.** When a plan's meals are used up, My Plan shows a "Renew
+  plan" card that opens a sheet with four options: repeat the same plan, edit
+  it (plan size, lunch/dinner per day, add-ons — live price), build a new plan
+  through onboarding, or cancel. Repeat/edit create the new plan server-side
+  (`renew-subscription`) and are paid through Cashfree like a first purchase;
+  the sheet waits for the payment to be confirmed and the finished plan is
+  closed automatically (its delivery batches carry over).
+- **Low-wallet banner.** When a plan still has meals but the wallet can't cover
+  the next one, My Plan says what it costs vs. the balance, with Add money.
+- **Customer ID** (e.g. GF-000001) shown on the Account screen.
+- Server-side changes that shipped alongside (no app update needed): balance
+  checked at the 8 AM / 1 PM cutoffs, low-balance warning at 8 PM, refunds,
+  customer codes, meals never scheduled past a plan's counter.
+
 ### 1.9.6 — 2026-10-11
 - Build 9, OTA 6.
 - **Wallet transactions show real dates.** The list ran full timestamps through

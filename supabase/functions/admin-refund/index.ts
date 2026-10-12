@@ -23,13 +23,83 @@ const json = (body: object, status = 200) =>
 const rupees = (paise: number) =>
   `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 
+// Cashfree doesn't offer refund events on every account's webhook settings,
+// so pending bank refunds are also checked by asking Cashfree directly
+// (body { action: 'sync' } — the admin Money page runs it on load). Same
+// outcome handling as cashfree-webhook's REFUND_STATUS_WEBHOOK branch; both
+// are guarded by the refund's status, so whichever sees it first wins.
+async function syncPendingRefunds(supabase: any) {
+  const { data: pending } = await supabase
+    .from('refunds')
+    .select('id, user_id, amount, cf_refund_id, payments ( cf_order_id )')
+    .eq('kind', 'bank')
+    .eq('status', 'pending')
+    .not('cf_refund_id', 'is', null)
+  let completed = 0, failed = 0
+  for (const r of (pending ?? []) as any[]) {
+    const orderId = Array.isArray(r.payments) ? r.payments[0]?.cf_order_id : r.payments?.cf_order_id
+    if (!orderId) continue
+    const res = await fetch(
+      `${CASHFREE_BASE}/orders/${encodeURIComponent(orderId)}/refunds/${encodeURIComponent(r.cf_refund_id)}`,
+      {
+        headers: {
+          'x-client-id': Deno.env.get('CASHFREE_APP_ID')!,
+          'x-client-secret': Deno.env.get('CASHFREE_SECRET_KEY')!,
+          'x-api-version': '2023-08-01',
+        },
+      }
+    )
+    if (!res.ok) continue
+    const body = await res.json().catch(() => ({}))
+    const status = String((body as any)?.refund_status ?? '').toUpperCase()
+    if (status === 'SUCCESS') {
+      const { data: done } = await supabase.from('refunds')
+        .update({ status: 'completed' }).eq('id', r.id).eq('status', 'pending').select('id')
+      if (done?.length) {
+        completed++
+        await supabase.rpc('notify_user', {
+          p_user: r.user_id,
+          p_title: 'Refund processed',
+          p_body: `${rupees(r.amount)} has been refunded to your original payment method. It can take a few working days to show in your account.`,
+          p_type: 'custom',
+        })
+      }
+    } else if (status === 'FAILED' || status === 'CANCELLED') {
+      const { data: done } = await supabase.from('refunds')
+        .update({ status: 'failed', failure_note: (body as any)?.status_description ?? status })
+        .eq('id', r.id).eq('status', 'pending').select('id')
+      if (done?.length) {
+        failed++
+        await supabase.rpc('wallet_credit', {
+          p_user: r.user_id,
+          p_amount: r.amount,
+          p_reason: 'Refund to bank failed — amount returned to wallet',
+          p_reference_id: `refund_fail_${r.id}`,
+        })
+        await supabase.rpc('notify_user', {
+          p_user: r.user_id,
+          p_title: 'Refund could not be processed',
+          p_body: `Your bank refund of ${rupees(r.amount)} didn't go through, so the amount is back in your GreenFeast wallet.`,
+          p_type: 'custom',
+        })
+      }
+    }
+  }
+  return { checked: (pending ?? []).length, completed, failed }
+}
+
 Deno.serve(async (req) => {
   const secret = Deno.env.get('INTERNAL_FN_SECRET')
   const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
   if (!secret || token !== secret) return json({ error: 'Unauthorized' }, 401)
 
   try {
-    const { payment_id, amount_paise, reason, admin_user_id } = await req.json()
+    const body = await req.json()
+    if (body?.action === 'sync') {
+      const supabaseSync = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+      return json({ ok: true, ...(await syncPendingRefunds(supabaseSync)) })
+    }
+    const { payment_id, amount_paise, reason, admin_user_id } = body
     const amount = Number(amount_paise)
     if (!payment_id || !Number.isInteger(amount) || amount <= 0) {
       return json({ error: 'payment_id and a positive amount are required' }, 400)
