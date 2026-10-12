@@ -638,6 +638,7 @@ export default function Home() {
                         contentFit="cover"
                         cachePolicy="memory-disk"
                         placeholder={meal.blur_data_url ? { uri: meal.blur_data_url } : undefined}
+                        placeholderContentFit="cover"
                         transition={200}
                       />
                     ) : (

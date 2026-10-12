@@ -20,6 +20,10 @@ export const OPS_EMAIL = 'greenfeast.ops@gmail.com'
 export const BUSINESS_NAME = 'Green Feast'
 export const BUSINESS_OPERATOR = 'Vinayak Rawat (proprietor)'
 export const BUSINESS_ADDRESS = '3 NA 22, Jawahar Nagar, Jaipur, Rajasthan 302004'
+export const BUSINESS_GSTIN = '08EGCPR0910Q1Z0'
+// FSSAI rules require the licence number wherever food is sold online. Shown
+// on the Contact Us page once filled in.
+export const FSSAI_LICENSE = 'TODO'
 
 // Every WhatsApp support entry point goes through here so the team can tell
 // at a glance that the chat started inside the app. `topic` says which screen

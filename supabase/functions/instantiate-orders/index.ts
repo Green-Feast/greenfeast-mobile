@@ -28,7 +28,7 @@ function next14Days(): Date[] {
 async function processSubscription(supabase: any, subId: string): Promise<number> {
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining')
+    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining, start_date')
     .eq('id', subId)
     .single()
 
@@ -122,6 +122,10 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     // weekly_menu uses Mon=0..Sun=6 to match the Kitchen admin UI convention
     const dowNum = (date.getUTCDay() + 6) % 7
     const dateStr = toISO(date)
+
+    // Nothing before the plan's first delivery date (set when an existing
+    // customer is moved over, so the app takes over from a chosen day).
+    if (sub.start_date && dateStr < sub.start_date) continue
 
     // Skip pause range
     if (sub.pause_from && sub.pause_until && dateStr >= sub.pause_from && dateStr <= sub.pause_until) continue

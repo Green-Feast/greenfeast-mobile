@@ -231,13 +231,15 @@ export default function PaymentScreen() {
   async function activateSubscription(subId: string) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    await supabase
-      .from('subscriptions')
-      .update({
-        status: 'active',
-        deliveries_remaining: PLAN_DELIVERIES[store.planId ?? ''] ?? 0,
-      })
-      .eq('id', subId)
+    // The plan is activated by the server once Cashfree confirms the payment
+    // (cashfree-webhook) — the app can't write plan status (migration 050).
+    // Wait for it, so My Plan opens on the active plan rather than the
+    // "Subscribe" screen. Usually a few seconds.
+    for (let i = 0; i < 15; i++) {
+      const { data } = await supabase.from('subscriptions').select('status').eq('id', subId).maybeSingle()
+      if (data?.status === 'active') break
+      await new Promise((r) => setTimeout(r, 2000))
+    }
     await supabase.from('users').update({ onboarded: true }).eq('id', user.id)
     setOnboarded(true)
     setHasSubscription(true) // sub is now active — unlock My Plan tab without app reload

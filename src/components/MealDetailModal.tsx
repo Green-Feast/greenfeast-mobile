@@ -63,6 +63,23 @@ function formatPrice(paise: number | null) {
   return `₹${(paise / 100).toFixed(0)}`
 }
 
+// Calorie split for the ring. Calories the known macros don't account for
+// (a dish with only protein entered, say) show as a neutral segment — without
+// it, one known macro filled the whole ring in its colour.
+function macroSegments(meal: MealDetail) {
+  const protein = (meal.protein ?? 0) * 4
+  const carbs = (meal.carbs ?? 0) * 4
+  const fat = (meal.fat ?? 0) * 9
+  const unaccounted = meal.kcal != null ? Math.max(0, meal.kcal - protein - carbs - fat) : 0
+  return [
+    { value: protein, color: Colors.macroProtein },
+    { value: carbs, color: Colors.macroCarbs },
+    { value: fat, color: Colors.macroFat },
+    // Small rounding differences on fully-entered dishes aren't worth a sliver.
+    { value: meal.kcal != null && unaccounted > meal.kcal * 0.05 ? unaccounted : 0, color: Colors.border },
+  ]
+}
+
 function ModalContent({ meal, onClose, unavailableReason, primaryAction, showBrandRow = true }: Props & { meal: MealDetail }) {
   const insets = useSafeAreaInsets()
   const categories = useCategoriesStore((s) => s.categories)
@@ -80,6 +97,10 @@ function ModalContent({ meal, onClose, unavailableReason, primaryAction, showBra
             contentFit="cover"
             cachePolicy="memory-disk"
             placeholder={meal.blur_data_url ? { uri: meal.blur_data_url } : undefined}
+            // expo-image draws placeholders at their own (tiny) size by
+            // default — fill the frame like the real photo does, or the first
+            // open of an uncached dish shows a small blurred thumbnail.
+            placeholderContentFit="cover"
             transition={150}
           />
         ) : (
@@ -115,11 +136,7 @@ function ModalContent({ meal, onClose, unavailableReason, primaryAction, showBra
                 strokeWidth={13}
                 centerValue={meal.kcal != null ? String(meal.kcal) : '—'}
                 centerLabel="kcal"
-                segments={[
-                  { value: (meal.protein ?? 0) * 4, color: Colors.macroProtein },
-                  { value: (meal.carbs ?? 0) * 4, color: Colors.macroCarbs },
-                  { value: (meal.fat ?? 0) * 9, color: Colors.macroFat },
-                ]}
+                segments={macroSegments(meal)}
               />
               <MacroRow protein={meal.protein} carbs={meal.carbs} fat={meal.fat} fibre={meal.fibre} kcal={meal.kcal} size="md" />
             </View>

@@ -162,6 +162,7 @@ export default function MenuScreen() {
                     contentFit="cover"
                     cachePolicy="memory-disk"
                     placeholder={item.blur_data_url ? { uri: item.blur_data_url } : undefined}
+                    placeholderContentFit="cover"
                     transition={150}
                   />
                 ) : (

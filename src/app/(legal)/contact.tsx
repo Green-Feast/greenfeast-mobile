@@ -7,6 +7,9 @@ import {
   BUSINESS_NAME,
   BUSINESS_OPERATOR,
   BUSINESS_ADDRESS,
+  BUSINESS_GSTIN,
+  FSSAI_LICENSE,
+  isConfigured,
   SUPPORT_PHONE_DISPLAY,
   SUPPORT_WHATSAPP_NUMBER,
   SUPPORT_EMAIL,
@@ -89,6 +92,11 @@ export default function ContactScreen() {
           />
         </View>
 
+        <View style={styles.registrations}>
+          {isConfigured(FSSAI_LICENSE) && <Text style={styles.regLine}>FSSAI Lic. No. {FSSAI_LICENSE}</Text>}
+          <Text style={styles.regLine}>GSTIN {BUSINESS_GSTIN}</Text>
+        </View>
+
         <Text style={styles.note}>
           We reply to every message within 1 business day. For a delivery or food issue, include your registered phone
           number and a photo. See Refunds & Cancellations for what we can refund.
@@ -121,5 +129,7 @@ const styles = StyleSheet.create({
   rowLabel: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500 },
   rowValue: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.ink900, marginTop: 2, lineHeight: 21 },
   divider: { height: 1, backgroundColor: Colors.border, marginLeft: 54 },
+  registrations: { marginTop: 18, gap: 2 },
+  regLine: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink500 },
   note: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, lineHeight: 20, marginTop: 18 },
 })
