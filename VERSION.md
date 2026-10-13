@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.8 — 2026-10-13
+- Build 9, OTA 8.
+- **Meal photos open full-size.** The blurred preview shown while a dish photo
+  downloads was drawn at its own tiny size (expo-image's default), so the first
+  open of an uncached dish showed a small thumbnail. It now fills the frame.
+- **Macro ring is honest.** Calories not covered by the macros entered for a
+  dish show as a neutral grey segment; before, a dish with only protein entered
+  showed a ring that was 100% protein-red.
+- **Checkout waits for the server to activate the plan** (the app can no longer
+  write plan status — migration 050), so My Plan opens on the active plan.
+- **Contact Us shows the GSTIN** (FSSAI licence number appears once filled in).
+
 ### 1.9.7 — 2026-10-12
 - Build 9, OTA 7.
 - **Plan renewal.** When a plan's meals are used up, My Plan shows a "Renew
