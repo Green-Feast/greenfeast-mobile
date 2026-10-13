@@ -58,6 +58,16 @@ function fmtRupees(paise: number) {
   return `₹${(paise / 100).toLocaleString('en-IN')}`
 }
 
+// Cash on delivery: the first day's meals are paid online now and the rest in
+// cash on the first delivery — rounded down to a round ₹100, the odd amount
+// going online. Same formula as cashfree-create-order (codSplit), which is
+// what's actually charged.
+function codSplit(totalPaise: number, perMealPaise: number, mealsPerDay: number) {
+  const firstDay = Math.min(perMealPaise * Math.max(mealsPerDay, 1), totalPaise)
+  const cash = Math.max(Math.floor((totalPaise - firstDay) / 10000) * 10000, 0)
+  return { upfront: totalPaise - cash, cash }
+}
+
 export default function PaymentScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
@@ -74,8 +84,13 @@ export default function PaymentScreen() {
   const [firstDelivery, setFirstDelivery] = useState('')
 
   const planAmount = PLAN_AMOUNTS[store.planId ?? ''] ?? 149900
-  const addonTotal = store.addOns.reduce((s, a) => s + a.pricePerMeal, 0) * (PLAN_DELIVERIES[store.planId ?? ''] ?? 5)
+  const planMeals = PLAN_DELIVERIES[store.planId ?? ''] ?? 5
+  const addonPerMeal = store.addOns.reduce((s, a) => s + a.pricePerMeal, 0)
+  const addonTotal = addonPerMeal * planMeals
   const grandTotal = planAmount + addonTotal
+  const cod = codSplit(grandTotal, Math.round(planAmount / planMeals) + addonPerMeal, store.mealsLunch + store.mealsDinner)
+  // What the server actually charged / left for cash (set when the order is made).
+  const [charged, setCharged] = useState<{ upfront: number; cash: number } | null>(null)
   const firstName = userName.split(' ')[0]
 
   useEffect(() => {
@@ -245,9 +260,9 @@ export default function PaymentScreen() {
     setHasSubscription(true) // sub is now active — unlock My Plan tab without app reload
   }
 
-  // Credit the wallet with the plan's grand total (computed server-side). The
-  // wallet is the billing ledger — meals debit from this opening balance.
-  // Idempotent (reference_id = subscription_id), so the webhook repeating is safe.
+  // Credit the wallet with what was paid (computed server-side). The wallet is
+  // the billing ledger — meals debit from this balance. Idempotent
+  // (reference_id = subscription_id), so the webhook doing it too is safe.
   async function fundWallet(subId: string) {
     const { data: { session } } = await supabase.auth.getSession()
     await supabase.functions.invoke('fund-subscription-wallet', {
@@ -263,34 +278,16 @@ export default function PaymentScreen() {
       const subId = await createRecords()
       setSubscriptionId(subId)
 
-      if (method === 'cod') {
-        // CoD: instantiate orders now so the delivery partner has a sheet and
-        // the subscriber sees their first meal. Cash is collected on first
-        // delivery; admin then flips the sub to 'active' to unlock the full plan.
-        const { data: { session } } = await supabase.auth.getSession()
-        await supabase.functions.invoke('instantiate-orders', {
-          body: { subscription_id: subId },
-          headers: { Authorization: `Bearer ${session?.access_token}` },
-        })
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          await supabase.from('users').update({ onboarded: true }).eq('id', user.id)
-          setOnboarded(true)
-        }
-        // CoD: cash is collected on delivery, but we fund the wallet now so the
-        // ledger reflects the plan total and per-meal debits draw it down.
-        await fundWallet(subId)
-        setHasSubscription(true) // limited CoD plan — first meal + pay banner
-        setPhase('success')
-        return
-      }
-
-      // Cashfree: create order via Edge Function, then hand off to the
-      // native SDK — it takes over the screen with its own checkout UI until
-      // onVerify/onError fires (registered on mount below).
+      // Both methods go through Cashfree now: online pays the whole plan,
+      // cash on delivery pays the first day's meals (the rest is cash at the
+      // first delivery — no more delivering on credit). The server prices it.
       const { data: { session } } = await supabase.auth.getSession()
       const res = await supabase.functions.invoke('cashfree-create-order', {
-        body: { subscription_id: subId, amount_paise: grandTotal },
+        body: {
+          subscription_id: subId,
+          amount_paise: method === 'cod' ? cod.upfront : grandTotal,
+          cod: method === 'cod',
+        },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       })
 
@@ -303,6 +300,7 @@ export default function PaymentScreen() {
         // error.context.json().
         throw new Error(await extractFunctionErrorMessage(res.error, 'Could not start payment. Please try again.'))
       }
+      setCharged({ upfront: res.data.amount_paise ?? grandTotal, cash: res.data.cash_paise ?? 0 })
 
       const cfSession = new CFSession(
         res.data.payment_session_id,
@@ -420,7 +418,9 @@ export default function PaymentScreen() {
           </View>
           <View style={styles.methodText}>
             <Text style={styles.methodTitle}>Cash on Delivery</Text>
-            <Text style={styles.methodDesc}>Confirm your order on WhatsApp</Text>
+            <Text style={styles.methodDesc}>
+              {fmtRupees(cod.upfront)} now · {fmtRupees(cod.cash)} cash on your first delivery
+            </Text>
           </View>
           <Text style={styles.methodIcon}>💵</Text>
         </TouchableOpacity>
@@ -437,8 +437,9 @@ export default function PaymentScreen() {
         {method === 'cod' && (
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
-              For Cash on Delivery we confirm your order over WhatsApp. Once your setup is done we'll
-              open WhatsApp for you — no need to come back here.
+              Pay your first day's meals ({fmtRupees(cod.upfront)}) online now to confirm your plan. Hand the
+              remaining {fmtRupees(cod.cash)} in cash to your delivery partner on your first delivery — we'll add it
+              to your GreenFeast wallet, which pays for your meals as they're delivered.
             </Text>
           </View>
         )}
@@ -454,7 +455,7 @@ export default function PaymentScreen() {
           ) : method === 'cashfree' ? (
             `Pay ${fmtRupees(grandTotal)} →`
           ) : (
-            'Confirm order →'
+            `Pay ${fmtRupees(cod.upfront)} now →`
           )}
         </Button>
       </View>
@@ -468,28 +469,33 @@ export default function PaymentScreen() {
             <Text style={styles.successTitle}>Welcome to GreenFeast!</Text>
             <Text style={styles.successDesc}>
               {method === 'cod'
-                ? `Your first meal is scheduled!\nPay ${fmtRupees(grandTotal)} in cash to your delivery partner on your first delivery.\nFirst delivery: ${firstDelivery}`
+                ? `${fmtRupees(charged?.upfront ?? cod.upfront)} paid — your plan is active!\nPlease keep ${fmtRupees(charged?.cash ?? cod.cash)} in cash ready for your delivery partner on your first delivery.\nFirst delivery: ${firstDelivery}`
                 : `Payment confirmed.\nYour subscription is active!\nFirst delivery: ${firstDelivery}`}
             </Text>
             <Button
               onPress={() => {
-                // COD orders are confirmed over WhatsApp — open it now, at the
-                // very end of the flow, so the user never has to come back.
-                if (method === 'cod') {
-                  const msg = encodeURIComponent(
-                    `Hi GreenFeast! I'm messaging from the GreenFeast app (v${APP_VERSION_STRING}).\n` +
-                    `Topic: Cash on Delivery confirmation\n\n` +
-                    `I just set up my ${store.planName || ''} plan on Cash on Delivery. Please confirm my order.`
-                  )
-                  Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${msg}`).catch(() => {})
-                }
                 store.reset()
                 router.replace('/(app)/(tabs)')
               }}
               style={{ marginTop: 8 }}
             >
-              {method === 'cod' ? 'Confirm on WhatsApp →' : 'Get started →'}
+              Get started →
             </Button>
+            {method === 'cod' && (
+              <TouchableOpacity
+                onPress={() => {
+                  const msg = encodeURIComponent(
+                    `Hi GreenFeast! I'm messaging from the GreenFeast app (v${APP_VERSION_STRING}).\n` +
+                    `Topic: Cash on Delivery\n\n` +
+                    `I just set up my ${store.planName || ''} plan with cash on delivery.`
+                  )
+                  Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${msg}`).catch(() => {})
+                }}
+                hitSlop={8}
+              >
+                <Text style={styles.waLink}>Questions? Message us on WhatsApp</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -602,4 +608,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
+  waLink: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.green700, marginTop: 4 },
 })

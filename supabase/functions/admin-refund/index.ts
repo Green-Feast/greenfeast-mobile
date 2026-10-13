@@ -57,11 +57,10 @@ async function syncPendingRefunds(supabase: any) {
         .update({ status: 'completed' }).eq('id', r.id).eq('status', 'pending').select('id')
       if (done?.length) {
         completed++
-        await supabase.rpc('notify_user', {
+        await supabase.rpc('notify_event', {
           p_user: r.user_id,
-          p_title: 'Refund processed',
-          p_body: `${rupees(r.amount)} has been refunded to your original payment method. It can take a few working days to show in your account.`,
-          p_type: 'custom',
+          p_key: 'refund_bank_done',
+          p_vars: { amount: rupees(r.amount) },
         })
       }
     } else if (status === 'FAILED' || status === 'CANCELLED') {
@@ -76,11 +75,10 @@ async function syncPendingRefunds(supabase: any) {
           p_reason: 'Refund to bank failed — amount returned to wallet',
           p_reference_id: `refund_fail_${r.id}`,
         })
-        await supabase.rpc('notify_user', {
+        await supabase.rpc('notify_event', {
           p_user: r.user_id,
-          p_title: 'Refund could not be processed',
-          p_body: `Your bank refund of ${rupees(r.amount)} didn't go through, so the amount is back in your GreenFeast wallet.`,
-          p_type: 'custom',
+          p_key: 'refund_bank_failed',
+          p_vars: { amount: rupees(r.amount) },
         })
       }
     }

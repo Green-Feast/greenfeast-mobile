@@ -32,36 +32,54 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     .eq('id', subId)
     .single()
 
-  // Active subs always get orders. CoD subs get orders while still 'pending'
-  // (deliveries start before cash is collected). Online 'pending' subs do not.
-  const eligible = sub && (sub.status === 'active' || (sub.status === 'pending' && sub.payment_method === 'cod'))
-  if (!eligible) return 0
+  // Only active plans get orders. Cash-on-delivery plans are active too
+  // (first day paid online at signup, or set up by the admin) — 052.
+  if (!sub || sub.status !== 'active') return 0
 
-  const [{ data: schedule }, { data: addr }, { data: subAddons }, { data: weeklyMenus }, { data: plan }] = await Promise.all([
+  const [{ data: schedule }, { data: addr }, { data: subAddons }, { data: weeklyMenus }, { data: plan }, { data: rules }] = await Promise.all([
     supabase
       .from('subscription_schedule')
       .select('day_of_week, meal_template_id')
       .eq('subscription_id', subId),
+    // Default address (one per customer since 052); archived ones never.
     supabase
       .from('addresses')
       .select('id')
       .eq('user_id', sub.user_id)
-      .eq('is_default', true)
+      .is('archived_at', null)
+      .order('is_default', { ascending: false })
+      .order('created_at')
+      .limit(1)
       .maybeSingle(),
     supabase
       .from('subscription_addons')
       .select('addon_id, sub_option, addons(price_per_meal)')
       .eq('subscription_id', subId),
+    // One weekly menu for everyone (052 removed the M2 track).
     supabase
       .from('weekly_menu')
       .select('day_of_week, meal_slot, meal_template_id')
-      .eq('menu_type', sub.menu_type ?? 'M1'),
+      .eq('menu_type', 'M1'),
     supabase
       .from('plans')
       .select('base_price, meals_total')
       .eq('id', sub.plan_id)
       .maybeSingle(),
+    // "Same dish every day" rules set by ops (Kitchen / subscriber profile).
+    supabase
+      .from('customer_meal_rules')
+      .select('meal_slot, day_of_week, meal_template_id, meal_templates ( is_active, subscription_valid )')
+      .eq('user_id', sub.user_id),
   ])
+
+  // "slot|dow" (a weekday) or "slot|*" (every day) → fixed dish. A dish that
+  // has since been switched off falls back to the weekly menu.
+  const fixedMap: Record<string, string> = {}
+  for (const r of (rules ?? []) as any[]) {
+    const t = Array.isArray(r.meal_templates) ? r.meal_templates[0] : r.meal_templates
+    if (!t?.is_active || !t?.subscription_valid) continue
+    fixedMap[`${r.meal_slot}|${r.day_of_week ?? '*'}`] = r.meal_template_id
+  }
 
   // day_of_week → meal_template_id lookup from subscription_schedule (fallback)
   const scheduleMap: Record<string, string> = {}
@@ -76,9 +94,9 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     if (row.meal_template_id) weeklyMenuMap[row.day_of_week][row.meal_slot] = row.meal_template_id
   }
 
-  // Bail only if neither source has any meals to offer
+  // Bail only if no source has any meals to offer
   const hasScheduleDays = Object.keys(scheduleMap).length > 0
-  if (!hasScheduleDays && Object.keys(weeklyMenuMap).length === 0) return 0
+  if (!hasScheduleDays && Object.keys(weeklyMenuMap).length === 0 && Object.keys(fixedMap).length === 0) return 0
 
   // Compute per-meal unit_price (paise) to snapshot on each order.
   // round(base_price / meals_total) + sum of addon prices.
@@ -101,9 +119,8 @@ async function processSubscription(supabase: any, subId: string): Promise<number
 
   // Never schedule more meals than the plan has left: what's already
   // scheduled counts against deliveries_remaining, and once it's used up the
-  // plan is finished until it's renewed. A pending CoD plan isn't activated
-  // yet (counter still 0), so its allowance is the plan size.
-  const allowance = sub.status === 'pending' ? (plan?.meals_total ?? 0) : (sub.deliveries_remaining ?? 0)
+  // plan is finished until it's renewed.
+  const allowance = sub.deliveries_remaining ?? 0
   const { data: upcoming } = await supabase
     .from('orders')
     .select('quantity')
@@ -151,9 +168,10 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       if (dateStr === todayIST && istHour >= SLOT_CUTOFF_HOUR[slot]) continue
       if (closed.has(`${dateStr}|${slot}`)) continue
 
-      // Try weekly_menu first (by menu_type + day_of_week + meal_slot),
-      // fall back to subscription_schedule (by day_of_week)
-      let mealTemplateId = weeklyMenuMap[dowNum]?.[slot]
+      // A fixed dish for this weekday, then one for every day, then the
+      // weekly menu, then the subscription_schedule fallback (by day name).
+      const fixed = fixedMap[`${slot}|${dowNum}`] ?? fixedMap[`${slot}|*`]
+      let mealTemplateId = fixed ?? weeklyMenuMap[dowNum]?.[slot]
       if (!mealTemplateId) mealTemplateId = scheduleMap[dow]
       if (!mealTemplateId) continue
 
@@ -171,7 +189,9 @@ async function processSubscription(supabase: any, subId: string): Promise<number
           delivery_date: dateStr,
           meal_slot: slot,
           status: 'scheduled',
-          is_customized: false,
+          // A fixed dish must survive weekly-menu edits (propagateMenuChanges
+          // only touches non-customised orders).
+          is_customized: !!fixed,
           quantity: slotQty,
           unit_price: unitPrice,
         })
@@ -252,7 +272,7 @@ Deno.serve(async (req) => {
     let body: any = {}
     try { body = await req.json() } catch { /* no body in cron invocations */ }
 
-    // Non-service-role callers (the app, after a CoD signup) may only
+    // Non-service-role callers (the app, after checkout) may only
     // instantiate their OWN subscription, identified by a valid user JWT.
     if (!isServiceRole) {
       const { data: { user }, error } = await supabase.auth.getUser(token)

@@ -1,9 +1,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-const DELIVERIES_BY_PLAN: Record<string, number> = {
-  trial: 5,
-  plan15: 15,
-  plan30: 30,
+function rupees(paise: number) {
+  return `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 }
 
 // Cashfree signs webhooks as base64(HMAC-SHA256(secret, timestamp + rawBody))
@@ -62,15 +60,15 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: 'refund row not found' }), { status: 500 })
       }
       const cfStatus = String(refund.refund_status ?? '').toUpperCase()
-      const amountText = `₹${(row.amount / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+      const amountText = rupees(row.amount)
 
       if (cfStatus === 'SUCCESS' && row.status !== 'completed') {
         await supabase.from('refunds').update({ status: 'completed' }).eq('id', row.id)
-        await supabase.rpc('notify_user', {
+        // Text: admin → Notifications → Automated messages.
+        await supabase.rpc('notify_event', {
           p_user: row.user_id,
-          p_title: 'Refund processed',
-          p_body: `${amountText} has been refunded to your original payment method. It can take a few working days to show in your account.`,
-          p_type: 'custom',
+          p_key: 'refund_bank_done',
+          p_vars: { amount: amountText },
         })
       } else if ((cfStatus === 'FAILED' || cfStatus === 'CANCELLED') && row.status === 'pending') {
         // The wallet was debited when the refund started — give it back.
@@ -87,11 +85,10 @@ Deno.serve(async (req) => {
         await supabase.from('refunds')
           .update({ status: 'failed', failure_note: refund.status_description ?? cfStatus })
           .eq('id', row.id)
-        await supabase.rpc('notify_user', {
+        await supabase.rpc('notify_event', {
           p_user: row.user_id,
-          p_title: 'Refund could not be processed',
-          p_body: `Your bank refund of ${amountText} didn't go through, so the amount is back in your GreenFeast wallet. Contact us if you need help.`,
-          p_type: 'custom',
+          p_key: 'refund_bank_failed',
+          p_vars: { amount: amountText },
         })
       }
       return new Response(JSON.stringify({ ok: true }), { status: 200 })
@@ -186,11 +183,12 @@ Deno.serve(async (req) => {
       if (paymentRow.subscription_id) {
         const { data: sub } = await supabase
           .from('subscriptions')
-          .select('plan_id, plan_name')
+          .select('plan_id, plan_name, payment_method, cod_due_paise, plans ( meals_total )')
           .eq('id', paymentRow.subscription_id)
           .single()
 
-        const deliveries = DELIVERIES_BY_PLAN[sub?.plan_id ?? ''] ?? 0
+        const planRow = Array.isArray((sub as any)?.plans) ? (sub as any).plans[0] : (sub as any)?.plans
+        const deliveries = planRow?.meals_total ?? 0
 
         // A renewal (or a new plan after the old one ran out) first closes the
         // customer's finished plan — only one live plan per customer is
@@ -231,10 +229,16 @@ Deno.serve(async (req) => {
         // this order was created for (= what was just captured, checked above)
         // with the same reference (subscription_id) as fund-subscription-wallet,
         // so whichever of the two lands second is a no-op.
+        // Cash on delivery: this was the first day's meals; the rest is
+        // collected in cash (cod_due_paise) and credited when it's recorded.
+        const planName = (sub as any)?.plan_name ?? 'Subscription'
+        const codDue = (sub as any)?.payment_method === 'cod' ? ((sub as any)?.cod_due_paise ?? 0) : 0
         const { error: fundErr } = await supabase.rpc('wallet_credit', {
           p_user: paymentRow.user_id,
           p_amount: paymentRow.amount,
-          p_reason: `Plan payment — ${(sub as any)?.plan_name ?? 'Subscription'}`,
+          p_reason: codDue > 0
+            ? `First day paid online — ${planName} (${rupees(codDue)} cash on delivery)`
+            : `Plan payment — ${planName}`,
           p_reference_id: paymentRow.subscription_id,
         })
         if (fundErr) {

@@ -59,7 +59,7 @@ async function fetchProfile(userId: string) {
         .from('subscriptions')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', userId)
-        .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)'),
+        .in('status', ['active', 'paused']),
     ]),
     PROFILE_LOOKUP_TIMEOUT_MS,
     'profile lookup'

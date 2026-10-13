@@ -24,6 +24,15 @@ function sanitizePhone(phone: string) {
   return digits.slice(-10)
 }
 
+// Cash on delivery: the first day's meals are paid online now, the rest in
+// cash on the first delivery — rounded down to a round ₹100, the odd amount
+// going online. Same formula as the app's payment screen (codSplit).
+function codSplit(totalPaise: number, perMealPaise: number, mealsPerDay: number) {
+  const firstDay = Math.min(perMealPaise * Math.max(mealsPerDay, 1), totalPaise)
+  const cash = Math.max(Math.floor((totalPaise - firstDay) / 10000) * 10000, 0)
+  return { upfront: totalPaise - cash, cash }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -32,7 +41,8 @@ Deno.serve(async (req) => {
   try {
     // amount_paise from the app is ignored — the price is computed below. It
     // used to be charged as sent, so a modified client could pay Rs 1 for a plan.
-    const { subscription_id, amount_paise: clientAmount } = await req.json()
+    // cod: true → charge only the cash-on-delivery upfront (first day's meals).
+    const { subscription_id, amount_paise: clientAmount, cod } = await req.json()
 
     if (!subscription_id) {
       return new Response(
@@ -61,7 +71,7 @@ Deno.serve(async (req) => {
     // Verify the subscription belongs to this user
     const { data: sub, error: subErr } = await supabase
       .from('subscriptions')
-      .select('id, plan_id, plans ( base_price, meals_total )')
+      .select('id, status, meals_lunch, meals_dinner, plan_id, plans ( base_price, meals_total )')
       .eq('id', subscription_id)
       .eq('user_id', user.id)
       .single()
@@ -82,9 +92,37 @@ Deno.serve(async (req) => {
     const addonPerMeal = (subAddons ?? []).reduce(
       (sum: number, row: any) => sum + (row.addons?.price_per_meal ?? 0), 0
     )
-    const amount_paise = plan.base_price + addonPerMeal * plan.meals_total
+    const planTotal = plan.base_price + addonPerMeal * plan.meals_total
+    let amount_paise = planTotal
+    let cash_paise = 0
+    if (cod) {
+      if ((sub as any).status !== 'pending') {
+        return new Response(
+          JSON.stringify({ error: 'Cash on delivery is only for a new plan.' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      const perMeal = Math.round(plan.base_price / Math.max(plan.meals_total, 1)) + addonPerMeal
+      const split = codSplit(planTotal, perMeal, ((sub as any).meals_lunch ?? 0) + ((sub as any).meals_dinner ?? 0))
+      amount_paise = split.upfront
+      cash_paise = split.cash
+    }
     if (clientAmount != null && clientAmount !== amount_paise) {
-      console.warn('cashfree-create-order: app showed', clientAmount, 'but plan costs', amount_paise, subscription_id)
+      console.warn('cashfree-create-order: app showed', clientAmount, 'but this charge is', amount_paise, subscription_id)
+    }
+    // The cash part is collected on delivery and recorded by the admin; the
+    // plan activates (cashfree-webhook) once this payment lands either way.
+    const { error: codErr } = await supabase
+      .from('subscriptions')
+      .update({ payment_method: cod ? 'cod' : 'online', cod_due_paise: cash_paise, cod_on_credit: false })
+      .eq('id', subscription_id)
+      .eq('status', 'pending')
+    if (codErr) {
+      console.error('cashfree-create-order: could not save the payment split:', codErr.message)
+      return new Response(
+        JSON.stringify({ error: 'Could not start the payment. Please try again.' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     const { data: userRow } = await supabase
@@ -152,6 +190,8 @@ Deno.serve(async (req) => {
         order_id: orderId,
         payment_session_id: cfOrder.payment_session_id,
         environment: CASHFREE_ENV,
+        amount_paise,
+        cash_paise,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

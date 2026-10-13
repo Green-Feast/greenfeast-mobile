@@ -9,11 +9,12 @@ import {
   RefreshControl,
   Modal,
   TextInput,
+  Alert,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight } from 'lucide-react-native'
+import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight, History, MapPin, RotateCcw, Banknote } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
 import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
@@ -45,13 +46,11 @@ type SubData = {
   end_date: string | null
   pause_from: string | null
   pause_until: string | null
-  menu_type: string | null
+  cod_due_paise: number | null
   plans: { name: string; meals_total: number; days_per_week: number; base_price: number } | null
 }
 
 type SubAddon = { addon_id: string; addons: { name: string; price_per_meal: number } | null }
-
-type FirstMeal = { delivery_date: string; meal_templates: { name: string } | null }
 
 type MealTemplate = {
   id: string
@@ -78,6 +77,7 @@ type OrderItem = {
   delivery_date: string
   meal_slot: string
   status: string
+  skip_reason: string | null
   address_id: string | null
   quantity: number | null
   unit_price: number | null
@@ -160,7 +160,6 @@ export default function SubscriptionScreen() {
   const router = useRouter()
   const { user, hasSubscription, loading: authLoading } = useAuthStore()
   const [sub, setSub] = useState<SubData | null>(null)
-  const [firstMeal, setFirstMeal] = useState<FirstMeal | null>(null)
   const [weekOrders, setWeekOrders] = useState<OrderItem[]>([])
   const [walletBalance, setWalletBalance] = useState<number | null>(null)
   const [addresses, setAddresses] = useState<AddressData[]>([])
@@ -193,7 +192,9 @@ export default function SubscriptionScreen() {
   const [plansCatalog, setPlansCatalog] = useState<RenewPlanOption[]>([])
   const paymentPurpose = useRef<'topup' | 'renewal'>('topup')
   const renewFromSubId = useRef<string | null>(null)
-  const [freeMealIds, setFreeMealIds] = useState<Set<string>>(new Set())
+  // Where an added dish goes (one portion home, one to the office…).
+  const [addAddressId, setAddAddressId] = useState<string | null>(null)
+  const [skipError, setSkipError] = useState('')
   const [topupAmountPaise, setTopupAmountPaise] = useState(50000) // ₹500 default
   const [topupCustom, setTopupCustom] = useState('')
   const [creatingTopup, setCreatingTopup] = useState(false)
@@ -209,9 +210,9 @@ export default function SubscriptionScreen() {
 
     const { data: subData, error: subErr } = await supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, menu_type, plans ( name, meals_total, days_per_week, base_price )')
+      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
-      .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
+      .in('status', ['active', 'paused'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -225,34 +226,20 @@ export default function SubscriptionScreen() {
 
     if (!s) return
 
-    // CoD limited view: only the first upcoming meal
-    if (s.status === 'pending' && s.payment_method === 'cod') {
-      const { data: order } = await supabase
-        .from('orders')
-        .select('delivery_date, meal_templates ( name )')
-        .eq('subscription_id', s.id)
-        .gte('delivery_date', today)
-        .in('status', ['scheduled', 'confirmed'])
-        .order('delivery_date')
-        .limit(1)
-        .maybeSingle()
-      setFirstMeal((order as unknown as FirstMeal) ?? null)
-      return
-    }
-
-    // Active / paused: fetch upcoming orders through the calendar strip's end.
+    // Fetch upcoming orders through the calendar strip's end.
     const endStr = stripEndISO(today)
 
     const [ordersRes, walletRes, addrRes, addonRes, closuresRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, meal_slot, status, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
+        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
         .eq('subscription_id', s.id)
         .gte('delivery_date', today)
         .lte('delivery_date', endStr)
         // Delivered / out-for-delivery stay in so today's finished slot still
-        // shows what was delivered instead of "No lunch".
-        .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery', 'delivered'])
+        // shows what was delivered instead of "No lunch"; skipped ones so a
+        // skip can be undone.
+        .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'skipped'])
         .order('delivery_date'),
       supabase
         .from('wallets')
@@ -263,6 +250,7 @@ export default function SubscriptionScreen() {
         .from('addresses')
         .select('id, line1, landmark, label, is_default')
         .eq('user_id', user.id)
+        .is('archived_at', null)
         .order('is_default', { ascending: false })
         .order('created_at'),
       supabase
@@ -335,27 +323,7 @@ export default function SubscriptionScreen() {
   }, [loading, sub, weekOrders.length, fetchAll])
 
   // Reset address picker + add-mode when modal closes or day changes
-  useEffect(() => { setPickingAddressForOrder(null); setAddMode(false); setSwapError('') }, [selectedDay, showDayModal])
-
-  // When selected day/slot changes, look up the free dishes (own + counterpart menu)
-  // so the swap list shows "Free" vs "+₹20" correctly.
-  useEffect(() => {
-    if (!sub) { setFreeMealIds(new Set()); return }
-    const slotOrder = weekOrders.find(o => o.delivery_date === selectedDay && !o.extra_dish && o.meal_slot === selectedSlot)
-    if (!slotOrder) { setFreeMealIds(new Set()); return }
-    const myMenuType = sub.menu_type ?? 'M1'
-    const counterpart = myMenuType === 'M1' ? 'M2' : 'M1'
-    const dowNum = dowMon0(selectedDay)
-    ;(async () => {
-      const { data } = await supabase
-        .from('weekly_menu')
-        .select('meal_template_id')
-        .in('menu_type', [myMenuType, counterpart])
-        .eq('day_of_week', dowNum)
-        .eq('meal_slot', selectedSlot)
-      setFreeMealIds(new Set((data ?? []).map((m: any) => m.meal_template_id).filter(Boolean)))
-    })()
-  }, [selectedDay, selectedSlot, sub, weekOrders])
+  useEffect(() => { setPickingAddressForOrder(null); setAddMode(false); setSwapError(''); setAddAddressId(null) }, [selectedDay, showDayModal])
 
   // Silent background refresh: tab focus, app foreground, every 5 min.
   const refreshAvailability = useAvailabilityStore((st) => st.refresh)
@@ -370,14 +338,52 @@ export default function SubscriptionScreen() {
   async function handleSkipConfirm() {
     if (!skipConfirm || !sub) return
     setSkipping(true)
+    setSkipError('')
     try {
-      await supabase.functions.invoke('manage-subscription', {
+      const { error } = await supabase.functions.invoke('manage-subscription', {
         body: { action: 'skip', subscription_id: sub.id, delivery_date: skipConfirm.date, meal_slot: skipConfirm.slot },
       })
+      if (error) {
+        setSkipError(await extractFunctionErrorMessage(error, 'Could not skip this meal. Please try again.'))
+        return
+      }
       setSkipConfirm(null)
+      setShowDayModal(false)
       await fetchAll()
-    } catch { /* silent */ }
-    finally { setSkipping(false) }
+    } catch {
+      setSkipError('Could not skip this meal. Please try again.')
+    } finally { setSkipping(false) }
+  }
+
+  // Changed their mind: bring back a meal they skipped, until the cutoff.
+  async function handleUnskip(date: string, slot: 'lunch' | 'dinner') {
+    if (!sub || skipping) return
+    setSkipping(true)
+    try {
+      const { error } = await supabase.functions.invoke('manage-subscription', {
+        body: { action: 'unskip', subscription_id: sub.id, delivery_date: date, meal_slot: slot },
+      })
+      if (error) {
+        Alert.alert('Could not bring it back', await extractFunctionErrorMessage(error, 'Please try again.'))
+        return
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      await fetchAll()
+    } finally {
+      setSkipping(false)
+    }
+  }
+
+  // One meal's delivery address. Its delivery route follows the address.
+  async function changeOrderAddress(orderId: string, addressId: string) {
+    setSwapError('')
+    const { error } = await supabase.from('orders').update({ address_id: addressId }).eq('id', orderId)
+    if (error) {
+      setSwapError(error.message || 'Could not change the address. Please try again.')
+      return
+    }
+    setWeekOrders(prev => prev.map(o => o.id === orderId ? { ...o, address_id: addressId } : o))
+    setPickingAddressForOrder(null)
   }
 
   async function handleSwapMeal(orderId: string, newMealId: string) {
@@ -390,11 +396,7 @@ export default function SubscriptionScreen() {
         body: { order_id: orderId, meal_template_id: newMealId },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (error) throw error
-      if (data?.error === 'insufficient_balance') {
-        setSwapError('Insufficient wallet balance (₹20 required). Add money first.')
-        return
-      }
+      if (error) throw new Error(await extractFunctionErrorMessage(error, 'Could not swap meal. Try again.'))
       if (data?.error) throw new Error(data.error)
       setShowDayModal(false)
       await fetchAll()
@@ -412,10 +414,10 @@ export default function SubscriptionScreen() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not authenticated')
       const { data, error } = await supabase.functions.invoke('add-dish', {
-        body: { order_id: refOrderId, meal_template_id: newMealId, meal_slot: slot },
+        body: { order_id: refOrderId, meal_template_id: newMealId, meal_slot: slot, address_id: addAddressId ?? undefined },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (error) throw error
+      if (error) throw new Error(await extractFunctionErrorMessage(error, 'Could not add dish. Try again.'))
       if (data?.error === 'insufficient_balance') {
         setSwapError('Insufficient wallet balance for an extra dish. Add money first.')
         return
@@ -442,10 +444,10 @@ export default function SubscriptionScreen() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not authenticated')
       const { data, error } = await supabase.functions.invoke('add-dish', {
-        body: { subscription_id: subId, delivery_date: date, meal_slot: slot, meal_template_id: newMealId },
+        body: { subscription_id: subId, delivery_date: date, meal_slot: slot, meal_template_id: newMealId, address_id: addAddressId ?? undefined },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (error) throw error
+      if (error) throw new Error(await extractFunctionErrorMessage(error, 'Could not add dish. Try again.'))
       if (data?.error === 'insufficient_balance') {
         setSwapError('Insufficient wallet balance for an extra dish. Add money first.')
         return
@@ -472,7 +474,7 @@ export default function SubscriptionScreen() {
         body: { order_id: orderId },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (error) throw error
+      if (error) throw new Error(await extractFunctionErrorMessage(error, 'Could not remove this dish. Try again.'))
       if (data?.error) throw new Error(data.error)
       await fetchAll()
     } catch (e: any) {
@@ -499,24 +501,21 @@ export default function SubscriptionScreen() {
         body: { order_id: orderId, op, addon_id: addonId },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (error) throw error
-      if (data?.error === 'insufficient_balance') {
-        setSwapError('Insufficient wallet balance. Add money first.')
+      // Named errors arrive as a non-2xx body (see supabaseFunctionError.ts).
+      const code = error ? await extractFunctionErrorMessage(error, 'Could not update the cart. Try again.') : data?.error
+      if (code === 'use_skip') {
+        setSkipConfirm({ date: selectedDay, slot: selectedSlot })
         return
       }
-      if (data?.error === 'cannot_remove_default_addon') {
+      if (code === 'cannot_remove_default_addon') {
         setSwapError("This add-on is part of your plan and can't be removed here.")
         return
       }
-      if (data?.error === 'below_minimum') {
-        setSwapError('You already have the minimum number of meals for this slot.')
-        return
-      }
-      if (data?.error === 'addon_quantity_cap') {
+      if (code === 'addon_quantity_cap') {
         setSwapError('Maximum 10 of this add-on per meal.')
         return
       }
-      if (data?.error) throw new Error(data.error)
+      if (code) throw new Error(code)
       await fetchAll()
     } catch (e: any) {
       setSwapError(e?.message ?? 'Could not update the cart. Try again.')
@@ -711,62 +710,16 @@ export default function SubscriptionScreen() {
   const mealsTotal = sub.plans?.meals_total ?? 0
   const remaining = sub.deliveries_remaining
   const progress = mealsTotal > 0 ? Math.min(100, (remaining / mealsTotal) * 100) : 0
-  const isCodPending = sub.status === 'pending' && sub.payment_method === 'cod'
-  const payAmount = sub.plans?.base_price ?? 0
-
-  // ── CoD limited view ──────────────────────────────────────────────────────
-
-  if (isCodPending) {
-    const planName = sub.plan_name || sub.plans?.name || 'Your Plan'
-    return (
-      <View style={s.container}>
-        <ScrollView
-          contentContainerStyle={[s.scroll, { paddingTop: insets.top + 16 }]}
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-        >
-          <Text style={s.title}>My Plan</Text>
-
-          <View style={s.codHeroCard}>
-            <Text style={s.codHeroEmoji}>🎉</Text>
-            <Text style={s.codHeroTitle}>{planName} is confirmed</Text>
-            <Text style={s.codHeroSub}>
-              Your first meal is on the way. Pay in cash on delivery to unlock your full plan.
-            </Text>
-          </View>
-
-          <Text style={s.sectionLabel}>Your first meal</Text>
-          <View style={s.codMealCard}>
-            {firstMeal ? (
-              <>
-                <Text style={s.codMealName}>{firstMeal.meal_templates?.name ?? 'Your meal'}</Text>
-                <Text style={s.codMealDate}>Arriving {fmtDate(firstMeal.delivery_date)}</Text>
-              </>
-            ) : (
-              <Text style={s.codMealDate}>We're scheduling your first delivery…</Text>
-            )}
-          </View>
-
-          <View style={s.codPayCard}>
-            <Text style={s.codPayEmoji}>💵</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={s.codPayTitle}>Pay ₹{fmt(payAmount)} on delivery</Text>
-              <Text style={s.codPayDesc}>
-                Hand the cash to your delivery partner when your first meal arrives. Once we confirm
-                payment, your full plan — pause, skip, meal changes and history — unlocks here.
-              </Text>
-            </View>
-          </View>
-        </ScrollView>
-      </View>
-    )
-  }
+  // Cash on delivery: the first day was paid online at signup; the rest is
+  // cash for the delivery partner, credited to the wallet when it's recorded.
+  const codDue = sub.payment_method === 'cod' ? (sub.cod_due_paise ?? 0) : 0
 
   // ── Active / paused home view ─────────────────────────────────────────────
 
   const todayStr = istToday()
+  const liveOrders = weekOrders.filter(o => o.status !== 'skipped')
   const orderMap = new Map<string, OrderItem[]>()
-  for (const o of weekOrders) {
+  for (const o of liveOrders) {
     const arr = orderMap.get(o.delivery_date) ?? []
     arr.push(o)
     orderMap.set(o.delivery_date, arr)
@@ -796,6 +749,10 @@ export default function SubscriptionScreen() {
     isSlotLocked(selectedDay, selectedSlot) ||
     heroOrders.some(o => o.status === 'preparing' || o.status === 'out_for_delivery' || o.status === 'delivered')
   const heroIsToday = selectedDay === todayStr
+  // Meals the customer skipped in this slot — can be brought back until cutoff.
+  const slotSkipped = weekOrders.filter(o =>
+    o.status === 'skipped' && o.delivery_date === selectedDay && o.meal_slot === selectedSlot)
+  const canUnskip = slotSkipped.some(o => o.skip_reason === 'user') && !isSlotLocked(selectedDay, selectedSlot)
 
   // Day modal data (same slot).
   const daySlotOrders = (orderMap.get(selectedDay) ?? []).filter(o => o.meal_slot === selectedSlot)
@@ -819,23 +776,20 @@ export default function SubscriptionScreen() {
   const orderBase = (o: OrderItem) => (o.unit_price ?? baseRate) * (o.quantity ?? 1)
   const addonLinesCost = (o: OrderItem) =>
     (o.order_addons ?? []).filter(l => l.kind === 'addon').reduce((sum, l) => sum + (l.unit_price ?? 0) * (l.quantity ?? 1), 0)
-  const feeCost = (o: OrderItem) =>
-    (o.switch_fee_paise ?? 0) + (o.order_addons ?? []).filter(l => l.kind === 'fee').reduce((sum, l) => sum + (l.unit_price ?? 0) * (l.quantity ?? 1), 0)
   // Cost of the next slot that's still open (not past cutoff) — for the
   // low-wallet banner.
-  const nextOpen = weekOrders
+  const nextOpen = liveOrders
     .filter((o) => (o.status === 'scheduled' || o.status === 'confirmed') && !isSlotLocked(o.delivery_date, o.meal_slot as 'lunch' | 'dinner'))
     .sort((a, b) => a.delivery_date.localeCompare(b.delivery_date) || (a.meal_slot === 'lunch' ? 0 : 1) - (b.meal_slot === 'lunch' ? 0 : 1))[0]
   const nextMealCost = nextOpen
-    ? weekOrders
+    ? liveOrders
         .filter((o) => o.delivery_date === nextOpen.delivery_date && o.meal_slot === nextOpen.meal_slot
           && (o.status === 'scheduled' || o.status === 'confirmed'))
-        .reduce((sum, o) => sum + orderBase(o) + addonLinesCost(o) + feeCost(o), 0)
+        .reduce((sum, o) => sum + orderBase(o) + addonLinesCost(o), 0)
     : 0
 
   const dayMealsAddons = dayAllOrders.reduce((sum, o) => sum + orderBase(o) + addonLinesCost(o), 0)
-  const daySwapFees = dayAllOrders.reduce((sum, o) => sum + feeCost(o), 0)
-  const dayTotal = dayMealsAddons + daySwapFees
+  const dayTotal = dayMealsAddons
   // Delivered meals are already paid for, so they can't make the balance "low".
   const lowBalance = walletBalance !== null && !heroDone && dayTotal > walletBalance
   const dayOrderAddonIds = new Set((dayOrder?.order_addons ?? []).filter(l => l.kind === 'addon' && l.addon_id).map(l => l.addon_id))
@@ -843,6 +797,50 @@ export default function SubscriptionScreen() {
     (dayOrder?.order_addons ?? []).filter(l => l.kind === 'addon' && l.addon_id).map(l => [l.addon_id as string, l.quantity ?? 1])
   )
   const defaultAddonIds = new Set(subAddons.map(a => a.addon_id))
+  const defaultAddress = addresses.find(a => a.is_default) ?? addresses[0] ?? null
+  // Where a newly added dish goes: chosen, else this slot's meal's address.
+  const addTarget = addAddressId ?? dayOrder?.address_id ?? defaultAddress?.id ?? null
+
+  // "Deliver to" for one meal: where it's going, with a picker to change it.
+  const renderAddressPicker = (order: OrderItem) => {
+    if (dayLocked || addresses.length === 0) return null
+    const sel = addresses.find(a => a.id === order.address_id) ?? defaultAddress
+    if (pickingAddressForOrder === order.id) {
+      return (
+        <View style={{ gap: 8, marginTop: 10 }}>
+          {addresses.map((addr) => {
+            const isSelected = sel?.id === addr.id
+            return (
+              <Pressable
+                key={addr.id}
+                style={[s.addrPickRow, isSelected && s.addrPickRowActive]}
+                onPress={() => changeOrderAddress(order.id, addr.id)}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.addrPickLabel, isSelected && { color: Colors.primary }]}>{addr.label}</Text>
+                  <Text style={s.addrPickLine1} numberOfLines={1}>{addr.line1}</Text>
+                </View>
+                {isSelected && <Check size={16} color={Colors.primary} strokeWidth={2.5} />}
+              </Pressable>
+            )
+          })}
+          <Pressable onPress={() => { setShowDayModal(false); router.push('/(app)/addresses') }} hitSlop={6}>
+            <Text style={s.addrPickChange}>Add or change addresses →</Text>
+          </Pressable>
+        </View>
+      )
+    }
+    return (
+      <Pressable style={[s.addrPickCurrent, { marginTop: 10 }]} onPress={() => setPickingAddressForOrder(order.id)}>
+        <MapPin size={15} color={Colors.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={s.addrPickLabel}>Deliver to {sel?.label ?? 'your address'}</Text>
+          {sel && <Text style={s.addrPickLine1} numberOfLines={1}>{sel.line1}</Text>}
+        </View>
+        <Text style={s.addrPickChange}>Change</Text>
+      </Pressable>
+    )
+  }
 
   // Day label for hero card eyebrow: "TODAY'S LUNCH" / "FRI 3'S DINNER"
   const heroEyebrow = heroIsToday
@@ -856,7 +854,29 @@ export default function SubscriptionScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
-        <Text style={s.title}>My Plan</Text>
+        <View style={s.titleRow}>
+          <Text style={[s.title, { marginBottom: 0 }]}>My Plan</Text>
+          <Pressable
+            onPress={() => router.push('/(app)/order-history' as any)}
+            hitSlop={10}
+            style={({ pressed }) => [s.historyBtn, pressed && { opacity: 0.7 }]}
+            accessibilityLabel="Order history"
+          >
+            <History size={20} color={Colors.text} strokeWidth={1.75} />
+          </Pressable>
+        </View>
+
+        {codDue > 0 && (
+          <View style={s.codPayCard}>
+            <Banknote size={22} color={Colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.codPayTitle}>₹{fmt(codDue)} cash to pay</Text>
+              <Text style={s.codPayDesc}>
+                Hand it to your delivery partner at your next delivery — it goes into your wallet and pays for your meals.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* WEEK HEADER */}
         <Text style={s.weekLabel}>{heroIsToday ? 'Today' : 'This week'}</Text>
@@ -1036,17 +1056,42 @@ export default function SubscriptionScreen() {
           </View>
         ) : (
           <View key="hero-empty" style={s.heroEmpty}>
+            {slotSkipped.length > 0 && !closures.has(`${selectedDay}|${selectedSlot}`) ? (
+              <>
+                <Text style={s.heroEmptyText}>
+                  {slotSkipped[0].skip_reason === 'user'
+                    ? `You skipped this ${selectedSlot} — nothing is charged.`
+                    : slotSkipped[0].skip_reason === 'plan_finished'
+                      ? `This ${selectedSlot} was skipped — your plan's meals were used up.`
+                      : slotSkipped[0].skip_reason === 'insufficient_balance'
+                        ? `This ${selectedSlot} was skipped — your wallet didn't cover it.`
+                        : `This ${selectedSlot} was skipped.`}
+                </Text>
+                {canUnskip && (
+                  <Pressable
+                    style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }, skipping && { opacity: 0.5 }]}
+                    onPress={() => handleUnskip(selectedDay, selectedSlot)}
+                    disabled={skipping}
+                  >
+                    {skipping ? <ActivityIndicator size="small" color={Colors.primary} /> : <RotateCcw size={14} color={Colors.primary} />}
+                    <Text style={s.heroAddBtnText}>Undo skip</Text>
+                  </Pressable>
+                )}
+              </>
+            ) : null}
+            {slotSkipped.length === 0 || closures.has(`${selectedDay}|${selectedSlot}`) ? (
             <Text style={s.heroEmptyText}>
               {closures.has(`${selectedDay}|${selectedSlot}`)
                 ? `Kitchen closed for ${selectedSlot} on ${dowShort(selectedDay)} ${dayNum(selectedDay)}${closures.get(`${selectedDay}|${selectedSlot}`) ? ` — ${closures.get(`${selectedDay}|${selectedSlot}`)}` : ''}. The meal stays on your plan.`
                 : `No ${selectedSlot} on ${dowShort(selectedDay)} ${dayNum(selectedDay)}`}
             </Text>
+            ) : null}
             {/* dayAnyBase used to gate this — meant a day with zero orders in
                 any slot (e.g. a weekday turned off in the default plan) had
                 no way to open the day modal at all. Off-day adds create an
                 extra_dish row with no base order, so dayAnyBase would stay
                 null even after adding one — this can't require it. */}
-            {!heroLocked && (
+            {!heroLocked && slotSkipped.length === 0 && (
               <Pressable
                 style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }]}
                 onPress={() => { setAddMode(true); setShowDayModal(true) }}
@@ -1103,6 +1148,20 @@ export default function SubscriptionScreen() {
             </View>
           </Pressable>
         </View>
+
+        <Pressable
+          style={({ pressed }) => [s.addrLinkRow, pressed && { opacity: 0.75 }]}
+          onPress={() => router.push('/(app)/addresses')}
+        >
+          <MapPin size={17} color={Colors.primary} strokeWidth={1.75} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.infoTileLabel}>Delivery addresses</Text>
+            <Text style={s.addrLinkSub} numberOfLines={1}>
+              {defaultAddress ? `${defaultAddress.label} · ${defaultAddress.line1}` : 'Add where your meals should go'}
+            </Text>
+          </View>
+          <ChevronRight size={15} color={Colors.textMuted} strokeWidth={2} />
+        </Pressable>
 
         {/* DELIVERIES REMAINING */}
         <View style={s.progressCard}>
@@ -1196,12 +1255,13 @@ export default function SubscriptionScreen() {
           <View style={s.confirmCard}>
             <Text style={s.confirmTitle}>Skip {skipConfirm?.slot ?? 'this'}?</Text>
             <Text style={s.confirmBody}>
-              {skipConfirm?.slot === 'lunch' ? 'Lunch' : 'Dinner'} on {fmtDate(skipConfirm?.date ?? null)}.{'\n'}This meal will be removed from your week.
+              {skipConfirm?.slot === 'lunch' ? 'Lunch' : 'Dinner'} on {fmtDate(skipConfirm?.date ?? null)}.{'\n'}Nothing is charged and the meal stays on your plan. You can undo this until the cutoff.
             </Text>
+            {skipError ? <Text style={s.dayModalSwapError}>{skipError}</Text> : null}
             <View style={s.confirmBtns}>
               <Pressable
                 style={[s.confirmBtn, s.confirmBtnGhost]}
-                onPress={() => setSkipConfirm(null)}
+                onPress={() => { setSkipConfirm(null); setSkipError('') }}
               >
                 <Text style={s.confirmBtnGhostText}>Cancel</Text>
               </Pressable>
@@ -1274,24 +1334,31 @@ export default function SubscriptionScreen() {
                     )}
                     <View style={s.dayModalStatusRow}>
                       <Text style={s.dayModalStatus}>{statusLabel(dayOrder.status)}</Text>
-                      {feeCost(dayOrder) > 0 && (
-                        <Text style={s.swapFeeTag}>+₹{fmt(feeCost(dayOrder))} swap fee</Text>
-                      )}
                     </View>
                   </View>
+
+                  {renderAddressPicker(dayOrder)}
 
                   {/* Portions stepper for the base meal */}
                   {!dayLocked && (
                     <View style={s.qtyRow}>
-                      <View>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
                         <Text style={s.qtyLabel}>Portions</Text>
-                        <Text style={s.qtySub}>Billed from your wallet on delivery</Text>
+                        <Text style={s.qtySub}>
+                          {(dayOrder.quantity ?? 1) <= 1
+                            ? 'Billed on delivery · − skips this meal'
+                            : 'Fewer portions = fewer meals and less from your wallet'}
+                        </Text>
                       </View>
                       <View style={s.qtyStepper}>
                         <Pressable
-                          style={[s.qtyBtn, (cartBusy || (dayOrder.quantity ?? 1) <= 1) && { opacity: 0.4 }]}
-                          onPress={() => handleCartOp(dayOrder.id, 'dec_qty')}
-                          disabled={cartBusy || (dayOrder.quantity ?? 1) <= 1}
+                          style={[s.qtyBtn, cartBusy && { opacity: 0.4 }]}
+                          onPress={() => {
+                            // The last portion: that's a skip (asks first).
+                            if ((dayOrder.quantity ?? 1) <= 1) setSkipConfirm({ date: selectedDay, slot: selectedSlot })
+                            else handleCartOp(dayOrder.id, 'dec_qty')
+                          }}
+                          disabled={cartBusy}
                           hitSlop={8}
                         >
                           <Text style={s.qtyBtnText}>−</Text>
@@ -1309,21 +1376,24 @@ export default function SubscriptionScreen() {
                     </View>
                   )}
 
-                  {/* Extra dishes added to this slot */}
+                  {/* Extra dishes added to this slot — each can go to its own address */}
                   {dayExtras.map((ex) => (
-                    <View key={ex.id} style={s.extraRow}>
-                      <Plus size={14} color={Colors.primary} />
-                      <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
-                      <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
-                      {!dayLocked && (
-                        <Pressable
-                          style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
-                          onPress={() => handleRemoveDish(ex.id)}
-                          disabled={cartBusy}
-                        >
-                          <Text style={s.addonRemoveText}>Remove</Text>
-                        </Pressable>
-                      )}
+                    <View key={ex.id}>
+                      <View style={s.extraRow}>
+                        <Plus size={14} color={Colors.primary} />
+                        <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
+                        <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
+                        {!dayLocked && (
+                          <Pressable
+                            style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
+                            onPress={() => handleRemoveDish(ex.id)}
+                            disabled={cartBusy}
+                          >
+                            <Text style={s.addonRemoveText}>Remove</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                      {addresses.length > 1 && renderAddressPicker(ex)}
                     </View>
                   ))}
 
@@ -1393,12 +1463,6 @@ export default function SubscriptionScreen() {
                       <Text style={s.cartSummaryLabel}>Meals & add-ons</Text>
                       <Text style={s.cartSummaryVal}>₹{fmt(dayMealsAddons)}</Text>
                     </View>
-                    {daySwapFees > 0 && (
-                      <View style={s.cartSummaryRow}>
-                        <Text style={s.cartSummaryLabel}>Swap fees</Text>
-                        <Text style={s.cartSummaryVal}>₹{fmt(daySwapFees)}</Text>
-                      </View>
-                    )}
                     <View style={s.cartSummaryTotalRow}>
                       <Text style={s.cartSummaryTotalLabel}>Day total</Text>
                       <Text style={s.cartSummaryTotalVal}>₹{fmt(dayTotal)}</Text>
@@ -1425,19 +1489,22 @@ export default function SubscriptionScreen() {
 
                   {/* Extra dishes already added to this slot (extras-only — no base order) */}
                   {dayExtras.map((ex) => (
-                    <View key={ex.id} style={s.extraRow}>
-                      <Plus size={14} color={Colors.primary} />
-                      <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
-                      <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
-                      {!dayLocked && (
-                        <Pressable
-                          style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
-                          onPress={() => handleRemoveDish(ex.id)}
-                          disabled={cartBusy}
-                        >
-                          <Text style={s.addonRemoveText}>Remove</Text>
-                        </Pressable>
-                      )}
+                    <View key={ex.id}>
+                      <View style={s.extraRow}>
+                        <Plus size={14} color={Colors.primary} />
+                        <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
+                        <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
+                        {!dayLocked && (
+                          <Pressable
+                            style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
+                            onPress={() => handleRemoveDish(ex.id)}
+                            disabled={cartBusy}
+                          >
+                            <Text style={s.addonRemoveText}>Remove</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                      {renderAddressPicker(ex)}
                     </View>
                   ))}
                 </View>
@@ -1483,6 +1550,20 @@ export default function SubscriptionScreen() {
                       <Text style={s.dayModalSectionLabel}>
                         {effectiveAddMode ? (dayOrder ? 'Add another dish to this slot' : `Add a ${selectedSlot} dish`) : 'Swap for something else'}
                       </Text>
+                      {effectiveAddMode && addresses.length > 1 && (
+                        <View style={s.addToRow}>
+                          <Text style={s.addToLabel}>Deliver it to</Text>
+                          {addresses.map((a) => (
+                            <Pressable
+                              key={a.id}
+                              onPress={() => setAddAddressId(a.id)}
+                              style={[s.addToChip, addTarget === a.id && s.addToChipActive]}
+                            >
+                              <Text style={[s.addToChipText, addTarget === a.id && s.addToChipTextActive]}>{a.label}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
                       {swapError ? (
                         <View style={s.swapErrorRow}>
                           <Text style={s.dayModalSwapError}>{swapError}</Text>
@@ -1495,7 +1576,6 @@ export default function SubscriptionScreen() {
                       ) : null}
                       {allMeals.map((meal) => {
                         const isCurrent = !effectiveAddMode && !!dayOrder && meal.id === dayOrder.meal_templates?.id
-                        const isFree = !effectiveAddMode && !isCurrent && freeMealIds.has(meal.id)
                         const available = isMealAvailable({ unavailableMeals }, selectedDay, meal.id)
                         return (
                           <Pressable
@@ -1543,9 +1623,9 @@ export default function SubscriptionScreen() {
                               </View>
                             )}
                             {!isCurrent && !swapping && available && (
-                              <View style={[s.switchBadge, (isFree || effectiveAddMode) && s.switchBadgeFree]}>
-                                <Text style={[s.switchBadgeText, (isFree || effectiveAddMode) && s.switchBadgeTextFree]} maxFontSizeMultiplier={1.3}>
-                                  {effectiveAddMode ? 'Add' : isFree ? 'Free' : '+₹20'}
+                              <View style={[s.switchBadge, s.switchBadgeFree]}>
+                                <Text style={[s.switchBadgeText, s.switchBadgeTextFree]} maxFontSizeMultiplier={1.3}>
+                                  {effectiveAddMode ? 'Add' : 'Swap'}
                                 </Text>
                               </View>
                             )}
@@ -1561,51 +1641,6 @@ export default function SubscriptionScreen() {
                 </View>
               )}
 
-              {/* Per-order address section */}
-              {dayOrder && !dayLocked && addresses.length > 0 && (
-                <View style={s.addrPickSection}>
-                  <Text style={s.dayModalSectionLabel}>Deliver to</Text>
-                  {pickingAddressForOrder === dayOrder.id ? (
-                    <View style={{ gap: 8, marginBottom: 8 }}>
-                      {addresses.map((addr) => {
-                        const isSelected = (dayOrder.address_id ?? addresses.find(a => a.is_default)?.id) === addr.id
-                        return (
-                          <Pressable
-                            key={addr.id}
-                            style={[s.addrPickRow, isSelected && s.addrPickRowActive]}
-                            onPress={async () => {
-                              await supabase.from('orders').update({ address_id: addr.id }).eq('id', dayOrder.id)
-                              setWeekOrders(prev => prev.map(o => o.id === dayOrder.id ? { ...o, address_id: addr.id } : o))
-                              setPickingAddressForOrder(null)
-                            }}
-                          >
-                            <View style={{ flex: 1 }}>
-                              <Text style={[s.addrPickLabel, isSelected && { color: Colors.primary }]}>{addr.label}</Text>
-                              <Text style={s.addrPickLine1} numberOfLines={1}>{addr.line1}</Text>
-                            </View>
-                            {isSelected && <Check size={16} color={Colors.primary} strokeWidth={2.5} />}
-                          </Pressable>
-                        )
-                      })}
-                    </View>
-                  ) : (
-                    <Pressable style={s.addrPickCurrent} onPress={() => setPickingAddressForOrder(dayOrder.id)}>
-                      {(() => {
-                        const sel = addresses.find(a => a.id === dayOrder.address_id) ?? addresses.find(a => a.is_default) ?? addresses[0]
-                        return (
-                          <>
-                            <View style={{ flex: 1 }}>
-                              <Text style={s.addrPickLabel}>{sel.label}</Text>
-                              <Text style={s.addrPickLine1} numberOfLines={1}>{sel.line1}</Text>
-                            </View>
-                            <Text style={s.addrPickChange}>Change</Text>
-                          </>
-                        )
-                      })()}
-                    </Pressable>
-                  )}
-                </View>
-              )}
             </ScrollView>
           </View>
         </View>
@@ -1742,6 +1777,22 @@ const s = StyleSheet.create({
   titleWrap: { paddingHorizontal: 16, paddingBottom: 8 },
   scroll: { paddingHorizontal: 16, paddingBottom: 40 },
   title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 16 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  historyBtn: {
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border,
+  },
+  addrLinkRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff', borderRadius: 16,
+    borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 16, paddingVertical: 14, marginBottom: 12,
+  },
+  addrLinkSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  addToRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 },
+  addToLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted },
+  addToChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: '#fff' },
+  addToChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  addToChipText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.text },
+  addToChipTextActive: { color: Colors.primary },
 
   sectionLabel: {
     fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.textLight,
@@ -1749,21 +1800,10 @@ const s = StyleSheet.create({
   },
 
   // CoD limited view
-  codHeroCard: {
-    backgroundColor: Colors.primaryLight, borderRadius: 16, padding: 20, marginBottom: 24,
-    alignItems: 'center', borderWidth: 2, borderColor: Colors.primary,
-  },
-  codHeroEmoji: { fontSize: 40, marginBottom: 8 },
-  codHeroTitle: { fontFamily: Fonts.heading, fontSize: 19, color: Colors.text, textAlign: 'center', marginBottom: 6 },
-  codHeroSub: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, textAlign: 'center', lineHeight: 20 },
-  codMealCard: { backgroundColor: '#fff', borderRadius: 14, padding: 18, marginBottom: 24, borderWidth: 1, borderColor: Colors.border },
-  codMealName: { fontFamily: Fonts.headingSemi, fontSize: 18, color: Colors.text, marginBottom: 4 },
-  codMealDate: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted },
   codPayCard: {
-    backgroundColor: '#fff', borderRadius: 14, padding: 18, flexDirection: 'row', gap: 14,
+    backgroundColor: '#fff', borderRadius: 14, padding: 16, flexDirection: 'row', gap: 12, marginBottom: 16,
     borderLeftWidth: 3, borderLeftColor: Colors.accent, borderWidth: 1, borderColor: Colors.border,
   },
-  codPayEmoji: { fontSize: 26 },
   codPayTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text, marginBottom: 4 },
   codPayDesc: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19 },
 
@@ -1786,7 +1826,6 @@ const s = StyleSheet.create({
   dayDate: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
 
   // Day modal extras
-  swapFeeTag: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.accentText, marginLeft: 10 },
   extraRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8,
     backgroundColor: Colors.primaryLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
@@ -1941,7 +1980,7 @@ const s = StyleSheet.create({
   // Per-order address picker in day modal
   addrPickSection: { paddingHorizontal: 20, paddingBottom: 16 },
   addrPickCurrent: {
-    flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 14,
     borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.primaryLight,
   },
   addrPickRow: {

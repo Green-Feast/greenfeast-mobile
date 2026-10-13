@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
         user_id: user.id,
         plan_id: plan.id,
         plan_name: old.plan_name,
-        menu_type: old.menu_type,
+        menu_type: 'M1', // one menu since 052
         status: 'pending',
         payment_method: 'online',
         delivery_mode: old.delivery_mode,

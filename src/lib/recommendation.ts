@@ -10,7 +10,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type HealthGoal = 'build-muscle' | 'lose-weight' | 'improve-wellness' | 'boost-energy'
-export type MenuType = 'M1' | 'M2'
+// One weekly menu for everyone since migration 052 (the M2 track is gone).
+export type MenuType = 'M1'
 export type PlanId = 'trial' | 'plan15' | 'plan30'
 
 export type Recommendation = {
@@ -27,19 +28,11 @@ export type Recommendation = {
 
 export const MENU_LABELS: Record<MenuType, string> = {
   M1: 'Global Menu',
-  M2: 'Gut Health Menu',
 }
 
 export const CONSTRAINT_LABELS: Record<string, string> = {
   'less-carbs': 'Less carbs',
   'more-fibre': 'More fibre',
-}
-
-// M2 informational moment shown before the customer confirms a gut-health plan
-// (stack-logic.txt §09). Only M2 gets this; M1 is self-explanatory.
-export const M2_INFO = {
-  title: 'Coastal Fresh',
-  body: 'Light, fresh meals that leave you feeling good, not heavy — picked for your goals. Want something different on a given day? Swap freely, anytime.',
 }
 
 // ── Plan names ("Daily" set) ─────────────────────────────────────────────────
@@ -78,39 +71,40 @@ function taglineFor(goal: HealthGoal, q1: string): string {
 
 // ── Stack table: menu + add-ons + constraints (stack-logic.txt §05) ───────────
 
-type StackRow = { menuType: MenuType; derivedAddons: string[]; derivedConstraints: string[] }
+// The answers still pick add-ons and constraints; the menu is the same for everyone.
+type StackRow = { derivedAddons: string[]; derivedConstraints: string[] }
 
 function stackFor(goal: HealthGoal, q1: string, q2: string): StackRow {
   if (goal === 'build-muscle') {
-    if (q1 === 'cut') return { menuType: 'M1', derivedAddons: ['extra-protein'], derivedConstraints: ['less-carbs'] }
-    return { menuType: 'M1', derivedAddons: ['smoothie', 'extra-protein'], derivedConstraints: [] } // bulk
+    if (q1 === 'cut') return { derivedAddons: ['extra-protein'], derivedConstraints: ['less-carbs'] }
+    return { derivedAddons: ['smoothie', 'extra-protein'], derivedConstraints: [] } // bulk
   }
 
   if (goal === 'lose-weight') {
     if (q1 === 'bloating') {
       return q2 === 'exercise'
-        ? { menuType: 'M2', derivedAddons: ['seeds', 'extra-protein'], derivedConstraints: ['less-carbs'] }
-        : { menuType: 'M2', derivedAddons: ['seeds'], derivedConstraints: ['less-carbs', 'more-fibre'] }
+        ? { derivedAddons: ['seeds', 'extra-protein'], derivedConstraints: ['less-carbs'] }
+        : { derivedAddons: ['seeds'], derivedConstraints: ['less-carbs', 'more-fibre'] }
     }
     if (q1 === 'lean-out') {
       return q2 === 'exercise'
-        ? { menuType: 'M1', derivedAddons: ['extra-protein'], derivedConstraints: ['less-carbs'] }
-        : { menuType: 'M1', derivedAddons: [], derivedConstraints: ['less-carbs'] }
+        ? { derivedAddons: ['extra-protein'], derivedConstraints: ['less-carbs'] }
+        : { derivedAddons: [], derivedConstraints: ['less-carbs'] }
     }
     // condition
     return q2 === 'exercise'
-      ? { menuType: 'M2', derivedAddons: ['extra-protein', 'seeds'], derivedConstraints: ['less-carbs'] }
-      : { menuType: 'M2', derivedAddons: ['seeds'], derivedConstraints: ['less-carbs'] }
+      ? { derivedAddons: ['extra-protein', 'seeds'], derivedConstraints: ['less-carbs'] }
+      : { derivedAddons: ['seeds'], derivedConstraints: ['less-carbs'] }
   }
 
   if (goal === 'improve-wellness') {
-    if (q1 === 'gut') return { menuType: 'M2', derivedAddons: ['seeds'], derivedConstraints: ['more-fibre'] }
-    return { menuType: 'M1', derivedAddons: [], derivedConstraints: [] } // clean
+    if (q1 === 'gut') return { derivedAddons: ['seeds'], derivedConstraints: ['more-fibre'] }
+    return { derivedAddons: [], derivedConstraints: [] } // clean
   }
 
   // boost-energy
-  if (q1 === 'crash') return { menuType: 'M1', derivedAddons: ['seeds'], derivedConstraints: [] }
-  return { menuType: 'M1', derivedAddons: ['exotic-fruits'], derivedConstraints: [] } // stamina
+  if (q1 === 'crash') return { derivedAddons: ['seeds'], derivedConstraints: [] }
+  return { derivedAddons: ['exotic-fruits'], derivedConstraints: [] } // stamina
 }
 
 // ── Meal count (layered model, stack-logic.txt §08) ───────────────────────────
@@ -143,7 +137,7 @@ export function computeRecommendation(input: {
   return {
     planName: planNameFor(goal, q1),
     tagline: taglineFor(goal, q1),
-    menuType: stack.menuType,
+    menuType: 'M1',
     derivedAddons: stack.derivedAddons,
     derivedConstraints: stack.derivedConstraints,
     recommendedMealCount: mealCount,

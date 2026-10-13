@@ -20,6 +20,10 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 //     weekday the subscriber turned off in their default plan). No reference
 //     order exists to derive anything from, so subscription ownership, date
 //     bounds and address all have to be established directly instead.
+//
+// Either way, address_id (one of the customer's own addresses) sends this
+// dish somewhere else — e.g. one portion home, one to the office. Its batch
+// follows that address (orders_batch_from_address, migration 052).
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,7 +41,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { order_id, subscription_id, delivery_date, meal_template_id, meal_slot } = await req.json()
+    const { order_id, subscription_id, delivery_date, meal_template_id, meal_slot, address_id } = await req.json()
     if (!meal_template_id) return json({ error: 'meal_template_id is required' }, 400)
     if (!order_id && !subscription_id) {
       return json({ error: 'Either order_id or subscription_id is required' }, 400)
@@ -87,16 +91,14 @@ Deno.serve(async (req) => {
       }
 
       // Ownership — mirrors the app's own subscription queries (e.g.
-      // AddToDaySheet): active/paused, or pending-but-already-paying-COD.
+      // AddToDaySheet): active or paused plans.
       const { data: sub } = await supabase
         .from('subscriptions')
-        .select('id, user_id, status, payment_method, end_date')
+        .select('id, user_id, status, end_date')
         .eq('id', subscription_id)
         .single()
       if (!sub || sub.user_id !== user.id) return json({ error: 'Subscription not found' }, 404)
-      const validStatus =
-        sub.status === 'active' || sub.status === 'paused' || (sub.status === 'pending' && sub.payment_method === 'cod')
-      if (!validStatus) return json({ error: 'Subscription is not active' }, 400)
+      if (sub.status !== 'active' && sub.status !== 'paused') return json({ error: 'Subscription is not active' }, 400)
       if (sub.end_date && delivery_date > sub.end_date) {
         return json({ error: 'That date is after your subscription ends' }, 400)
       }
@@ -105,30 +107,29 @@ Deno.serve(async (req) => {
       effectiveDate = delivery_date
       effectiveSlot = meal_slot
 
-      // Address — most recent order's address for this subscription (where
-      // they've actually been receiving deliveries), else their default
-      // address, else any, else null (the existing order_id path already
-      // tolerates a null address the same way).
-      const { data: recentOrder } = await supabase
-        .from('orders')
-        .select('address_id')
-        .eq('subscription_id', subscriptionId)
-        .not('address_id', 'is', null)
-        .order('delivery_date', { ascending: false })
+      // Address — the customer's default (the app can pass address_id to
+      // pick another), else none (the order_id path tolerates null too).
+      const { data: addr } = await supabase
+        .from('addresses')
+        .select('id, is_default')
+        .eq('user_id', user.id)
+        .is('archived_at', null)
+        .order('is_default', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (recentOrder?.address_id) {
-        addressId = recentOrder.address_id
-      } else {
-        const { data: addr } = await supabase
-          .from('addresses')
-          .select('id, is_default')
-          .eq('user_id', user.id)
-          .order('is_default', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-        addressId = addr?.id ?? null
-      }
+      addressId = addr?.id ?? null
+    }
+
+    if (address_id) {
+      const { data: own } = await supabase
+        .from('addresses')
+        .select('id')
+        .eq('id', address_id)
+        .eq('user_id', user.id)
+        .is('archived_at', null)
+        .maybeSingle()
+      if (!own) return json({ error: 'Address not found' }, 404)
+      addressId = own.id
     }
 
     const { data: locked } = await supabase.rpc('is_slot_locked', {

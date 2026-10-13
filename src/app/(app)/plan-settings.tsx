@@ -82,7 +82,7 @@ export default function PlanSettingsScreen() {
       .from('subscriptions')
       .select('id, status, payment_method, plan_name, deliveries_remaining, end_date, pause_from, pause_until, plans ( name, meals_total, days_per_week, base_price ), subscription_addons ( addons ( price_per_meal ) )')
       .eq('user_id', user.id)
-      .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
+      .in('status', ['active', 'paused'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()

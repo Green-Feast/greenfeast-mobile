@@ -251,7 +251,7 @@ export default function Home() {
             .from('subscriptions')
             .select('id, status, deliveries_remaining, plan_name, plans ( meals_total )')
             .eq('user_id', user.id)
-            .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
+            .in('status', ['active', 'paused'])
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle(),

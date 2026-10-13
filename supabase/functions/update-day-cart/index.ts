@@ -5,7 +5,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 //   op = 'add_addon'      { addon_id }  — attach an add-on to the day, at quantity 1.
 //   op = 'remove_addon'   { addon_id }  — detach a non-default add-on entirely.
 //   op = 'inc_qty'                      — +1 base portion (never re-bills here).
-//   op = 'dec_qty'                      — -1 base portion (never below the slot floor).
+//   op = 'dec_qty'                      — -1 base portion, down to 1. Below that is a
+//                                         skip (the app asks first): 'use_skip'.
 //   op = 'inc_addon_qty'  { addon_id }  — attach at qty 1 if absent, else +1 (cap 10).
 //   op = 'dec_addon_qty'  { addon_id }  — -1; a non-default add-on at qty 1 is removed
 //                                         entirely rather than left at 0. A default
@@ -159,8 +160,10 @@ Deno.serve(async (req) => {
         .eq('id', order.id)
     }
     if (op === 'dec_qty') {
-      const floor = Math.max(order.meal_slot === 'dinner' ? (sub?.meals_dinner ?? 0) : (sub?.meals_lunch ?? 1), 1)
-      if ((order.quantity ?? 1) <= floor) return json({ error: 'below_minimum', floor }, 400)
+      // Fewer portions than the plan's default is fine for a day (a roommate
+      // away): the meal counter and wallet are charged per delivered portion.
+      // The last portion goes through skip instead, which the app confirms.
+      if ((order.quantity ?? 1) <= 1) return json({ error: 'use_skip' }, 400)
       await supabase.from('orders')
         .update({ quantity: (order.quantity ?? 1) - 1, updated_at: new Date().toISOString() })
         .eq('id', order.id)

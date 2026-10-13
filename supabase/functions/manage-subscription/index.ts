@@ -61,7 +61,7 @@ Deno.serve(async (req) => {
 
     const { data: sub } = await supabase
       .from('subscriptions')
-      .select('id, status, user_id')
+      .select('id, status, user_id, deliveries_remaining')
       .eq('id', subscription_id)
       .eq('user_id', user.id)
       .single()
@@ -186,6 +186,73 @@ Deno.serve(async (req) => {
       if (skipErr) throw skipErr
 
       return json({ ok: true, action: 'skipped', delivery_date, meal_slot: meal_slot ?? null, slots_skipped: openSlots })
+    }
+
+    // ── unskip ───────────────────────────────────────────────────────────────
+
+    // Changed their mind: bring back a meal they skipped themselves, while the
+    // slot is still open. Wallet- or plan-driven skips happen at cutoff, so
+    // they're never open again.
+    if (action === 'unskip') {
+      if (!delivery_date || !meal_slot) return json({ error: 'delivery_date and meal_slot are required' }, 400)
+      if (sub.status !== 'active' && sub.status !== 'paused') {
+        return json({ error: "Your plan isn't active." }, 400)
+      }
+      const { data: locked } = await supabase.rpc('is_slot_locked', { p_date: delivery_date, p_slot: meal_slot })
+      if (locked) return json({ error: 'Too late — this meal has already locked for the day.' }, 400)
+
+      const { data: closed } = await supabase
+        .from('kitchen_closures').select('reason')
+        .eq('closed_on', delivery_date).eq('meal_slot', meal_slot).maybeSingle()
+      if (closed) return json({ error: `The kitchen is closed for ${meal_slot} that day.` }, 400)
+
+      const { data: skipped } = await supabase
+        .from('orders')
+        .select('id, quantity')
+        .eq('subscription_id', subscription_id)
+        .eq('delivery_date', delivery_date)
+        .eq('meal_slot', meal_slot)
+        .eq('status', 'skipped')
+        .eq('skip_reason', 'user')
+      if (!skipped || skipped.length === 0) return json({ error: "There's no skipped meal to bring back." }, 400)
+      const need = skipped.reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)
+
+      // The plan only has so many meals: while this one was skipped, the
+      // nightly job may have used its place for a day at the end of the
+      // window. Give that place back (latest untouched meal first).
+      const { data: upcoming } = await supabase
+        .from('orders')
+        .select('id, delivery_date, meal_slot, quantity, extra_dish, is_customized, status')
+        .eq('subscription_id', subscription_id)
+        .gte('delivery_date', today())
+        .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery'])
+        .order('delivery_date', { ascending: false })
+        .order('meal_slot', { ascending: false })
+      let room = (sub.deliveries_remaining ?? 0) -
+        (upcoming ?? []).reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)
+      if (room < need) {
+        const freeable = (upcoming ?? []).filter((o: any) =>
+          o.status === 'scheduled' && !o.extra_dish && !o.is_customized && o.delivery_date > delivery_date)
+        const drop: string[] = []
+        for (const o of freeable) {
+          if (room >= need) break
+          drop.push(o.id)
+          room += o.quantity ?? 1
+        }
+        if (room < need) {
+          return json({ error: 'Your plan has no meals left for this one. Renew your plan to add more.' }, 400)
+        }
+        if (drop.length > 0) await supabase.from('orders').delete().in('id', drop)
+      }
+
+      const { error: unskipErr } = await supabase
+        .from('orders')
+        .update({ status: 'scheduled', skip_reason: null, updated_at: new Date().toISOString() })
+        .in('id', skipped.map((o: any) => o.id))
+      if (unskipErr) throw unskipErr
+      for (const o of skipped) await supabase.rpc('recompute_order_cart', { p_order: o.id })
+
+      return json({ ok: true, action: 'unskipped', delivery_date, meal_slot, restored: skipped.length })
     }
 
     // ── cancel ───────────────────────────────────────────────────────────────

@@ -25,6 +25,8 @@ import {
   ChevronUp,
   ChevronRight,
   Lock,
+  MapPin,
+  History,
   RefreshCw,
   AlertTriangle,
   Trash2,
@@ -270,6 +272,27 @@ export default function AccountScreen() {
             <Text style={styles.referralSub}>Share on WhatsApp →</Text>
           </View>
         </Pressable>
+
+        {user && (
+          <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
+            <Pressable
+              style={({ pressed }) => [styles.row, styles.rowBorder, pressed && styles.rowPressed]}
+              onPress={() => router.push('/(app)/addresses' as any)}
+            >
+              <MapPin size={18} color={Colors.ink500} />
+              <Text style={[styles.rowLabel, { flex: 1 }]}>Delivery addresses</Text>
+              <ChevronRight size={16} color={Colors.ink400} />
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              onPress={() => router.push('/(app)/order-history' as any)}
+            >
+              <History size={18} color={Colors.ink500} />
+              <Text style={[styles.rowLabel, { flex: 1 }]}>Order history</Text>
+              <ChevronRight size={16} color={Colors.ink400} />
+            </Pressable>
+          </View>
+        )}
 
         {hasPassword && (
           <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>

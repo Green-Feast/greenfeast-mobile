@@ -65,7 +65,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
         .from('subscriptions')
         .select('id')
         .eq('user_id', user.id)
-        .or('status.eq.active,status.eq.paused,and(status.eq.pending,payment_method.eq.cod)')
+        .in('status', ['active', 'paused'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()

@@ -17,7 +17,7 @@ import { Check } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useOnboardingStore, type AddOnSelection } from '@/store/onboarding'
-import { MENU_LABELS, M2_INFO, CONSTRAINT_LABELS } from '@/lib/recommendation'
+import { MENU_LABELS, CONSTRAINT_LABELS } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
@@ -37,11 +37,8 @@ type Addon = {
   fat: number | null
 }
 
-// Representative photo for the "Your menu style" card, picked by menu type.
-const MENU_STYLE_PHOTOS = {
-  M1: require('@/assets/food/quinoa-buddha.webp'),
-  M2: require('@/assets/food/mediterranean-bliss.webp'),
-} as const
+// Representative photo for the "Your menu style" card.
+const MENU_STYLE_PHOTO = require('@/assets/food/quinoa-buddha.webp')
 
 function fmt(paise: number) {
   return `₹${(paise / 100).toLocaleString('en-IN')}`
@@ -134,12 +131,11 @@ export default function RecommendationScreen() {
     ...derivedConstraints.map((c) => CONSTRAINT_LABELS[c] ?? c),
   ]
 
-  const menuStyle = menuType === 'M2'
-    ? M2_INFO
-    : {
-        title: 'Global Kitchen',
-        body: 'A rotating world tour of balanced, protein-forward meals — never repetitive, always satisfying. Want something different on a given day? Swap freely, anytime.',
-      }
+  // One menu for everyone (the separate gut-health menu was retired).
+  const menuStyle = {
+    title: 'Global Kitchen',
+    body: 'A rotating world tour of balanced, protein-forward meals — never repetitive, always satisfying. Want something different on a given day? Swap freely, anytime.',
+  }
 
   function buildAddOns(): AddOnSelection[] {
     return addonRows.map((a) => ({ id: a.id, name: a.name, pricePerMeal: a.price_per_meal }))
@@ -217,7 +213,7 @@ export default function RecommendationScreen() {
           <Page>
             <CardShell>
               <Image
-                source={MENU_STYLE_PHOTOS[menuType]}
+                source={MENU_STYLE_PHOTO}
                 style={styles.menuStylePhoto}
                 contentFit="cover"
                 cachePolicy="memory-disk"

@@ -1,13 +1,8 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-const SWITCH_FEE_PAISE = 2000 // ₹20
-
-// Swap a day's meal. Switching to your own menu's dish or the counterpart menu's
-// dish for that day/slot is FREE; anything else adds a ₹20 "Meal switch" fee.
-//
-// No money moves here — the fee is recorded as a cart line (order_addons,
-// kind='fee') so it lands in orders.cart_total and is billed ON DELIVERY along
-// with the meal. Reverting to a free dish removes the fee line.
+// Swap a day's meal for any subscription dish. Swaps are free (052 removed the
+// ₹20 "Meal switch" fee); the meal is billed on delivery like any other, at
+// the order's own rate. The kitchen's ingredient snapshot follows the new dish.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -58,7 +53,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Cannot switch — this slot has already locked for the day.' }, 400)
     }
     if (order.meal_template_id === meal_template_id) {
-      return json({ ok: true, charged: false }) // nothing to do
+      return json({ ok: true, charged: false, fee_paise: 0 }) // nothing to do
     }
 
     // Server-side availability enforcement — the app greys these out, but a
@@ -86,56 +81,26 @@ Deno.serve(async (req) => {
       return json({ error: 'This dish is not available for subscription orders.' }, 400)
     }
 
-    // Load subscription to find its menu_type
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('menu_type')
-      .eq('id', order.subscription_id)
-      .single()
-
-    const myMenuType = sub?.menu_type ?? 'M1'
-    const counterpart = myMenuType === 'M1' ? 'M2' : 'M1'
-
-    // Derive day_of_week (Mon=0) for the delivery date
-    const deliveryDate = new Date(order.delivery_date + 'T00:00:00Z')
-    const dowNum = (deliveryDate.getUTCDay() + 6) % 7
-
-    // Both the user's own menu dish and the counterpart's dish are free swaps.
-    const { data: menuRows } = await supabase
-      .from('weekly_menu')
-      .select('meal_template_id')
-      .in('menu_type', [myMenuType, counterpart])
-      .eq('day_of_week', dowNum)
-      .eq('meal_slot', order.meal_slot)
-    const freeSet = new Set((menuRows ?? []).map((m: any) => m.meal_template_id).filter(Boolean))
-    const isFreeSwitch = freeSet.has(meal_template_id)
-
     // Apply the swap.
     await supabase
       .from('orders')
       .update({
         meal_template_id,
         is_customized: true,
-        switch_fee_paise: 0, // fee now lives on a cart line, not this column
+        switch_fee_paise: 0,
         updated_at: new Date().toISOString(),
       })
       .eq('id', order_id)
 
-    // Reconcile the "Meal switch" fee line: remove any existing one, then add a
-    // single line back only if the new dish is off-menu.
+    // Any "Meal switch" fee line left from before swaps were free goes too.
     await supabase.from('order_addons')
       .delete().eq('order_id', order_id).eq('kind', 'fee').eq('label', 'Meal switch')
-    if (!isFreeSwitch) {
-      await supabase.from('order_addons').insert({
-        order_id, addon_id: null, kind: 'fee', label: 'Meal switch',
-        quantity: 1, unit_price: SWITCH_FEE_PAISE,
-      })
-    }
+    await supabase.rpc('snapshot_order_ingredients', { p_order: order_id })
 
-    // Re-snapshot the cart total so the fee shows up immediately in the app.
+    // Re-snapshot the cart total.
     await supabase.rpc('recompute_order_cart', { p_order: order_id })
 
-    return json({ ok: true, charged: false, fee_paise: isFreeSwitch ? 0 : SWITCH_FEE_PAISE, billed: 'on_delivery' })
+    return json({ ok: true, charged: false, fee_paise: 0, billed: 'on_delivery' })
   } catch (err) {
     console.error('switch-meal error:', err)
     return json({ error: 'Internal server error' }, 500)

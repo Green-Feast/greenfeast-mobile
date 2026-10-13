@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -90,6 +91,7 @@ export default function AddressesScreen() {
       .from('addresses')
       .select('id, line1, landmark, pincode, label, type, is_default, lat, lng')
       .eq('user_id', user.id)
+      .is('archived_at', null)
       .order('is_default', { ascending: false })
       .order('created_at')
     setAddresses((data as Address[]) ?? [])
@@ -126,9 +128,11 @@ export default function AddressesScreen() {
           .update({ line1: line1.trim(), landmark: landmark.trim() || null, pincode, label, type: addrType, lat: pin?.lat ?? null, lng: pin?.lng ?? null })
           .eq('id', editingId)
         if (err) throw err
+        setFormOpen(false)
+        await fetchAddresses()
       } else {
         const isFirst = addresses.length === 0
-        const { error: err } = await supabase.from('addresses').insert({
+        const { data: created, error: err } = await supabase.from('addresses').insert({
           user_id: user!.id,
           line1: line1.trim(),
           landmark: landmark.trim() || null,
@@ -138,33 +142,67 @@ export default function AddressesScreen() {
           lat: pin?.lat ?? null,
           lng: pin?.lng ?? null,
           is_default: isFirst,
-        })
+        }).select('id').single()
         if (err) throw err
+        setFormOpen(false)
+        await fetchAddresses()
+        // A new place to eat: offer to send the upcoming meals there.
+        if (created && !isFirst) askToUse(created.id, label)
+        else if (created && isFirst) await moveUpcoming(created.id, true)
       }
-      setFormOpen(false)
-      await fetchAddresses()
     } catch { setError('Could not save address. Please try again.') }
     finally { setSaving(false) }
   }
 
-  async function handleDelete(id: string) {
-    setDeletingId(id)
-    try {
-      await supabase.from('addresses').delete().eq('id', id)
-      const updated = addresses.filter(a => a.id !== id)
-      // If deleted was default and there are remaining addresses, promote the first
-      if (addresses.find(a => a.id === id)?.is_default && updated.length > 0) {
-        await supabase.from('addresses').update({ is_default: true }).eq('id', updated[0].id)
-      }
-      await fetchAddresses()
-    } finally { setDeletingId(null) }
+  // Makes it the default; with moveMeals, every upcoming meal that can still
+  // be changed goes there too (its delivery route follows the address).
+  async function moveUpcoming(id: string, moveMeals: boolean) {
+    const { data, error: err } = await supabase.rpc('set_default_address', { p_address: id, p_move_upcoming: moveMeals })
+    if (err) {
+      Alert.alert('Could not change the address', err.message)
+      return
+    }
+    await fetchAddresses()
+    if (moveMeals && (data ?? 0) > 0) {
+      Alert.alert('Done', `${data} upcoming meal${data === 1 ? '' : 's'} will now be delivered here.`)
+    }
   }
 
-  async function handleSetDefault(id: string) {
-    if (!user) return
-    await supabase.from('addresses').update({ is_default: false }).eq('user_id', user.id)
-    await supabase.from('addresses').update({ is_default: true }).eq('id', id)
-    await fetchAddresses()
+  function askToUse(id: string, name: string) {
+    Alert.alert(
+      `Deliver to ${name}?`,
+      'Should your upcoming meals go to this address? You can still change single days from My Plan.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'New meals only', onPress: () => moveUpcoming(id, false) },
+        { text: 'All upcoming meals', onPress: () => moveUpcoming(id, true) },
+      ]
+    )
+  }
+
+  async function handleDelete(id: string) {
+    Alert.alert('Remove this address?', 'Any upcoming meals going here move to your other address.', [
+      { text: 'Keep it', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setDeletingId(id)
+          try {
+            // Archived rather than deleted once orders have used it, so past
+            // orders keep their address.
+            const { error: err } = await supabase.rpc('archive_address', { p_address: id })
+            if (err) Alert.alert('Could not remove it', err.message)
+            await fetchAddresses()
+          } finally { setDeletingId(null) }
+        },
+      },
+    ])
+  }
+
+  function handleSetDefault(id: string) {
+    const addr = addresses.find(a => a.id === id)
+    askToUse(id, addr?.label ?? 'this address')
   }
 
   return (
@@ -185,7 +223,7 @@ export default function AddressesScreen() {
         ) : addresses.length === 0 ? (
           <View style={s.emptyWrap}>
             <Text style={s.emptyText}>No addresses saved yet.</Text>
-            <Text style={s.emptySubText}>Add one below to speed up checkout.</Text>
+            <Text style={s.emptySubText}>Add one below — your meals are delivered there.</Text>
           </View>
         ) : (
           <View style={s.listWrap}>
@@ -222,7 +260,7 @@ export default function AddressesScreen() {
                 <Text style={s.addrPincode}>Pincode: {addr.pincode}</Text>
                 {!addr.is_default && (
                   <Pressable style={s.setDefaultBtn} onPress={() => handleSetDefault(addr.id)}>
-                    <Text style={s.setDefaultText}>Set as default</Text>
+                    <Text style={s.setDefaultText}>Deliver here</Text>
                   </Pressable>
                 )}
               </View>
