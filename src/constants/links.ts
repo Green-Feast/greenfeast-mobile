@@ -23,7 +23,7 @@ export const BUSINESS_ADDRESS = '3 NA 22, Jawahar Nagar, Jaipur, Rajasthan 30200
 export const BUSINESS_GSTIN = '08EGCPR0910Q1Z0'
 // FSSAI rules require the licence number wherever food is sold online. Shown
 // on the Contact Us page once filled in.
-export const FSSAI_LICENSE = 'TODO'
+export const FSSAI_LICENSE = '12225026001073'
 
 // Every WhatsApp support entry point goes through here so the team can tell
 // at a glance that the chat started inside the app. `topic` says which screen

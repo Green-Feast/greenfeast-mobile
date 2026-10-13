@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.9 — 2026-10-13
+- Build 9, OTA 9.
+- **Change password** (Account, email logins; re-checks the current one).
+- **Set your own password on first sign-in** for accounts the admin created
+  with a temporary password (user_metadata.must_change_password).
+- **Sign-in methods card** (Account): link Google or Apple to the same
+  account. Needs "Allow manual linking" on in Supabase Auth.
+- **Password reset link works when it opens the app from closed** (cold start
+  wasn't handled, so the reset screen timed out as "expired").
+- **Closed-kitchen days** say so in My Plan, with the reason.
+- **FSSAI licence number** on Contact Us (Lic. No. 12225026001073).
+
 ### 1.9.8 — 2026-10-13
 - Build 9, OTA 8.
 - **Meal photos open full-size.** The blurred preview shown while a dish photo
