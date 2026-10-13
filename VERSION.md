@@ -52,6 +52,26 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.10 — 2026-10-14
+- Build 9, OTA 10.
+- **Cash on delivery pays the first day online.** The first day's meals are
+  paid through Cashfree and the rest (a round ₹100 amount) in cash on the
+  first delivery — no more delivering on credit. My Plan shows the cash due.
+- **One menu for everyone** — the recommendation no longer splits into a
+  separate gut-health menu.
+- **Swaps are free** — no more ₹20 badge or swap-fee line.
+- **Fewer portions for a day**: "−" goes down to 1 portion; removing the last
+  one is a skip. **Undo skip** until the cutoff.
+- **Delivery address per meal** right under the meal (extra dishes too), so a
+  second portion can go to another address; "Add a dish" asks where to send
+  it. Address book reachable from Account and My Plan, with "deliver all
+  upcoming meals here"; removing an address works (archived if used).
+- **Order history** (history icon on My Plan, or Account): every meal with
+  dish, portions, add-ons, address, skip reason and what it cost.
+- Real error messages instead of "non-2xx" on skip, swap, cart and dish edits.
+- Phone screen reports a failed save (e.g. number already on another account)
+  instead of looping.
+
 ### 1.9.9 — 2026-10-13
 - Build 9, OTA 9.
 - **Change password** (Account, email logins; re-checks the current one).
