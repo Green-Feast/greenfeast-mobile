@@ -182,6 +182,8 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showAddMoney, setShowAddMoney] = useState(false)
+  // Kitchen closures (admin → Operations) in the strip's range: "date|slot" → reason.
+  const [closures, setClosures] = useState<Map<string, string | null>>(new Map())
   // Renewal (plan's meals used up): sheet + payment progress. The Cashfree
   // callback below is shared with wallet top-ups; paymentPurpose says which
   // one a returning payment belongs to.
@@ -241,7 +243,7 @@ export default function SubscriptionScreen() {
     // Active / paused: fetch upcoming orders through the calendar strip's end.
     const endStr = stripEndISO(today)
 
-    const [ordersRes, walletRes, addrRes, addonRes] = await Promise.all([
+    const [ordersRes, walletRes, addrRes, addonRes, closuresRes] = await Promise.all([
       supabase
         .from('orders')
         .select('id, delivery_date, meal_slot, status, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
@@ -267,6 +269,11 @@ export default function SubscriptionScreen() {
         .from('subscription_addons')
         .select('addon_id, addons ( name, price_per_meal )')
         .eq('subscription_id', s.id),
+      supabase
+        .from('kitchen_closures')
+        .select('closed_on, meal_slot, reason')
+        .gte('closed_on', today)
+        .lte('closed_on', endStr),
     ])
 
     if (ordersRes.error || walletRes.error) return
@@ -274,6 +281,8 @@ export default function SubscriptionScreen() {
     setWalletBalance(walletRes.data?.balance ?? null)
     setAddresses((addrRes.data as AddressData[]) ?? [])
     setSubAddons((addonRes.data as unknown as SubAddon[]) ?? [])
+    setClosures(new Map(((closuresRes.data ?? []) as { closed_on: string; meal_slot: string; reason: string | null }[])
+      .map((c) => [`${c.closed_on}|${c.meal_slot}`, c.reason])))
   }, [user])
 
   // Fetch meal + add-on catalogues once on mount for the cart editor.
@@ -1027,7 +1036,11 @@ export default function SubscriptionScreen() {
           </View>
         ) : (
           <View key="hero-empty" style={s.heroEmpty}>
-            <Text style={s.heroEmptyText}>No {selectedSlot} on {dowShort(selectedDay)} {dayNum(selectedDay)}</Text>
+            <Text style={s.heroEmptyText}>
+              {closures.has(`${selectedDay}|${selectedSlot}`)
+                ? `Kitchen closed for ${selectedSlot} on ${dowShort(selectedDay)} ${dayNum(selectedDay)}${closures.get(`${selectedDay}|${selectedSlot}`) ? ` — ${closures.get(`${selectedDay}|${selectedSlot}`)}` : ''}. The meal stays on your plan.`
+                : `No ${selectedSlot} on ${dowShort(selectedDay)} ${dayNum(selectedDay)}`}
+            </Text>
             {/* dayAnyBase used to gate this — meant a day with zero orders in
                 any slot (e.g. a weekday turned off in the default plan) had
                 no way to open the day modal at all. Off-day adds create an

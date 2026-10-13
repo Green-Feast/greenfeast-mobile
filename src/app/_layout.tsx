@@ -30,6 +30,7 @@ import { useAuthStore } from '@/store/auth'
 import { useOtaNotifications } from '@/hooks/useOtaNotifications'
 import { Colors } from '@/constants/colors'
 import { LEGAL_LAST_UPDATED } from '@/constants/legal'
+import ChangePasswordSheet from '@/components/ChangePasswordSheet'
 
 // Before anything else — a crash during boot is exactly what this needs to
 // catch, and that window closes as soon as the first component renders.
@@ -259,7 +260,22 @@ function AuthGate() {
   // Stack instead of Slot so the whole app has one real navigation history —
   // back/swipe-back always returns to the literal previous screen, matching
   // the fix already applied to (app)/_layout.tsx for the same reason.
-  return <Stack screenOptions={{ headerShown: false }} />
+  // Accounts the admin created with a temporary password must set their own
+  // before using the app (user_metadata.must_change_password). Rendered here,
+  // not in (app), so it also covers a customer who lands in onboarding.
+  const mustChangePassword = !!session?.user?.user_metadata?.must_change_password
+
+  return (
+    <>
+      <Stack screenOptions={{ headerShown: false }} />
+      <ChangePasswordSheet
+        visible={mustChangePassword}
+        mode="forced"
+        email={session?.user?.email ?? null}
+        onClose={() => {}}
+      />
+    </>
+  )
 }
 
 export default function RootLayout() {
@@ -271,13 +287,19 @@ export default function RootLayout() {
   const handledCode = useRef<string | null>(null)
   useEffect(() => {
     if (Platform.OS === 'web') return
-    const sub = Linking.addEventListener('url', ({ url }) => {
+    const handle = (url: string | null) => {
+      if (!url) return
       const { queryParams } = Linking.parse(url)
       const code = queryParams?.code as string | undefined
       if (!code || handledCode.current === code) return
       handledCode.current = code
       supabase.auth.exchangeCodeForSession(code)
-    })
+    }
+    // Cold start: when the link itself opened the app (e.g. the password-reset
+    // email tapped while the app was closed) no 'url' event fires — without
+    // this the reset screen waited for a session that never came ("expired").
+    Linking.getInitialURL().then(handle)
+    const sub = Linking.addEventListener('url', ({ url }) => handle(url))
     return () => sub.remove()
   }, [])
 

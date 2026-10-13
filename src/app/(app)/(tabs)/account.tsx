@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronRight,
+  Lock,
   RefreshCw,
   AlertTriangle,
   Trash2,
@@ -35,6 +36,7 @@ import { Colors, Fonts } from '@/constants/colors'
 import { APP_VERSION_STRING } from '@/constants/version'
 import { REFERRAL_MESSAGE, supportWhatsAppUrl } from '@/constants/links'
 import Skeleton from '@/components/Skeleton'
+import ChangePasswordSheet from '@/components/ChangePasswordSheet'
 import WhatsAppIcon from '@/components/WhatsAppIcon'
 
 const FAQS = [
@@ -49,6 +51,9 @@ export default function AccountScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
   const { user, signOut, loading: authLoading } = useAuthStore()
+  const [showChangePassword, setShowChangePassword] = useState(false)
+  // Only email + password logins have a password to change (Google/Apple don't).
+  const hasPassword = ((user?.app_metadata?.providers as string[] | undefined) ?? [user?.app_metadata?.provider]).includes('email')
 
   async function handleLogout() {
     setLogoutConfirm(false)
@@ -264,6 +269,25 @@ export default function AccountScreen() {
             <Text style={styles.referralSub}>Share on WhatsApp →</Text>
           </View>
         </Pressable>
+
+        {hasPassword && (
+          <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
+            <Pressable
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              onPress={() => setShowChangePassword(true)}
+            >
+              <Lock size={18} color={Colors.ink500} />
+              <Text style={[styles.rowLabel, { flex: 1 }]}>Change password</Text>
+              <ChevronRight size={16} color={Colors.ink400} />
+            </Pressable>
+          </View>
+        )}
+        <ChangePasswordSheet
+          visible={showChangePassword}
+          mode="change"
+          email={user?.email ?? null}
+          onClose={() => setShowChangePassword(false)}
+        />
 
         {/* Support + FAQ */}
         <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
