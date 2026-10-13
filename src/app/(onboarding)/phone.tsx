@@ -32,7 +32,16 @@ export default function OnboardingPhoneScreen() {
     const cleanPhone = '+91' + phone.replace(/\D/g, '')
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      await supabase.from('users').update({ phone: cleanPhone }).eq('id', user!.id)
+      const { error: saveErr } = await supabase.from('users').update({ phone: cleanPhone }).eq('id', user!.id)
+      // The save used to be fire-and-forget: when it failed (most often the
+      // number already belongs to another account — phone is unique), the app
+      // carried on as if it had saved, and asked again on every launch.
+      if (saveErr) {
+        setError(saveErr.code === '23505'
+          ? 'This number is already on another GreenFeast account. Sign in with that account, or message us on WhatsApp and we’ll sort it out.'
+          : 'Could not save your number. Please try again.')
+        return
+      }
       setPhone(cleanPhone)
       router.replace('/(onboarding)/gate')
     } catch (e: any) {
