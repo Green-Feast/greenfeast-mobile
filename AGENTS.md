@@ -108,10 +108,28 @@ reflect the latest commits, that's expected, not a bug to fix.
   lines must go through an edge function. Delivery billing always recomputes the price
   (`recompute_order_cart`), never trusts `cart_total`. Wallets are credited only from money
   actually received: Cashfree payments via `cashfree-webhook` (`fund-subscription-wallet` only
-  credits a payment already marked paid), and cash-on-delivery via the admin's "Mark cash
-  received" (`markCodPaid`). A CoD plan still `pending` is delivered on credit, so its wallet
-  can go negative until the cash is marked. Plan prices are computed server-side
+  credits a payment already marked paid), and cash via the admin's "Record cash received"
+  (`recordCashPayment`, reference `cash_<paymentId>`). Plan prices are computed server-side
   (`cashfree-create-order`); the amount the app sends is ignored.
+- **Cash on delivery since migration 052 (2026-10-14).** App signups pay the first day's meals
+  online (`cashfree-create-order {cod:true}`; the cash part is rounded down to ₹100) and the plan
+  goes active with `subscriptions.cod_due_paise` left to collect — no delivering on credit.
+  Only plans the admin sets up as cash on delivery have `cod_on_credit` (the billing functions
+  and cutoff checks let those wallets go negative until the cash is recorded). Unpaid `pending`
+  plans get no orders.
+- **One menu (052).** `weekly_menu` only has `menu_type = 'M1'`; every plan is M1 and swaps are
+  free (no "Meal switch" fee lines). "Same dish every day" is `customer_meal_rules` (per
+  customer, survives renewals), applied by `instantiate-orders` ahead of the weekly menu.
+- **Batches belong to addresses (052).** `addresses.batch_id_lunch/dinner`; trigger
+  `orders_batch_from_address` sets every order's batch from its address and
+  `addresses_batch_changed` moves upcoming orders when an address changes batch. The
+  subscription-level batch columns are legacy. One default address per customer (partial unique
+  index); customers change it with `set_default_address(id, move_upcoming)` and remove one with
+  `archive_address(id)` (archived, not deleted, once orders used it).
+- **Customer messages are templates (052).** Automated texts live in `notification_templates`
+  (edited in admin → Notifications → Automated messages) and are sent with
+  `notify_event(user, key, vars)` from SQL / edge functions or `notifyEvent()` in the admin —
+  don't hard-code new message text.
 - **Scheduled jobs live in the database (pg_cron, UTC), not only on Vercel.** Migration 045:
   `enforce_slot_balance('lunch'|'dinner')` at 8 AM / 1 PM IST skips orders the wallet can't
   cover before the kitchen cooks them; `warn_low_balance()` at 8 PM IST warns about tomorrow.
