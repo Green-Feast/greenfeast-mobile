@@ -112,6 +112,14 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery'])
   let capacity = allowance - (upcoming ?? []).reduce((s: number, o: any) => s + (o.quantity ?? 1), 0)
 
+  // Kitchen closed (holiday etc., admin → Operations): no orders for those
+  // slots. The meals stay on the plan and get scheduled on later days.
+  const { data: closures } = await supabase
+    .from('kitchen_closures')
+    .select('closed_on, meal_slot')
+    .gte('closed_on', toISO(new Date(Date.now() + IST_OFFSET_MS)))
+  const closed = new Set((closures ?? []).map((c: any) => `${c.closed_on}|${c.meal_slot}`))
+
   let created = 0
   const istNow = new Date(Date.now() + IST_OFFSET_MS)
   const todayIST = toISO(istNow)
@@ -141,6 +149,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       // A slot already past today's cutoff is locked for the kitchen: creating
       // it now (e.g. a 3 PM signup getting today's lunch) is a meal nobody cooks.
       if (dateStr === todayIST && istHour >= SLOT_CUTOFF_HOUR[slot]) continue
+      if (closed.has(`${dateStr}|${slot}`)) continue
 
       // Try weekly_menu first (by menu_type + day_of_week + meal_slot),
       // fall back to subscription_schedule (by day_of_week)

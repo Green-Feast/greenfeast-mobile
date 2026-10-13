@@ -138,6 +138,16 @@ Deno.serve(async (req) => {
       return json({ error: 'Cannot add — this slot has already locked for the day.' }, 400)
     }
 
+    const { data: closed } = await supabase
+      .from('kitchen_closures')
+      .select('reason')
+      .eq('closed_on', effectiveDate)
+      .eq('meal_slot', effectiveSlot)
+      .maybeSingle()
+    if (closed) {
+      return json({ error: `The kitchen is closed for ${effectiveSlot} that day${closed.reason ? ` (${closed.reason})` : ''}.` }, 400)
+    }
+
     // Server-side availability enforcement — the app greys these out, but a
     // client check is UX only, not a guarantee.
     const { data: unavailable } = await supabase
