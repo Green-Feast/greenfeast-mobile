@@ -37,6 +37,7 @@ import { APP_VERSION_STRING } from '@/constants/version'
 import { REFERRAL_MESSAGE, supportWhatsAppUrl } from '@/constants/links'
 import Skeleton from '@/components/Skeleton'
 import ChangePasswordSheet from '@/components/ChangePasswordSheet'
+import LinkedAccountsCard from '@/components/LinkedAccountsCard'
 import WhatsAppIcon from '@/components/WhatsAppIcon'
 
 const FAQS = [
@@ -282,6 +283,7 @@ export default function AccountScreen() {
             </Pressable>
           </View>
         )}
+        {user && <LinkedAccountsCard />}
         <ChangePasswordSheet
           visible={showChangePassword}
           mode="change"
