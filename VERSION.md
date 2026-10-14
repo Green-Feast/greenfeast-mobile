@@ -52,6 +52,26 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.11 — 2026-10-14
+- Build 9, OTA 11.
+- **Meal edits feel instant.** Portions, add-ons, swaps, skips and undo-skip
+  show the moment you tap and save in the background (errors are shown and
+  the plan corrects itself). My Plan reloads in one round trip, and the
+  meal-edit functions are woken up when My Plan / Customize open — a cold
+  function used to cost 2–7 s per tap. Adding a dish with several portions
+  is one call instead of one per portion.
+- **Bell shows every notification** — delivery updates, skips, wallet,
+  refunds, cash received, promotions — not only app updates; refreshed when
+  a push arrives, marked read when opened.
+- **"Restart to update"** button next to the bell once an update has
+  downloaded, and the app now looks for updates whenever it comes back to
+  the foreground (at most every 30 min), not only on a cold start.
+- **This week's menu** screen: Home's "Explore this week's menu" and a new
+  calendar icon on My Plan open the subscribers' weekly menu (a card per
+  day, tap for details); works signed out.
+- **Phone number already in use** is shown as soon as 10 digits are typed
+  on the phone screen (one account per number until OTP).
+
 ### 1.9.10 — 2026-10-14
 - Build 9, OTA 10.
 - **Cash on delivery pays the first day online.** The first day's meals are
