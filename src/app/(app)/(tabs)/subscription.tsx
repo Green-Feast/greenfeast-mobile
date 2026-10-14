@@ -30,6 +30,7 @@ import RenewPlanSheet, { type RenewConfig, type RenewPaymentState, type RenewPla
 import { useOnboardingStore } from '@/store/onboarding'
 import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import MacroRow from '@/components/MacroRow'
+import { warmFunctions } from '@/lib/warmFunctions'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,8 @@ type OrderItem = {
 }
 
 type AddonCatalog = { id: string; name: string; price_per_meal: number }
+
+type CartOp = 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty' | 'inc_addon_qty' | 'dec_addon_qty'
 
 type WalletTransaction = {
   id: string
@@ -204,11 +207,18 @@ export default function SubscriptionScreen() {
   const unavailableAddons = useAvailabilityStore((st) => st.unavailableAddons)
   const ensureFreshAvailability = useAvailabilityStore((st) => st.ensureFresh)
 
+  // The plan's id, once known: the plan and everything under it then load in
+  // one round trip instead of two (plan first, then its orders).
+  const subIdRef = useRef<string | null>(null)
+
   const fetchAll = useCallback(async () => {
     if (!user) return
+    // Customer is on My Plan, likely about to edit meals: wake the functions.
+    warmFunctions()
     const today = istToday()
+    const endStr = stripEndISO(today)
 
-    const { data: subData, error: subErr } = await supabase
+    const planQuery = () => supabase
       .from('subscriptions')
       .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
@@ -217,23 +227,11 @@ export default function SubscriptionScreen() {
       .limit(1)
       .maybeSingle()
 
-    // Network failure (e.g. a background auto-refresh on a flaky connection):
-    // keep what's on screen rather than blanking the plan.
-    if (subErr) return
-
-    const s = (subData as unknown as SubData) ?? null
-    setSub(s)
-
-    if (!s) return
-
-    // Fetch upcoming orders through the calendar strip's end.
-    const endStr = stripEndISO(today)
-
-    const [ordersRes, walletRes, addrRes, addonRes, closuresRes] = await Promise.all([
+    const detailQueries = (subId: string) => Promise.all([
       supabase
         .from('orders')
         .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
-        .eq('subscription_id', s.id)
+        .eq('subscription_id', subId)
         .gte('delivery_date', today)
         .lte('delivery_date', endStr)
         // Delivered / out-for-delivery stay in so today's finished slot still
@@ -256,13 +254,29 @@ export default function SubscriptionScreen() {
       supabase
         .from('subscription_addons')
         .select('addon_id, addons ( name, price_per_meal )')
-        .eq('subscription_id', s.id),
+        .eq('subscription_id', subId),
       supabase
         .from('kitchen_closures')
         .select('closed_on, meal_slot, reason')
         .gte('closed_on', today)
         .lte('closed_on', endStr),
     ])
+
+    const knownId = subIdRef.current
+    const [planRes, guessed] = await Promise.all([planQuery(), knownId ? detailQueries(knownId) : Promise.resolve(null)])
+
+    // Network failure (e.g. a background auto-refresh on a flaky connection):
+    // keep what's on screen rather than blanking the plan.
+    if (planRes.error) return
+
+    const s = (planRes.data as unknown as SubData) ?? null
+    setSub(s)
+    subIdRef.current = s?.id ?? null
+    if (!s) return
+
+    // First load, or the plan changed (e.g. a renewal): load its details now.
+    const [ordersRes, walletRes, addrRes, addonRes, closuresRes] =
+      guessed && knownId === s.id ? guessed : await detailQueries(s.id)
 
     if (ordersRes.error || walletRes.error) return
     setWeekOrders((ordersRes.data as unknown as OrderItem[]) ?? [])
@@ -324,6 +338,7 @@ export default function SubscriptionScreen() {
 
   // Reset address picker + add-mode when modal closes or day changes
   useEffect(() => { setPickingAddressForOrder(null); setAddMode(false); setSwapError(''); setAddAddressId(null) }, [selectedDay, showDayModal])
+  useEffect(() => { if (showDayModal) warmFunctions() }, [showDayModal])
 
   // Silent background refresh: tab focus, app foreground, every 5 min.
   const refreshAvailability = useAvailabilityStore((st) => st.refresh)
@@ -335,43 +350,45 @@ export default function SubscriptionScreen() {
     setRefreshing(false)
   }, [fetchAll])
 
+  // Skips and un-skips show straight away and save in the background; if the
+  // server refuses, the customer is told and the plan reloads to the truth.
   async function handleSkipConfirm() {
     if (!skipConfirm || !sub) return
-    setSkipping(true)
+    const { date, slot } = skipConfirm
     setSkipError('')
+    setSkipConfirm(null)
+    setShowDayModal(false)
+    setWeekOrders(prev => prev.map(o =>
+      o.delivery_date === date && o.meal_slot === slot && (o.status === 'scheduled' || o.status === 'confirmed')
+        ? { ...o, status: 'skipped', skip_reason: 'user' } : o))
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     try {
       const { error } = await supabase.functions.invoke('manage-subscription', {
-        body: { action: 'skip', subscription_id: sub.id, delivery_date: skipConfirm.date, meal_slot: skipConfirm.slot },
+        body: { action: 'skip', subscription_id: sub.id, delivery_date: date, meal_slot: slot },
       })
-      if (error) {
-        setSkipError(await extractFunctionErrorMessage(error, 'Could not skip this meal. Please try again.'))
-        return
-      }
-      setSkipConfirm(null)
-      setShowDayModal(false)
-      await fetchAll()
+      if (error) Alert.alert('Could not skip this meal', await extractFunctionErrorMessage(error, 'Please try again.'))
     } catch {
-      setSkipError('Could not skip this meal. Please try again.')
-    } finally { setSkipping(false) }
+      Alert.alert('Could not skip this meal', 'Please check your connection and try again.')
+    }
+    fetchAll()
   }
 
   // Changed their mind: bring back a meal they skipped, until the cutoff.
   async function handleUnskip(date: string, slot: 'lunch' | 'dinner') {
-    if (!sub || skipping) return
-    setSkipping(true)
+    if (!sub) return
+    setWeekOrders(prev => prev.map(o =>
+      o.delivery_date === date && o.meal_slot === slot && o.status === 'skipped' && o.skip_reason === 'user'
+        ? { ...o, status: 'scheduled', skip_reason: null } : o))
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     try {
       const { error } = await supabase.functions.invoke('manage-subscription', {
         body: { action: 'unskip', subscription_id: sub.id, delivery_date: date, meal_slot: slot },
       })
-      if (error) {
-        Alert.alert('Could not bring it back', await extractFunctionErrorMessage(error, 'Please try again.'))
-        return
-      }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      await fetchAll()
-    } finally {
-      setSkipping(false)
+      if (error) Alert.alert('Could not bring it back', await extractFunctionErrorMessage(error, 'Please try again.'))
+    } catch {
+      Alert.alert('Could not bring it back', 'Please check your connection and try again.')
     }
+    fetchAll()
   }
 
   // One meal's delivery address. Its delivery route follows the address.
@@ -386,25 +403,30 @@ export default function SubscriptionScreen() {
     setPickingAddressForOrder(null)
   }
 
+  // The new dish shows straight away; the swap saves in the background.
   async function handleSwapMeal(orderId: string, newMealId: string) {
-    setSwapping(true)
     setSwapError('')
+    const meal = allMeals.find(m => m.id === newMealId)
+    if (meal) {
+      setWeekOrders(prev => prev.map(o => o.id === orderId
+        ? { ...o, meal_templates: { id: meal.id, name: meal.name, kcal: meal.kcal, protein: meal.protein, carbs: null, fat: null, image_url: meal.image_url } }
+        : o))
+    }
+    setShowDayModal(false)
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      if (!session) throw new Error('Not authenticated')
+      if (!session) throw new Error('Please sign in again.')
       const { data, error } = await supabase.functions.invoke('switch-meal', {
         body: { order_id: orderId, meal_template_id: newMealId },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
       if (error) throw new Error(await extractFunctionErrorMessage(error, 'Could not swap meal. Try again.'))
       if (data?.error) throw new Error(data.error)
-      setShowDayModal(false)
-      await fetchAll()
     } catch (e: any) {
-      setSwapError(e?.message ?? 'Could not swap meal. Try again.')
-    } finally {
-      setSwapping(false)
+      Alert.alert('Could not swap the meal', e?.message ?? 'Please try again.')
     }
+    fetchAll()
   }
 
   async function handleAddDish(refOrderId: string, newMealId: string, slot: 'lunch' | 'dinner') {
@@ -486,42 +508,60 @@ export default function SubscriptionScreen() {
 
   // Add-on add/remove/quantity + base meal quantity. Nothing here is charged
   // immediately — everything is billed from the wallet on delivery.
-  async function handleCartOp(
-    orderId: string,
-    op: 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty' | 'inc_addon_qty' | 'dec_addon_qty',
-    addonId?: string
-  ) {
-    if (cartBusy) return
-    setCartBusy(true)
+  // Each tap shows at once and is saved in the background, in tap order (the
+  // server reads then writes the count, so two at once could lose one); the
+  // plan reloads when the last one is done, which also undoes anything the
+  // server refused.
+  const cartQueue = useRef<Promise<void>>(Promise.resolve())
+  const cartPending = useRef(0)
+
+  function applyCartOpLocally(orderId: string, op: CartOp, addonId?: string) {
+    setWeekOrders(prev => prev.map(o => {
+      if (o.id !== orderId) return o
+      if (op === 'inc_qty') return { ...o, quantity: (o.quantity ?? 1) + 1 }
+      if (op === 'dec_qty') return { ...o, quantity: Math.max((o.quantity ?? 1) - 1, 1) }
+      if (!addonId) return o
+      const lines = o.order_addons ?? []
+      const line = lines.find(l => l.kind === 'addon' && l.addon_id === addonId)
+      if (op === 'add_addon' || op === 'inc_addon_qty') {
+        if (line) {
+          if (op === 'add_addon') return o
+          return { ...o, order_addons: lines.map(l => l === line ? { ...l, quantity: Math.min((l.quantity ?? 1) + 1, 10) } : l) }
+        }
+        const price = allAddons.find(a => a.id === addonId)?.price_per_meal ?? null
+        return { ...o, order_addons: [...lines, { id: `pending-${addonId}`, addon_id: addonId, kind: 'addon', label: null, quantity: 1, unit_price: price }] }
+      }
+      if (!line) return o
+      if (op === 'remove_addon' || (line.quantity ?? 1) <= 1) return { ...o, order_addons: lines.filter(l => l !== line) }
+      return { ...o, order_addons: lines.map(l => l === line ? { ...l, quantity: (l.quantity ?? 1) - 1 } : l) }
+    }))
+  }
+
+  function handleCartOp(orderId: string, op: CartOp, addonId?: string) {
     setSwapError('')
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) throw new Error('Not authenticated')
-      const { data, error } = await supabase.functions.invoke('update-day-cart', {
-        body: { order_id: orderId, op, addon_id: addonId },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-      // Named errors arrive as a non-2xx body (see supabaseFunctionError.ts).
-      const code = error ? await extractFunctionErrorMessage(error, 'Could not update the cart. Try again.') : data?.error
-      if (code === 'use_skip') {
-        setSkipConfirm({ date: selectedDay, slot: selectedSlot })
-        return
+    applyCartOpLocally(orderId, op, addonId)
+    cartPending.current += 1
+    cartQueue.current = cartQueue.current.then(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) throw new Error('Please sign in again.')
+        const { data, error } = await supabase.functions.invoke('update-day-cart', {
+          body: { order_id: orderId, op, addon_id: addonId },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        })
+        // Named errors arrive as a non-2xx body (see supabaseFunctionError.ts).
+        const code = error ? await extractFunctionErrorMessage(error, 'Could not update the cart. Try again.') : data?.error
+        if (code === 'use_skip') setSkipConfirm({ date: selectedDay, slot: selectedSlot })
+        else if (code === 'cannot_remove_default_addon') setSwapError("This add-on is part of your plan and can't be removed here.")
+        else if (code === 'addon_quantity_cap') setSwapError('Maximum 10 of this add-on per meal.')
+        else if (code) setSwapError(code)
+      } catch (e: any) {
+        setSwapError(e?.message ?? 'Could not update the cart. Try again.')
+      } finally {
+        cartPending.current -= 1
+        if (cartPending.current === 0) await fetchAll()
       }
-      if (code === 'cannot_remove_default_addon') {
-        setSwapError("This add-on is part of your plan and can't be removed here.")
-        return
-      }
-      if (code === 'addon_quantity_cap') {
-        setSwapError('Maximum 10 of this add-on per meal.')
-        return
-      }
-      if (code) throw new Error(code)
-      await fetchAll()
-    } catch (e: any) {
-      setSwapError(e?.message ?? 'Could not update the cart. Try again.')
-    } finally {
-      setCartBusy(false)
-    }
+    })
   }
 
   async function fetchTransactions() {

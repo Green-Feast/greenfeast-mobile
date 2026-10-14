@@ -26,6 +26,25 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// The session JWT is verified locally against the project's signing keys
+// (getClaims, keys cached by this warm worker) instead of a round trip to the
+// Auth server on every tap; the client lives at module scope so the cache and
+// connections survive between requests.
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  { auth: { persistSession: false, autoRefreshToken: false } },
+)
+
+async function userFrom(req: Request): Promise<{ id: string } | null> {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return null
+  const { data, error } = await supabase.auth.getClaims(token)
+  const sub = data?.claims?.sub
+  if (error || !sub || data?.claims?.role !== 'authenticated') return null
+  return { id: sub as string }
+}
+
 function json(body: object, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -44,14 +63,8 @@ Deno.serve(async (req) => {
     }
     if (!order_id || !op) return json({ error: 'order_id and op are required' }, 400)
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    )
-
-    const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token)
-    if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+    const user = await userFrom(req)
+    if (!user) return json({ error: 'Unauthorized' }, 401)
 
     // ── Load + guard the base order ───────────────────────────────────────
     const { data: order } = await supabase
@@ -63,19 +76,19 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'This delivery can no longer be changed' }, 400)
     }
-    const { data: locked } = await supabase.rpc('is_slot_locked', {
-      p_date: order.delivery_date, p_slot: order.meal_slot,
-    })
+    const [{ data: locked }, { data: sub }] = await Promise.all([
+      supabase.rpc('is_slot_locked', { p_date: order.delivery_date, p_slot: order.meal_slot }),
+      supabase
+        .from('subscriptions')
+        .select('meals_lunch, meals_dinner, plan_id, plans ( base_price, meals_total )')
+        .eq('id', order.subscription_id)
+        .single(),
+    ])
     if (locked) {
       return json({ error: 'Cannot edit — this slot has already locked for the day.' }, 400)
     }
 
     // Backfill the base-meal rate snapshot on older orders so cart_total is right.
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('meals_lunch, meals_dinner, plan_id, plans ( base_price, meals_total )')
-      .eq('id', order.subscription_id)
-      .single()
     const plan = (sub as any)?.plans as { base_price: number; meals_total: number } | null
     if (order.unit_price == null && plan) {
       const rate = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
@@ -170,8 +183,10 @@ Deno.serve(async (req) => {
     }
 
     // Re-snapshot the cart total and report the wallet balance for warnings.
-    const { data: cartTotal } = await supabase.rpc('recompute_order_cart', { p_order: order.id })
-    const { data: wallet } = await supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle()
+    const [{ data: cartTotal }, { data: wallet }] = await Promise.all([
+      supabase.rpc('recompute_order_cart', { p_order: order.id }),
+      supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle(),
+    ])
     return json({ ok: true, order_id: order.id, cart_total: cartTotal ?? null, wallet_balance: wallet?.balance ?? 0 })
   } catch (err) {
     console.error('update-day-cart error:', err)

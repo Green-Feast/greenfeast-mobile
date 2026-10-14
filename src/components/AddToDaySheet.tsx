@@ -14,6 +14,8 @@ import { useAuthStore } from '@/store/auth'
 import { useAvailabilityStore, isMealAvailable } from '@/store/availability'
 import { istToday, addDaysISO, isSlotLocked, isDayFullyLocked, dowMon0 } from '@/lib/ist'
 import { Colors, Fonts } from '@/constants/colors'
+import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
+import { warmFunctions } from '@/lib/warmFunctions'
 
 const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -45,7 +47,9 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
   const [success, setSuccess] = useState(false)
 
   useEffect(() => {
-    if (visible) ensureFreshAvailability()
+    if (!visible) return
+    ensureFreshAvailability()
+    warmFunctions(['add-dish']) // wake it while they pick a day
   }, [visible, ensureFreshAvailability])
 
   useEffect(() => {
@@ -123,24 +127,19 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not authenticated')
 
+      // One call with the portion count (add-dish takes quantity) — it used to
+      // be one more call per extra portion, each a full round trip.
       const { data, error: fnError } = await supabase.functions.invoke('add-dish', {
-        body: { order_id: day.refOrderId, meal_template_id: meal.id, meal_slot: slot },
+        body: { order_id: day.refOrderId, meal_template_id: meal.id, meal_slot: slot, quantity: qty },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (fnError) throw fnError
+      if (fnError) throw new Error(await extractFunctionErrorMessage(fnError, 'Could not add this dish. Try again.'))
       if (data?.error === 'insufficient_balance') {
         setError('Insufficient wallet balance for an extra dish. Add money in My Plan first.')
         return
       }
       if (data?.error) throw new Error(data.error)
 
-      const newOrderId = data?.order_id
-      for (let i = 1; i < qty && newOrderId; i++) {
-        await supabase.functions.invoke('update-day-cart', {
-          body: { order_id: newOrderId, op: 'inc_qty' },
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        })
-      }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       setSuccess(true)

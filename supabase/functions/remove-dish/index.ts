@@ -12,6 +12,25 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// The session JWT is verified locally against the project's signing keys
+// (getClaims, keys cached by this warm worker) instead of a round trip to the
+// Auth server on every tap; the client lives at module scope so the cache and
+// connections survive between requests.
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  { auth: { persistSession: false, autoRefreshToken: false } },
+)
+
+async function userFrom(req: Request): Promise<{ id: string } | null> {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return null
+  const { data, error } = await supabase.auth.getClaims(token)
+  const sub = data?.claims?.sub
+  if (error || !sub || data?.claims?.role !== 'authenticated') return null
+  return { id: sub as string }
+}
+
 function json(body: object, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -29,14 +48,8 @@ Deno.serve(async (req) => {
       return json({ error: 'order_id is required' }, 400)
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
-    const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token)
-    if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+    const user = await userFrom(req)
+    if (!user) return json({ error: 'Unauthorized' }, 401)
 
     const { data: order } = await supabase
       .from('orders')

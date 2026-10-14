@@ -30,6 +30,25 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// The session JWT is verified locally against the project's signing keys
+// (getClaims, keys cached by this warm worker) instead of a round trip to the
+// Auth server on every tap; the client lives at module scope so the cache and
+// connections survive between requests.
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  { auth: { persistSession: false, autoRefreshToken: false } },
+)
+
+async function userFrom(req: Request): Promise<{ id: string } | null> {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return null
+  const { data, error } = await supabase.auth.getClaims(token)
+  const sub = data?.claims?.sub
+  if (error || !sub || data?.claims?.role !== 'authenticated') return null
+  return { id: sub as string }
+}
+
 function json(body: object, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -41,7 +60,9 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { order_id, subscription_id, delivery_date, meal_template_id, meal_slot, address_id } = await req.json()
+    const { order_id, subscription_id, delivery_date, meal_template_id, meal_slot, address_id, quantity } = await req.json()
+    // Portions of this dish (one call instead of an inc_qty call per portion).
+    const qty = Math.min(Math.max(Number.isInteger(quantity) ? quantity : 1, 1), 10)
     if (!meal_template_id) return json({ error: 'meal_template_id is required' }, 400)
     if (!order_id && !subscription_id) {
       return json({ error: 'Either order_id or subscription_id is required' }, 400)
@@ -53,14 +74,8 @@ Deno.serve(async (req) => {
       return json({ error: 'meal_slot must be lunch or dinner' }, 400)
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
-    const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token)
-    if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+    const user = await userFrom(req)
+    if (!user) return json({ error: 'Unauthorized' }, 401)
 
     // ── Derive a common context — { subscriptionId, effectiveDate,
     //    effectiveSlot, addressId } — from whichever path was used. ────────
@@ -132,82 +147,73 @@ Deno.serve(async (req) => {
       addressId = own.id
     }
 
-    const { data: locked } = await supabase.rpc('is_slot_locked', {
-      p_date: effectiveDate, p_slot: effectiveSlot,
-    })
+    // Everything that has to be true before adding, checked together: slot
+    // still open, kitchen open, dish available that day (the app greys these
+    // out, but a client check is UX only) and allowed on plans, meals left.
+    // Also the subscription's slot batches (orders without an address ride
+    // them) and the next slot_seq for this (subscription, date, slot).
+    const [
+      { data: locked }, { data: closed }, { data: unavailable }, { data: dish }, { data: sub }, { data: existing },
+    ] = await Promise.all([
+      supabase.rpc('is_slot_locked', { p_date: effectiveDate, p_slot: effectiveSlot }),
+      supabase
+        .from('kitchen_closures')
+        .select('reason')
+        .eq('closed_on', effectiveDate)
+        .eq('meal_slot', effectiveSlot)
+        .maybeSingle(),
+      supabase
+        .from('meal_availability')
+        .select('is_available')
+        .eq('for_date', effectiveDate)
+        .eq('meal_template_id', meal_template_id)
+        .eq('is_available', false)
+        .maybeSingle(),
+      supabase
+        .from('meal_templates')
+        .select('is_active, subscription_valid')
+        .eq('id', meal_template_id)
+        .maybeSingle(),
+      supabase
+        .from('subscriptions')
+        .select('plan_id, batch_id_lunch, batch_id_dinner, deliveries_remaining, plans ( base_price, meals_total )')
+        .eq('id', subscriptionId)
+        .single(),
+      supabase
+        .from('orders')
+        .select('slot_seq')
+        .eq('subscription_id', subscriptionId)
+        .eq('delivery_date', effectiveDate)
+        .eq('meal_slot', effectiveSlot)
+        .order('slot_seq', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
     if (locked) {
       return json({ error: 'Cannot add — this slot has already locked for the day.' }, 400)
     }
-
-    const { data: closed } = await supabase
-      .from('kitchen_closures')
-      .select('reason')
-      .eq('closed_on', effectiveDate)
-      .eq('meal_slot', effectiveSlot)
-      .maybeSingle()
     if (closed) {
       return json({ error: `The kitchen is closed for ${effectiveSlot} that day${closed.reason ? ` (${closed.reason})` : ''}.` }, 400)
     }
-
-    // Server-side availability enforcement — the app greys these out, but a
-    // client check is UX only, not a guarantee.
-    const { data: unavailable } = await supabase
-      .from('meal_availability')
-      .select('is_available')
-      .eq('for_date', effectiveDate)
-      .eq('meal_template_id', meal_template_id)
-      .eq('is_available', false)
-      .maybeSingle()
     if (unavailable) {
       return json({ error: 'This dish is not available on that date.' }, 400)
     }
-
-    // subscription_valid gates a dish out of subscription flows entirely
-    // (menu_tab-visible-but-takeaway-only dishes) — same "client check is UX
-    // only" reasoning as above.
-    const { data: dish } = await supabase
-      .from('meal_templates')
-      .select('is_active, subscription_valid')
-      .eq('id', meal_template_id)
-      .maybeSingle()
     if (!dish || !dish.is_active || !dish.subscription_valid) {
       return json({ error: 'This dish is not available for subscription orders.' }, 400)
     }
-
-    // Base per-meal rate (paise) from the plan — add-ons are not included.
-    // Also fetch both slot batches: a dinner dish added off a lunch reference
-    // order (or vice versa) must ride the subscription's batch for the slot
-    // it's actually being added to, not the reference order's own batch.
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('plan_id, batch_id_lunch, batch_id_dinner, deliveries_remaining')
-      .eq('id', subscriptionId)
-      .single()
     if (!sub) return json({ error: 'Subscription not found' }, 404)
     if ((sub.deliveries_remaining ?? 0) <= 0) {
       return json({ error: 'No deliveries remaining on this plan' }, 400)
     }
-    const { data: plan } = await supabase
-      .from('plans')
-      .select('base_price, meals_total')
-      .eq('id', sub.plan_id)
-      .maybeSingle()
-
+    // Base per-meal rate (paise) from the plan — add-ons are not included.
+    const plan = (Array.isArray((sub as any).plans) ? (sub as any).plans[0] : (sub as any).plans) as
+      { base_price: number; meals_total: number } | null
     if (!plan) return json({ error: 'Plan not found' }, 404)
     const rate = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
 
-    // Next slot_seq for this (subscription, date, slot). Zero existing rows
-    // (the off-day case) resolves to slot_seq 1, leaving 0 unused for that
-    // (date, slot) — harmless, advance_batch_delivered just sorts by it.
-    const { data: existing } = await supabase
-      .from('orders')
-      .select('slot_seq')
-      .eq('subscription_id', subscriptionId)
-      .eq('delivery_date', effectiveDate)
-      .eq('meal_slot', effectiveSlot)
-      .order('slot_seq', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    // Zero existing rows (the off-day case) resolves to slot_seq 1, leaving 0
+    // unused for that (date, slot) — harmless, advance_batch_delivered just
+    // sorts by it.
     const nextSeq = (existing?.slot_seq ?? 0) + 1
 
     // Create the extra dish order.
@@ -224,7 +230,7 @@ Deno.serve(async (req) => {
         status: 'scheduled',
         is_customized: true,
         extra_dish: true,
-        quantity: 1,
+        quantity: qty,
         unit_price: rate,
         slot_seq: nextSeq,
       })
@@ -236,28 +242,15 @@ Deno.serve(async (req) => {
       return json({ error: 'Could not add dish' }, 500)
     }
 
-    // Snapshot ingredients for the kitchen.
-    const { data: ings } = await supabase
-      .from('template_ingredients')
-      .select('quantity, ingredients ( id, name, unit )')
-      .eq('meal_template_id', meal_template_id)
-    if (ings && ings.length > 0) {
-      await supabase.from('order_ingredients').insert(
-        ings.map((ti: any) => ({
-          order_id: created.id,
-          ingredient_id: ti.ingredients.id,
-          ingredient_name: ti.ingredients.name,
-          quantity: ti.quantity,
-          unit: ti.ingredients.unit,
-        }))
-      )
-    }
+    // Snapshot ingredients for the kitchen and the cart total (so the dish
+    // shows its price right away). The wallet is debited and the counter
+    // burned ON DELIVERY (not here).
+    await Promise.all([
+      supabase.rpc('snapshot_order_ingredients', { p_order: created.id }),
+      supabase.rpc('recompute_order_cart', { p_order: created.id }),
+    ])
 
-    // Snapshot the cart total so the extra dish shows its price right away.
-    // The wallet is debited and the counter burned ON DELIVERY (not here).
-    await supabase.rpc('recompute_order_cart', { p_order: created.id })
-
-    return json({ ok: true, order_id: created.id, billed: 'on_delivery', amount: rate })
+    return json({ ok: true, order_id: created.id, billed: 'on_delivery', amount: rate * qty })
   } catch (err) {
     console.error('add-dish error:', err)
     return json({ error: 'Internal server error' }, 500)

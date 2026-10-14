@@ -11,6 +11,25 @@ function today(): string {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
 }
 
+// The session JWT is verified locally against the project's signing keys
+// (getClaims, keys cached by this warm worker) instead of a round trip to the
+// Auth server on every tap; the client lives at module scope so the cache and
+// connections survive between requests.
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  { auth: { persistSession: false, autoRefreshToken: false } },
+)
+
+async function userFrom(req: Request): Promise<{ id: string } | null> {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return null
+  const { data, error } = await supabase.auth.getClaims(token)
+  const sub = data?.claims?.sub
+  if (error || !sub || data?.claims?.role !== 'authenticated') return null
+  return { id: sub as string }
+}
+
 type OrderRef = { id: string; delivery_date: string; meal_slot: string }
 
 // Today's slots that are past their cutoff are already on the kitchen sheet:
@@ -20,10 +39,11 @@ type OrderRef = { id: string; delivery_date: string; meal_slot: string }
 async function withoutLockedToday(supabase: any, rows: OrderRef[]): Promise<string[]> {
   const t = today()
   const locked = new Set<string>()
-  for (const slot of ['lunch', 'dinner']) {
-    const { data } = await supabase.rpc('is_slot_locked', { p_date: t, p_slot: slot })
-    if (data) locked.add(slot)
-  }
+  const checks = await Promise.all(
+    ['lunch', 'dinner'].map((slot) => supabase.rpc('is_slot_locked', { p_date: t, p_slot: slot }))
+  )
+  if (checks[0].data) locked.add('lunch')
+  if (checks[1].data) locked.add('dinner')
   return rows
     .filter((o) => !(o.delivery_date === t && locked.has(o.meal_slot)))
     .map((o) => o.id)
@@ -47,17 +67,9 @@ Deno.serve(async (req) => {
       return json({ error: 'action and subscription_id are required' }, 400)
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
     // Verify caller owns this subscription
-    const authHeader = req.headers.get('Authorization')
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(
-      authHeader?.replace('Bearer ', '') ?? ''
-    )
-    if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+    const user = await userFrom(req)
+    if (!user) return json({ error: 'Unauthorized' }, 401)
 
     const { data: sub } = await supabase
       .from('subscriptions')
@@ -158,12 +170,11 @@ Deno.serve(async (req) => {
       // specific day" flow), present = skip just that slot (My Plan hero card).
       // Each requested slot is checked independently against its own cutoff —
       // a whole-day skip after lunch has locked should still skip dinner.
-      const candidateSlots = meal_slot ? [meal_slot] : ['lunch', 'dinner']
-      const openSlots: string[] = []
-      for (const s of candidateSlots) {
-        const { data: locked } = await supabase.rpc('is_slot_locked', { p_date: delivery_date, p_slot: s })
-        if (!locked) openSlots.push(s)
-      }
+      const candidateSlots: string[] = meal_slot ? [meal_slot] : ['lunch', 'dinner']
+      const lockChecks = await Promise.all(
+        candidateSlots.map((s) => supabase.rpc('is_slot_locked', { p_date: delivery_date, p_slot: s }))
+      )
+      const openSlots = candidateSlots.filter((_, i) => !lockChecks[i].data)
       if (openSlots.length === 0) {
         return json({
           error: meal_slot
@@ -198,36 +209,35 @@ Deno.serve(async (req) => {
       if (sub.status !== 'active' && sub.status !== 'paused') {
         return json({ error: "Your plan isn't active." }, 400)
       }
-      const { data: locked } = await supabase.rpc('is_slot_locked', { p_date: delivery_date, p_slot: meal_slot })
-      if (locked) return json({ error: 'Too late — this meal has already locked for the day.' }, 400)
-
-      const { data: closed } = await supabase
-        .from('kitchen_closures').select('reason')
-        .eq('closed_on', delivery_date).eq('meal_slot', meal_slot).maybeSingle()
-      if (closed) return json({ error: `The kitchen is closed for ${meal_slot} that day.` }, 400)
-
-      const { data: skipped } = await supabase
-        .from('orders')
-        .select('id, quantity')
-        .eq('subscription_id', subscription_id)
-        .eq('delivery_date', delivery_date)
-        .eq('meal_slot', meal_slot)
-        .eq('status', 'skipped')
-        .eq('skip_reason', 'user')
-      if (!skipped || skipped.length === 0) return json({ error: "There's no skipped meal to bring back." }, 400)
-      const need = skipped.reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)
-
       // The plan only has so many meals: while this one was skipped, the
       // nightly job may have used its place for a day at the end of the
-      // window. Give that place back (latest untouched meal first).
-      const { data: upcoming } = await supabase
-        .from('orders')
-        .select('id, delivery_date, meal_slot, quantity, extra_dish, is_customized, status')
-        .eq('subscription_id', subscription_id)
-        .gte('delivery_date', today())
-        .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery'])
-        .order('delivery_date', { ascending: false })
-        .order('meal_slot', { ascending: false })
+      // window — `upcoming` is what's scheduled, to give that place back.
+      const [{ data: locked }, { data: closed }, { data: skipped }, { data: upcoming }] = await Promise.all([
+        supabase.rpc('is_slot_locked', { p_date: delivery_date, p_slot: meal_slot }),
+        supabase
+          .from('kitchen_closures').select('reason')
+          .eq('closed_on', delivery_date).eq('meal_slot', meal_slot).maybeSingle(),
+        supabase
+          .from('orders')
+          .select('id, quantity')
+          .eq('subscription_id', subscription_id)
+          .eq('delivery_date', delivery_date)
+          .eq('meal_slot', meal_slot)
+          .eq('status', 'skipped')
+          .eq('skip_reason', 'user'),
+        supabase
+          .from('orders')
+          .select('id, delivery_date, meal_slot, quantity, extra_dish, is_customized, status')
+          .eq('subscription_id', subscription_id)
+          .gte('delivery_date', today())
+          .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery'])
+          .order('delivery_date', { ascending: false })
+          .order('meal_slot', { ascending: false }),
+      ])
+      if (locked) return json({ error: 'Too late — this meal has already locked for the day.' }, 400)
+      if (closed) return json({ error: `The kitchen is closed for ${meal_slot} that day.` }, 400)
+      if (!skipped || skipped.length === 0) return json({ error: "There's no skipped meal to bring back." }, 400)
+      const need = skipped.reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)
       let room = (sub.deliveries_remaining ?? 0) -
         (upcoming ?? []).reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)
       if (room < need) {
@@ -250,7 +260,7 @@ Deno.serve(async (req) => {
         .update({ status: 'scheduled', skip_reason: null, updated_at: new Date().toISOString() })
         .in('id', skipped.map((o: any) => o.id))
       if (unskipErr) throw unskipErr
-      for (const o of skipped) await supabase.rpc('recompute_order_cart', { p_order: o.id })
+      await Promise.all(skipped.map((o: any) => supabase.rpc('recompute_order_cart', { p_order: o.id })))
 
       return json({ ok: true, action: 'unskipped', delivery_date, meal_slot, restored: skipped.length })
     }

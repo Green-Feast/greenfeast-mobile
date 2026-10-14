@@ -9,6 +9,25 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// The session JWT is verified locally against the project's signing keys
+// (getClaims, keys cached by this warm worker) instead of a round trip to the
+// Auth server on every tap; the client lives at module scope so the cache and
+// connections survive between requests.
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  { auth: { persistSession: false, autoRefreshToken: false } },
+)
+
+async function userFrom(req: Request): Promise<{ id: string } | null> {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return null
+  const { data, error } = await supabase.auth.getClaims(token)
+  const sub = data?.claims?.sub
+  if (error || !sub || data?.claims?.role !== 'authenticated') return null
+  return { id: sub as string }
+}
+
 function json(body: object, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -25,15 +44,9 @@ Deno.serve(async (req) => {
       return json({ error: 'order_id and meal_template_id are required' }, 400)
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
     // Authenticate caller
-    const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token)
-    if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+    const user = await userFrom(req)
+    if (!user) return json({ error: 'Unauthorized' }, 401)
 
     // Load the order and verify ownership
     const { data: order } = await supabase
@@ -46,59 +59,57 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'Cannot switch a delivered, cancelled, or skipped order' }, 400)
     }
-    const { data: locked } = await supabase.rpc('is_slot_locked', {
-      p_date: order.delivery_date, p_slot: order.meal_slot,
-    })
-    if (locked) {
-      return json({ error: 'Cannot switch — this slot has already locked for the day.' }, 400)
-    }
     if (order.meal_template_id === meal_template_id) {
       return json({ ok: true, charged: false, fee_paise: 0 }) // nothing to do
     }
 
-    // Server-side availability enforcement — the app greys these out, but a
-    // client check is UX only, not a guarantee.
-    const { data: unavailable } = await supabase
-      .from('meal_availability')
-      .select('is_available')
-      .eq('for_date', order.delivery_date)
-      .eq('meal_template_id', meal_template_id)
-      .eq('is_available', false)
-      .maybeSingle()
+    // Lock, availability (the app greys these out, but a client check is UX
+    // only) and subscription_valid (menu-visible-but-takeaway-only dishes),
+    // checked together.
+    const [{ data: locked }, { data: unavailable }, { data: dish }] = await Promise.all([
+      supabase.rpc('is_slot_locked', { p_date: order.delivery_date, p_slot: order.meal_slot }),
+      supabase
+        .from('meal_availability')
+        .select('is_available')
+        .eq('for_date', order.delivery_date)
+        .eq('meal_template_id', meal_template_id)
+        .eq('is_available', false)
+        .maybeSingle(),
+      supabase
+        .from('meal_templates')
+        .select('is_active, subscription_valid')
+        .eq('id', meal_template_id)
+        .maybeSingle(),
+    ])
+    if (locked) {
+      return json({ error: 'Cannot switch — this slot has already locked for the day.' }, 400)
+    }
     if (unavailable) {
       return json({ error: 'This dish is not available on that date.' }, 400)
     }
-
-    // subscription_valid gates a dish out of subscription flows entirely
-    // (menu-visible-but-takeaway-only dishes) — same "client check is UX
-    // only" reasoning as above.
-    const { data: dish } = await supabase
-      .from('meal_templates')
-      .select('is_active, subscription_valid')
-      .eq('id', meal_template_id)
-      .maybeSingle()
     if (!dish || !dish.is_active || !dish.subscription_valid) {
       return json({ error: 'This dish is not available for subscription orders.' }, 400)
     }
 
-    // Apply the swap.
-    await supabase
-      .from('orders')
-      .update({
-        meal_template_id,
-        is_customized: true,
-        switch_fee_paise: 0,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', order_id)
-
-    // Any "Meal switch" fee line left from before swaps were free goes too.
-    await supabase.from('order_addons')
-      .delete().eq('order_id', order_id).eq('kind', 'fee').eq('label', 'Meal switch')
-    await supabase.rpc('snapshot_order_ingredients', { p_order: order_id })
-
-    // Re-snapshot the cart total.
-    await supabase.rpc('recompute_order_cart', { p_order: order_id })
+    // Apply the swap (and drop any "Meal switch" fee line left from before
+    // swaps were free), then re-snapshot the ingredients and cart total.
+    await Promise.all([
+      supabase
+        .from('orders')
+        .update({
+          meal_template_id,
+          is_customized: true,
+          switch_fee_paise: 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', order_id),
+      supabase.from('order_addons')
+        .delete().eq('order_id', order_id).eq('kind', 'fee').eq('label', 'Meal switch'),
+    ])
+    await Promise.all([
+      supabase.rpc('snapshot_order_ingredients', { p_order: order_id }),
+      supabase.rpc('recompute_order_cart', { p_order: order_id }),
+    ])
 
     return json({ ok: true, charged: false, fee_paise: 0, billed: 'on_delivery' })
   } catch (err) {
