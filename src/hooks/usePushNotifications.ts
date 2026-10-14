@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useNotificationStore } from '@/store/notifications'
 import { Platform } from 'react-native'
 import Constants, { ExecutionEnvironment } from 'expo-constants'
 import { supabase } from '@/lib/supabase'
@@ -88,5 +89,16 @@ export function usePushNotifications() {
   useEffect(() => {
     if (isExpoGo || !user?.id) return
     registerForPushNotifications(user.id)
+  }, [user?.id])
+
+  // A push arriving (or tapped) means a new row in the bell's history.
+  useEffect(() => {
+    if (!Notifications || !user?.id) return
+    const userId = user.id
+    const refresh = () => { useNotificationStore.getState().loadRemote(userId) }
+    refresh()
+    const received = Notifications.addNotificationReceivedListener(refresh)
+    const tapped = Notifications.addNotificationResponseReceivedListener(refresh)
+    return () => { received.remove(); tapped.remove() }
   }, [user?.id])
 }

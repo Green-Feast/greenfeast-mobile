@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { AppState } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Updates from 'expo-updates'
 import { useNotificationStore } from '@/store/notifications'
@@ -38,6 +39,27 @@ export function useOtaNotifications() {
   useEffect(() => {
     hydrate()
   }, [hydrate])
+
+  // expo-updates only looks for an update on a cold start, and most iPhone
+  // users never close the app. Look again whenever it comes back to the
+  // foreground (at most every 30 min) and download it in the background; once
+  // it's ready, isUpdatePending flips and Home shows "Restart to update".
+  useEffect(() => {
+    if (__DEV__ || !Updates.isEnabled) return
+    let lastCheck = 0
+    const check = async () => {
+      if (Date.now() - lastCheck < 30 * 60 * 1000) return
+      lastCheck = Date.now()
+      try {
+        const res = await Updates.checkForUpdateAsync()
+        if (res.isAvailable) await Updates.fetchUpdateAsync()
+      } catch {
+        // offline or no update server reachable — try again next time
+      }
+    }
+    const sub = AppState.addEventListener('change', (state) => { if (state === 'active') check() })
+    return () => sub.remove()
+  }, [])
 
   useEffect(() => {
     if (!hydrated || announcedPending.current) return

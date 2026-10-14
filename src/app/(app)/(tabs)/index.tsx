@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
 import * as Updates from 'expo-updates'
 import * as Haptics from 'expo-haptics'
-import { ArrowRight, Leaf, RefreshCw, Bell, X, ChevronRight, Check, CalendarPlus } from 'lucide-react-native'
+import { ArrowRight, Leaf, RefreshCw, Bell, X, ChevronRight, Check, CalendarPlus, Download } from 'lucide-react-native'
 import MacroRow from '@/components/MacroRow'
 import MacroRing from '@/components/MacroRing'
 import StoryCarousel from '@/components/StoryCarousel'
@@ -30,7 +30,7 @@ import { withTimeout } from '@/lib/withTimeout'
 import { logColdStart } from '@/lib/coldStartLog'
 import { istToday, istHour, addDaysISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
-import { useNotificationStore } from '@/store/notifications'
+import { useNotificationStore, mergedNotifications } from '@/store/notifications'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/availability'
 import { useCategoriesStore, categoryEmoji } from '@/store/categories'
@@ -171,9 +171,15 @@ export default function Home() {
   const [fetchError, setFetchError] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [reloading, setReloading] = useState(false)
-  const notifications = useNotificationStore((s) => s.notifications)
+  // Bell: everything GreenFeast sent this customer + this device's update notes.
+  const localNotes = useNotificationStore((s) => s.local)
+  const remoteNotes = useNotificationStore((s) => s.remote)
+  const loadRemoteNotes = useNotificationStore((s) => s.loadRemote)
   const markAllRead = useNotificationStore((s) => s.markAllRead)
+  const notifications = useMemo(() => mergedNotifications(localNotes, remoteNotes), [localNotes, remoteNotes])
   const unreadCount = notifications.filter((n) => !n.read).length
+  // An app update has downloaded in the background — offer to restart into it.
+  const { isUpdatePending } = Updates.useUpdates()
   const unavailableMeals = useAvailabilityStore((s) => s.unavailableMeals)
   const specials = useAvailabilityStore((s) => s.specials)
   const ensureFreshAvailability = useAvailabilityStore((s) => s.ensureFresh)
@@ -185,6 +191,11 @@ export default function Home() {
   useEffect(() => {
     loadCategories()
   }, [loadCategories])
+
+  // Signed out: the bell mustn't keep the previous account's messages.
+  useEffect(() => {
+    if (!user) useNotificationStore.getState().clearRemote()
+  }, [user])
 
   // Home has a green hero band under the status bar (every other screen is
   // light-background — see _layout.tsx's global style="dark" default). Tabs
@@ -206,7 +217,8 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       ensureFreshAvailability()
-    }, [ensureFreshAvailability])
+      if (user?.id) loadRemoteNotes(user.id)
+    }, [ensureFreshAvailability, loadRemoteNotes, user?.id])
   )
 
   async function handleReloadNow() {
@@ -474,14 +486,33 @@ export default function Home() {
               <Logo size={28} />
               <Text style={styles.wordmark}>greenfeast</Text>
             </View>
-            <Pressable
-              style={({ pressed }) => [styles.bellBtn, pressed && { opacity: 0.7 }]}
-              onPress={() => { setShowNotifications(true); markAllRead() }}
-              hitSlop={8}
-            >
-              <Bell size={20} color="#fff" strokeWidth={1.8} />
-              {unreadCount > 0 && <View style={styles.bellBadge} />}
-            </Pressable>
+            <View style={styles.headerActions}>
+              {isUpdatePending && (
+                <Pressable
+                  style={({ pressed }) => [styles.updatePill, pressed && { opacity: 0.8 }]}
+                  onPress={handleReloadNow}
+                  disabled={reloading}
+                  hitSlop={6}
+                >
+                  {reloading
+                    ? <ActivityIndicator size="small" color={Colors.primary} />
+                    : <Download size={13} color={Colors.primary} strokeWidth={2.2} />}
+                  <Text style={styles.updatePillText}>Restart to update</Text>
+                </Pressable>
+              )}
+              <Pressable
+                style={({ pressed }) => [styles.bellBtn, pressed && { opacity: 0.7 }]}
+                onPress={() => {
+                  setShowNotifications(true)
+                  if (user?.id) loadRemoteNotes(user.id).then(() => markAllRead(user.id))
+                  else markAllRead()
+                }}
+                hitSlop={8}
+              >
+                <Bell size={20} color="#fff" strokeWidth={1.8} />
+                {unreadCount > 0 && <View style={styles.bellBadge} />}
+              </Pressable>
+            </View>
           </View>
 
           {userName ? (
@@ -848,6 +879,12 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   bellBtn: { padding: 4 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  updatePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#fff', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6,
+  },
+  updatePillText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
   bellBadge: {
     position: 'absolute', top: 2, right: 2,
     width: 8, height: 8, borderRadius: 4,
