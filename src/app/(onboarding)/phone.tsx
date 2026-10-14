@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
+const IN_USE = 'This number is already in use. Use another number, or sign in with the account it belongs to.'
+
 export default function OnboardingPhoneScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
@@ -21,9 +23,24 @@ export default function OnboardingPhoneScreen() {
   const [focused, setFocused] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [inUse, setInUse] = useState(false)
   const inputRef = useAutoFocus()
 
   const isValid = phone.replace(/\D/g, '').length === 10
+
+  // Until numbers are verified by OTP, a number already on another account
+  // can't be used again — say so as soon as all 10 digits are typed.
+  useEffect(() => {
+    setInUse(false)
+    if (phone.length !== 10) return
+    let cancelled = false
+    supabase.rpc('phone_in_use', { p_phone: '+91' + phone }).then(({ data }) => {
+      if (cancelled || !data) return
+      setInUse(true)
+      setError(IN_USE)
+    })
+    return () => { cancelled = true }
+  }, [phone])
 
   async function handleContinue() {
     if (!isValid) return
@@ -37,9 +54,8 @@ export default function OnboardingPhoneScreen() {
       // number already belongs to another account — phone is unique), the app
       // carried on as if it had saved, and asked again on every launch.
       if (saveErr) {
-        setError(saveErr.code === '23505'
-          ? 'This number is already on another GreenFeast account. Sign in with that account, or message us on WhatsApp and we’ll sort it out.'
-          : 'Could not save your number. Please try again.')
+        if (saveErr.code === '23505') setInUse(true)
+        setError(saveErr.code === '23505' ? IN_USE : 'Could not save your number. Please try again.')
         return
       }
       setPhone(cleanPhone)
@@ -57,7 +73,7 @@ export default function OnboardingPhoneScreen() {
       contentContainerStyle={[styles.inner, { paddingTop: insets.top + 16 }]}
       footerStyle={styles.footer}
       footer={
-        <Button onPress={handleContinue} disabled={!isValid} loading={loading}>
+        <Button onPress={handleContinue} disabled={!isValid || inUse} loading={loading}>
           Continue →
         </Button>
       }

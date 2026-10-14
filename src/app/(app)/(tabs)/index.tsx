@@ -718,7 +718,7 @@ export default function Home() {
         <Animated.View entering={FadeInDown.delay(320).duration(400)} style={styles.menuNudgeWrap}>
           <Pressable
             style={({ pressed }) => [styles.menuNudge, pressed && { transform: [{ scale: 0.98 }] }]}
-            onPress={() => router.push('/(app)/(tabs)/menu')}
+            onPress={() => router.push('/(app)/weekly-menu' as any)}
           >
             <View style={{ flex: 1 }}>
               <Text style={styles.menuNudgeTitle}>Explore this week's menu</Text>

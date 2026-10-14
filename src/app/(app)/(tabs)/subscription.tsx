@@ -14,7 +14,7 @@ import {
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight, History, MapPin, RotateCcw, Banknote } from 'lucide-react-native'
+import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight, History, MapPin, RotateCcw, Banknote, CalendarDays } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
 import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
@@ -896,14 +896,24 @@ export default function SubscriptionScreen() {
       >
         <View style={s.titleRow}>
           <Text style={[s.title, { marginBottom: 0 }]}>My Plan</Text>
-          <Pressable
-            onPress={() => router.push('/(app)/order-history' as any)}
-            hitSlop={10}
-            style={({ pressed }) => [s.historyBtn, pressed && { opacity: 0.7 }]}
-            accessibilityLabel="Order history"
-          >
-            <History size={20} color={Colors.text} strokeWidth={1.75} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable
+              onPress={() => router.push('/(app)/weekly-menu' as any)}
+              hitSlop={10}
+              style={({ pressed }) => [s.historyBtn, pressed && { opacity: 0.7 }]}
+              accessibilityLabel="This week's menu"
+            >
+              <CalendarDays size={20} color={Colors.text} strokeWidth={1.75} />
+            </Pressable>
+            <Pressable
+              onPress={() => router.push('/(app)/order-history' as any)}
+              hitSlop={10}
+              style={({ pressed }) => [s.historyBtn, pressed && { opacity: 0.7 }]}
+              accessibilityLabel="Order history"
+            >
+              <History size={20} color={Colors.text} strokeWidth={1.75} />
+            </Pressable>
+          </View>
         </View>
 
         {codDue > 0 && (
