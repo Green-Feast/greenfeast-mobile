@@ -130,17 +130,20 @@ reflect the latest commits, that's expected, not a bug to fix.
   (edited in admin → Notifications → Automated messages) and are sent with
   `notify_event(user, key, vars)` from SQL / edge functions or `notifyEvent()` in the admin —
   don't hard-code new message text.
-- **Delivery partner app (057–059, 2026-10-17).** Partners sign in at the admin's `/partner`
-  (greenfeast-admin repo) with their phone number and a password the admin sets; the Supabase
-  account carries `user_metadata.gf_account = 'partner'`, so `handle_new_auth_user` makes no
-  `public.users` row for it (Auth sets app_metadata only after the insert). Partners mark meals
-  on the way / delivered through the same path as admin Operations (`advance_order_delivered`
-  billing, template pushes; `{rider}` in out_for_delivery). On orders: `delivery_partner_id`,
-  `out_for_delivery_at` / `delivered_at` (stamped by trigger `orders_stamp_delivery` on every
-  path), `delivery_issue` (a failed drop — unbilled until the office delivers it or skips it as
-  `not_delivered`) and `delivery_photo_path` (private bucket `delivery-photos`). Cash a partner
-  collects is a `cash_reports` row until the office records it. Customers see their rider via
-  `my_riders(date)`.
+- **Delivery partner app (057–060, 2026-10-17).** Its own Expo app, the greenfeast-delivery-partner
+  repo (Android/iOS and a web version on Vercel). Partners sign in with their phone number and a
+  password the admin sets (Delivery Partners → App login); the Supabase account is
+  `p<10 digits>@partners.greenfeast.test` with `user_metadata.gf_account = 'partner'`, so
+  `handle_new_auth_user` makes no `public.users` row for it (Auth sets app_metadata only after
+  the insert). The app has no service key: everything goes through the `partner_*` functions
+  (060), which check `current_partner()` and bill / message like admin Operations
+  (`advance_order_delivered`, `notify_event`; `{rider}` in out_for_delivery). On orders:
+  `delivery_partner_id`, `out_for_delivery_at` / `delivered_at` (stamped by trigger
+  `orders_stamp_delivery` on every path), `delivery_issue` (a failed drop — unbilled until the
+  office delivers it or skips it as `not_delivered`) and `delivery_photo_path` (private bucket
+  `delivery-photos`; partners upload into today's folder via `is_active_partner()`). Cash a
+  partner collects is a `cash_reports` row until the office records it. Customers see their
+  rider via `my_riders(date)`.
 - **Scheduled jobs live in the database (pg_cron, UTC), not only on Vercel.** Migration 045:
   `enforce_slot_balance('lunch'|'dinner')` at 8 AM / 1 PM IST skips orders the wallet can't
   cover before the kitchen cooks them; `warn_low_balance()` at 8 PM IST warns about tomorrow.
