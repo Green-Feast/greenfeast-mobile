@@ -10,11 +10,12 @@ import {
   Modal,
   TextInput,
   Alert,
+  Linking,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight, History, MapPin, RotateCcw, Banknote, CalendarDays } from 'lucide-react-native'
+import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight, History, MapPin, RotateCcw, Banknote, CalendarDays, Phone, Bike } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
 import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
@@ -85,8 +86,17 @@ type OrderItem = {
   switch_fee_paise: number | null
   extra_dish: boolean | null
   slot_seq: number | null
+  delivered_at: string | null
   meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; carbs: number | null; fat: number | null; image_url: string | null } | null
   order_addons: CartLine[]
+}
+
+// Who's bringing today's meal (delivery partner app) — my_riders() gives the
+// partner's first name and phone for the customer's own orders.
+type Rider = { name: string; phone: string }
+
+function clockIST(iso: string) {
+  return new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })
 }
 
 type AddonCatalog = { id: string; name: string; price_per_meal: number }
@@ -186,6 +196,7 @@ export default function SubscriptionScreen() {
   const [showAddMoney, setShowAddMoney] = useState(false)
   // Kitchen closures (admin → Operations) in the strip's range: "date|slot" → reason.
   const [closures, setClosures] = useState<Map<string, string | null>>(new Map())
+  const [riders, setRiders] = useState<Map<string, Rider>>(new Map())
   // Renewal (plan's meals used up): sheet + payment progress. The Cashfree
   // callback below is shared with wallet top-ups; paymentPurpose says which
   // one a returning payment belongs to.
@@ -230,7 +241,7 @@ export default function SubscriptionScreen() {
     const detailQueries = (subId: string) => Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
+        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, delivered_at, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
         .eq('subscription_id', subId)
         .gte('delivery_date', today)
         .lte('delivery_date', endStr)
@@ -260,6 +271,7 @@ export default function SubscriptionScreen() {
         .select('closed_on, meal_slot, reason')
         .gte('closed_on', today)
         .lte('closed_on', endStr),
+      supabase.rpc('my_riders', { p_date: today }),
     ])
 
     const knownId = subIdRef.current
@@ -275,7 +287,7 @@ export default function SubscriptionScreen() {
     if (!s) return
 
     // First load, or the plan changed (e.g. a renewal): load its details now.
-    const [ordersRes, walletRes, addrRes, addonRes, closuresRes] =
+    const [ordersRes, walletRes, addrRes, addonRes, closuresRes, ridersRes] =
       guessed && knownId === s.id ? guessed : await detailQueries(s.id)
 
     if (ordersRes.error || walletRes.error) return
@@ -285,6 +297,8 @@ export default function SubscriptionScreen() {
     setSubAddons((addonRes.data as unknown as SubAddon[]) ?? [])
     setClosures(new Map(((closuresRes.data ?? []) as { closed_on: string; meal_slot: string; reason: string | null }[])
       .map((c) => [`${c.closed_on}|${c.meal_slot}`, c.reason])))
+    setRiders(new Map(((ridersRes.data ?? []) as { order_id: string; rider_name: string; rider_phone: string }[])
+      .map((r) => [r.order_id, { name: r.rider_name, phone: r.rider_phone }])))
   }, [user])
 
   // Fetch meal + add-on catalogues once on mount for the cart editor.
@@ -785,6 +799,10 @@ export default function SubscriptionScreen() {
   // the new same-day cutoff would otherwise expose Skip/Swap/Remove on a meal
   // that's already `preparing`.
   const heroDone = heroOrders.length > 0 && heroOrders.every(o => o.status === 'delivered')
+  const heroRider = heroOrders.map(o => riders.get(o.id)).find(Boolean) ?? null
+  const heroDeliveredAt = heroDone
+    ? heroOrders.map(o => o.delivered_at).filter((t): t is string => !!t).sort().pop() ?? null
+    : null
   const heroLocked =
     isSlotLocked(selectedDay, selectedSlot) ||
     heroOrders.some(o => o.status === 'preparing' || o.status === 'out_for_delivery' || o.status === 'delivered')
@@ -991,6 +1009,27 @@ export default function SubscriptionScreen() {
                   </Text>
                 </View>
               </View>
+
+              {/* Who's bringing it (delivery partner app) */}
+              {heroBase.status === 'out_for_delivery' && heroRider && (
+                <View style={s.riderRow}>
+                  <Bike size={16} color={Colors.primary} />
+                  <Text style={s.riderText} numberOfLines={1}>On the way with {heroRider.name}</Text>
+                  <Pressable
+                    onPress={() => Linking.openURL(`tel:${heroRider.phone}`).catch(() => {})}
+                    style={({ pressed }) => [s.riderCall, pressed && { opacity: 0.7 }]}
+                    accessibilityLabel={`Call ${heroRider.name}`}
+                  >
+                    <Phone size={13} color="#fff" />
+                    <Text style={s.riderCallText}>Call</Text>
+                  </Pressable>
+                </View>
+              )}
+              {heroDeliveredAt && (
+                <Text style={s.riderDone}>
+                  Delivered at {clockIST(heroDeliveredAt)}{heroRider ? ` by ${heroRider.name}` : ''}
+                </Text>
+              )}
 
               {/* Meal list */}
               <View style={s.heroCartList}>
@@ -2073,6 +2112,17 @@ const s = StyleSheet.create({
     backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5, marginTop: 2,
   },
   heroStatusPrep: { backgroundColor: '#FFF9C4' },
+  riderRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12,
+    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, backgroundColor: Colors.primaryLight,
+  },
+  riderText: { flex: 1, fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
+  riderCall: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: Colors.primary,
+  },
+  riderCallText: { fontFamily: Fonts.bodySemi, fontSize: 12, color: '#fff' },
+  riderDone: { marginTop: 10, fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
   heroStatusText: { fontFamily: Fonts.bodySemi, fontSize: 11, color: Colors.primary },
   heroStatusPrepText: { color: '#795700' },
 

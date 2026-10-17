@@ -31,6 +31,7 @@ type HistoryOrder = {
   quantity: number | null
   extra_dish: boolean | null
   cart_total: number | null
+  delivered_at: string | null
   meal_templates: { name: string; image_url: string | null; kcal: number | null } | null
   addresses: { label: string | null } | null
   order_addons: { kind: string; label: string | null; quantity: number | null; unit_price: number | null; addons: { name: string } | null }[]
@@ -48,6 +49,7 @@ const SKIP_TEXT: Record<string, string> = {
   plan_finished: 'Skipped — plan had finished',
   kitchen_closed: 'Kitchen closed',
   pause: 'Plan paused',
+  not_delivered: "Couldn't be delivered",
 }
 
 function fmt(paise: number) {
@@ -98,7 +100,7 @@ export default function OrderHistoryScreen() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, delivery_date, meal_slot, status, skip_reason, quantity, extra_dish, cart_total,
+        id, delivery_date, meal_slot, status, skip_reason, quantity, extra_dish, cart_total, delivered_at,
         meal_templates ( name, image_url, kcal ),
         addresses ( label ),
         order_addons ( kind, label, quantity, unit_price, addons ( name ) )
@@ -236,6 +238,7 @@ function GroupCard({ group, charges }: { group: Group; charges: Map<string, numb
   const charged = delivered.reduce((n, o) => n + (charges.get(o.id) ?? o.cart_total ?? 0), 0)
   const portions = group.orders.reduce((n, o) => n + (o.status === 'delivered' ? (o.quantity ?? 1) : 0), 0)
   const first = group.orders[0]
+  const deliveredAt = delivered.map((o) => o.delivered_at).filter((t): t is string => !!t).sort().pop()
 
   return (
     <View style={st.card}>
@@ -247,7 +250,9 @@ function GroupCard({ group, charges }: { group: Group; charges: Map<string, numb
         {allDelivered ? (
           <View style={[st.chip, st.chipDone]}>
             <CheckCircle2 size={13} color={Colors.primary} />
-            <Text style={[st.chipText, { color: Colors.primary }]}>Delivered</Text>
+            <Text style={[st.chipText, { color: Colors.primary }]}>
+              Delivered{deliveredAt ? ` ${new Date(deliveredAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })}` : ''}
+            </Text>
           </View>
         ) : noneDelivered ? (
           <View style={[st.chip, st.chipSkip]}>
