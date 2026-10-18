@@ -130,6 +130,13 @@ reflect the latest commits, that's expected, not a bug to fix.
   (edited in admin → Notifications → Automated messages) and are sent with
   `notify_event(user, key, vars)` from SQL / edge functions or `notifyEvent()` in the admin —
   don't hard-code new message text.
+- **WhatsApp OTP for the customer's number (061).** The onboarding phone screen asks the
+  `phone-otp` edge function (`status` / `send` / `verify`); it sends a Meta Cloud API
+  Authentication template and saves `users.phone` + `phone_verified_at` only after the code
+  matches. Off (app saves the number directly, as before) until `WHATSAPP_TOKEN` and
+  `WHATSAPP_PHONE_NUMBER_ID` are set; App Review numbers via `OTP_REVIEW_PHONES` /
+  `OTP_REVIEW_CODE`. Customers can't write `phone_verified_at`, and changing the number
+  themselves clears it (trigger `users_phone_unverify`).
 - **Delivery partner app (057–060, 2026-10-17).** Its own Expo app, the greenfeast-delivery-partner
   repo (Android/iOS and a web version on Vercel). Partners sign in with their phone number and a
   password the admin sets (Delivery Partners → App login); the Supabase account is
