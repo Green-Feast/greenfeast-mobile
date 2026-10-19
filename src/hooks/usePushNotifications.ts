@@ -4,6 +4,7 @@ import { Platform } from 'react-native'
 import Constants, { ExecutionEnvironment } from 'expo-constants'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import { useRatingStore } from '@/store/rating'
 
 // expo-notifications' push module was removed from Expo Go (SDK 53+) and throws
 // at *import* time there. So we must not statically import it — only require it
@@ -83,6 +84,22 @@ async function registerForPushNotifications(userId: string) {
   }
 }
 
+type Response = import('expo-notifications').NotificationResponse
+
+// Tapping "How was your lunch?" (send_rating_asks, migration 064) opens the
+// rating sheet for that meal. Each tap is handled once — the listener and the
+// "app was opened by this tap" lookup can both report the same one.
+const handledTaps = new Set<string>()
+function openFromTap(response: Response | null) {
+  if (!response) return
+  const id = response.notification.request.identifier
+  if (handledTaps.has(id)) return
+  handledTaps.add(id)
+  const data = response.notification.request.content.data as { type?: unknown; date?: unknown; slot?: unknown } | undefined
+  if (data?.type !== 'rate_meal' || typeof data.date !== 'string' || (data.slot !== 'lunch' && data.slot !== 'dinner')) return
+  useRatingStore.getState().open({ date: data.date, slot: data.slot, source: 'push' })
+}
+
 export function usePushNotifications() {
   const { user } = useAuthStore()
 
@@ -94,11 +111,19 @@ export function usePushNotifications() {
   // A push arriving (or tapped) means a new row in the bell's history.
   useEffect(() => {
     if (!Notifications || !user?.id) return
+    const N = Notifications
     const userId = user.id
     const refresh = () => { useNotificationStore.getState().loadRemote(userId) }
     refresh()
-    const received = Notifications.addNotificationReceivedListener(refresh)
-    const tapped = Notifications.addNotificationResponseReceivedListener(refresh)
+    const received = N.addNotificationReceivedListener(refresh)
+    const tapped = N.addNotificationResponseReceivedListener((response) => { refresh(); openFromTap(response) })
+    // The app was started by tapping a push (before the listener existed).
+    try {
+      openFromTap(N.getLastNotificationResponse())
+      N.clearLastNotificationResponse()
+    } catch {
+      N.getLastNotificationResponseAsync().then(openFromTap).catch(() => {})
+    }
     return () => { received.remove(); tapped.remove() }
   }, [user?.id])
 }

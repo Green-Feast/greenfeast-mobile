@@ -36,5 +36,14 @@ export function supportWhatsAppUrl(topic = 'General support'): string {
   return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`
 }
 
+// Store listings, for Account's "Rate us" row. `action=write-review` opens the
+// App Store straight on the review sheet (allowed from a button the user taps;
+// automatic prompts must use Apple's own API). Not on Google Play yet — the
+// row stays hidden on Android until PLAY_STORE_URL is set.
+export const APP_STORE_ID = '6805608220'
+export const APP_STORE_REVIEW_URL = `itms-apps://apps.apple.com/app/id${APP_STORE_ID}?action=write-review`
+export const APP_STORE_REVIEW_WEB_URL = `https://apps.apple.com/app/id${APP_STORE_ID}?action=write-review`
+export const PLAY_STORE_URL = 'TODO'
+
 export const REFERRAL_MESSAGE =
   "I've been getting my meals from GreenFeast — fresh, macro-balanced food delivered daily in Jaipur. Thought you'd like it too: https://greenfeast.in"

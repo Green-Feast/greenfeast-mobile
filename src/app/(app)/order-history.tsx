@@ -11,16 +11,19 @@ import {
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ChevronLeft, CheckCircle2, SkipForward, XCircle, MapPin, Plus } from 'lucide-react-native'
+import { ChevronLeft, CheckCircle2, SkipForward, XCircle, MapPin, Plus, Star } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import { useRatingStore } from '@/store/rating'
+import { fetchMyRatings, canStillRate, STAR_COLOR, type MealRating } from '@/lib/ratings'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday } from '@/lib/ist'
 
 // Order history: every meal so far — what was delivered (dish, portions,
 // add-ons, extra dishes, where it went), what was skipped and why, and what
 // each one cost from the wallet. The wallet's transaction list says where the
-// money went; this says what it bought.
+// money went; this says what it bought. Delivered meals show the customer's
+// rating, and can be rated (or re-rated) for 7 days.
 
 type HistoryOrder = {
   id: string
@@ -93,6 +96,8 @@ export default function OrderHistoryScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [summary, setSummary] = useState<{ meals: number; spent: number } | null>(null)
+  const [ratings, setRatings] = useState<Map<string, MealRating>>(new Map())
+  const ratingVersion = useRatingStore((s) => s.version)
 
   const loadPage = useCallback(async (offset: number, which: Filter): Promise<HistoryOrder[]> => {
     if (!user) return []
@@ -174,6 +179,32 @@ export default function OrderHistoryScreen() {
     setLoadingMore(false)
   }
 
+  // Ratings for every meal loaded so far ("date|slot" keys, like groups);
+  // reloaded after a rating is saved anywhere.
+  const oldestDate = rows.length ? rows[rows.length - 1].delivery_date : null
+  useEffect(() => {
+    if (!user || !oldestDate) return
+    fetchMyRatings(user.id, oldestDate).then(setRatings).catch(() => {})
+  }, [user, oldestDate, ratingVersion])
+
+  function openRating(group: Group, stars?: number) {
+    const delivered = group.orders.filter((o) => o.status === 'delivered')
+    const names = [...new Set(delivered.map((o) => o.meal_templates?.name).filter((n): n is string => !!n))]
+    useRatingStore.getState().open({
+      date: group.date,
+      slot: group.slot,
+      source: 'history',
+      meal: {
+        date: group.date,
+        slot: group.slot,
+        dishNames: names.join(' + ') || 'Your meal',
+        image: delivered.find((o) => o.meal_templates?.image_url)?.meal_templates?.image_url ?? null,
+      },
+      initialStars: stars,
+      existing: ratings.get(group.key) ?? null,
+    })
+  }
+
   const groups = groupOrders(rows)
 
   return (
@@ -225,13 +256,26 @@ export default function OrderHistoryScreen() {
           )
         }
         ListFooterComponent={loadingMore ? <ActivityIndicator color={Colors.primary} style={{ marginVertical: 16 }} /> : null}
-        renderItem={({ item }) => <GroupCard group={item} charges={charges} />}
+        extraData={ratings}
+        renderItem={({ item }) => (
+          <GroupCard group={item} charges={charges} rating={ratings.get(item.key) ?? null} onRate={(stars) => openRating(item, stars)} />
+        )}
       />
     </View>
   )
 }
 
-function GroupCard({ group, charges }: { group: Group; charges: Map<string, number> }) {
+function GroupCard({
+  group,
+  charges,
+  rating,
+  onRate,
+}: {
+  group: Group
+  charges: Map<string, number>
+  rating: MealRating | null
+  onRate: (stars?: number) => void
+}) {
   const delivered = group.orders.filter((o) => o.status === 'delivered')
   const allDelivered = delivered.length === group.orders.length
   const noneDelivered = delivered.length === 0
@@ -301,11 +345,44 @@ function GroupCard({ group, charges }: { group: Group; charges: Map<string, numb
         )
       })}
 
+      {!noneDelivered && (rating || canStillRate(group.date)) && (
+        <RateRow rating={rating} editable={canStillRate(group.date)} onRate={onRate} />
+      )}
+
       <View style={st.cardFooter}>
         <Text style={st.footerText}>
           {noneDelivered ? 'Nothing charged — the meal stayed on your plan' : `${portions} meal${portions === 1 ? '' : 's'} from your plan`}
         </Text>
         {!noneDelivered && <Text style={st.footerTotal}>{fmt(charged)}</Text>}
+      </View>
+    </View>
+  )
+}
+
+// "Your rating ★★★★☆ · Edit" — or five empty stars to rate it.
+function RateRow({ rating, editable, onRate }: { rating: MealRating | null; editable: boolean; onRate: (stars?: number) => void }) {
+  if (rating) {
+    return (
+      <Pressable style={st.rateRow} onPress={() => onRate()} disabled={!editable} hitSlop={4}>
+        <Text style={st.rateLabel}>Your rating</Text>
+        <View style={st.rateStars}>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <Star key={n} size={15} color={n <= rating.stars ? STAR_COLOR : Colors.ink300} fill={n <= rating.stars ? STAR_COLOR : 'transparent'} strokeWidth={1.5} />
+          ))}
+        </View>
+        {editable && <Text style={st.rateEdit}>Edit</Text>}
+      </Pressable>
+    )
+  }
+  return (
+    <View style={st.rateRow}>
+      <Text style={st.rateLabel}>Rate this meal</Text>
+      <View style={st.rateStars}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Pressable key={n} onPress={() => onRate(n)} hitSlop={6} accessibilityLabel={`${n} star${n === 1 ? '' : 's'}`}>
+            <Star size={22} color={Colors.ink300} strokeWidth={1.5} />
+          </Pressable>
+        ))}
       </View>
     </View>
   )
@@ -351,6 +428,11 @@ const st = StyleSheet.create({
   addrRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
   addrText: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textMuted },
   price: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+
+  rateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: Colors.borderFaint },
+  rateLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, flex: 1 },
+  rateStars: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rateEdit: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.primary },
 
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: Colors.borderFaint, paddingTop: 10, marginTop: 2 },
   footerText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, flex: 1, paddingRight: 8 },

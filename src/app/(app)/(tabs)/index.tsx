@@ -24,6 +24,7 @@ import MacroRow from '@/components/MacroRow'
 import MacroRing from '@/components/MacroRing'
 import StoryCarousel from '@/components/StoryCarousel'
 import AddToDaySheet from '@/components/AddToDaySheet'
+import RateMealCard from '@/components/RateMealCard'
 import MealDetailModal, { type MealDetail, type MealDetailPrimaryAction } from '@/components/MealDetailModal'
 import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/withTimeout'
@@ -35,6 +36,8 @@ import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/availability'
 import { useCategoriesStore, categoryEmoji } from '@/store/categories'
 import { useHomeCacheStore, readHomeCache } from '@/store/homeCache'
+import { useRatingStore } from '@/store/rating'
+import { fetchRatingPrompt, toPrompt, dismissRatingPrompt, snoozePrompt, promptSnoozed, type RatingPrompt } from '@/lib/ratings'
 import { Colors, Fonts } from '@/constants/colors'
 import { STORY_SLIDES, CHEF_NOTES } from '@/constants/homeContent'
 import { REFERRAL_MESSAGE } from '@/constants/links'
@@ -170,6 +173,9 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false)
   const [fetchError, setFetchError] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  // "How was your lunch?" — the meal the server wants rated now, if any.
+  const [ratingPrompt, setRatingPrompt] = useState<RatingPrompt | null>(null)
+  const ratingVersion = useRatingStore((s) => s.version)
   const [reloading, setReloading] = useState(false)
   // Bell: everything GreenFeast sent this customer + this device's update notes.
   const localNotes = useNotificationStore((s) => s.local)
@@ -194,8 +200,17 @@ export default function Home() {
 
   // Signed out: the bell mustn't keep the previous account's messages.
   useEffect(() => {
-    if (!user) useNotificationStore.getState().clearRemote()
+    if (!user) {
+      useNotificationStore.getState().clearRemote()
+      setRatingPrompt(null)
+    }
   }, [user])
+
+  // A rating was saved (here, from Order history or a push): the card moves on.
+  useEffect(() => {
+    if (!user || ratingVersion === 0) return
+    fetchRatingPrompt().then((p) => setRatingPrompt(promptSnoozed() ? null : p)).catch(() => {})
+  }, [ratingVersion])
 
   // Home has a green hero band under the status bar (every other screen is
   // light-background — see _layout.tsx's global style="dark" default). Tabs
@@ -256,7 +271,7 @@ export default function Home() {
     try {
       // Bounded so a stalled request surfaces the error state's Retry button
       // rather than leaving the skeleton up indefinitely.
-      const [userRes, subRes, orderRes, upcomingRes] = await withTimeout(
+      const [userRes, subRes, orderRes, upcomingRes, promptRes] = await withTimeout(
         Promise.all([
           supabase.from('users').select('name').eq('id', user.id).single(),
           supabase
@@ -281,6 +296,9 @@ export default function Home() {
             .lte('delivery_date', addDaysISO(today, 7))
             .in('status', ['scheduled', 'confirmed'])
             .order('delivery_date'),
+          // Asking counts as asked (see admin → Feedback), so not while the
+          // customer has just said "not now".
+          promptSnoozed() ? Promise.resolve(null) : supabase.rpc('my_rating_prompt'),
         ]),
         HOME_FETCH_TIMEOUT_MS,
         'home data'
@@ -301,6 +319,10 @@ export default function Home() {
       setTodayOrder(resolvedTodayOrder)
 
       setAddTarget(findNextAddTarget((upcomingRes.data as unknown as UpcomingOrder[]) ?? []))
+
+      // A failed lookup keeps whatever card is showing.
+      if (!promptRes) setRatingPrompt(null)
+      else if (!promptRes.error) setRatingPrompt(toPrompt(promptRes.data))
 
       // Seed the next cold start — see store/homeCache.ts.
       saveHomeCache({
@@ -535,6 +557,30 @@ export default function Home() {
             <Text style={styles.heroCtaText}>{hasSubscription ? 'My plan →' : 'Build your plan →'}</Text>
           </Pressable>
         </Animated.View>
+
+        {/* Rate the last meal — server picks which one and how often */}
+        {ratingPrompt && (
+          <Animated.View entering={FadeInDown.delay(60).duration(400)} style={styles.section}>
+            <RateMealCard
+              prompt={ratingPrompt}
+              onRate={(stars) =>
+                useRatingStore.getState().open({
+                  date: ratingPrompt.date,
+                  slot: ratingPrompt.slot,
+                  source: 'app',
+                  meal: ratingPrompt,
+                  initialStars: stars,
+                })
+              }
+              onDismiss={() => {
+                const p = ratingPrompt
+                setRatingPrompt(null)
+                snoozePrompt()
+                dismissRatingPrompt(p.date, p.slot).catch(() => {})
+              }}
+            />
+          </Animated.View>
+        )}
 
         {/* Today's delivery (subscribers only) — tap through to My Plan */}
         {hasSubscription && (

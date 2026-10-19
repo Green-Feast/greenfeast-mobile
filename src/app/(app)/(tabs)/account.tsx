@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
+  Platform,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -30,17 +31,41 @@ import {
   RefreshCw,
   AlertTriangle,
   Trash2,
+  MessageSquareText,
+  Star,
 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { APP_VERSION_STRING } from '@/constants/version'
-import { REFERRAL_MESSAGE, supportWhatsAppUrl } from '@/constants/links'
+import {
+  REFERRAL_MESSAGE,
+  supportWhatsAppUrl,
+  APP_STORE_REVIEW_URL,
+  APP_STORE_REVIEW_WEB_URL,
+  PLAY_STORE_URL,
+  isConfigured,
+} from '@/constants/links'
 import Skeleton from '@/components/Skeleton'
 import ChangePasswordSheet from '@/components/ChangePasswordSheet'
 import LinkedAccountsCard from '@/components/LinkedAccountsCard'
 import WhatsAppIcon from '@/components/WhatsAppIcon'
+import FeedbackSheet from '@/components/FeedbackSheet'
+
+// "Rate us": the App Store's write-review page on iPhone; Google Play once the
+// app is listed there (hidden until then).
+const STORE_RATING_LABEL =
+  Platform.OS === 'ios' ? 'Rate us on the App Store' : isConfigured(PLAY_STORE_URL) ? 'Rate us on Google Play' : null
+
+async function openStoreRating() {
+  if (Platform.OS !== 'ios') return Linking.openURL(PLAY_STORE_URL)
+  try {
+    await Linking.openURL(APP_STORE_REVIEW_URL)
+  } catch {
+    await Linking.openURL(APP_STORE_REVIEW_WEB_URL)
+  }
+}
 
 const FAQS = [
   { q: 'Can I change my meals after subscribing?', a: "Yes! You can swap meals until 8 AM (lunch) or 1 PM (dinner) on the delivery day itself." },
@@ -55,6 +80,7 @@ export default function AccountScreen() {
   const router = useRouter()
   const { user, signOut, loading: authLoading } = useAuthStore()
   const [showChangePassword, setShowChangePassword] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
   // Only email + password logins have a password to change (Google/Apple don't).
   const hasPassword = ((user?.app_metadata?.providers as string[] | undefined) ?? [user?.app_metadata?.provider]).includes('email')
 
@@ -307,6 +333,7 @@ export default function AccountScreen() {
           </View>
         )}
         {user && <LinkedAccountsCard />}
+        <FeedbackSheet visible={showFeedback} onClose={() => setShowFeedback(false)} />
         <ChangePasswordSheet
           visible={showChangePassword}
           mode="change"
@@ -332,6 +359,28 @@ export default function AccountScreen() {
             <Text style={[styles.rowLabel, { flex: 1 }]}>Contact Us</Text>
             <ChevronRight size={16} color={Colors.ink400} />
           </Pressable>
+
+          {user && (
+            <Pressable
+              style={({ pressed }) => [styles.row, styles.rowBorder, pressed && styles.rowPressed]}
+              onPress={() => setShowFeedback(true)}
+            >
+              <MessageSquareText size={18} color={Colors.ink500} />
+              <Text style={[styles.rowLabel, { flex: 1 }]}>Send feedback</Text>
+              <ChevronRight size={16} color={Colors.ink400} />
+            </Pressable>
+          )}
+
+          {STORE_RATING_LABEL && (
+            <Pressable
+              style={({ pressed }) => [styles.row, styles.rowBorder, pressed && styles.rowPressed]}
+              onPress={() => { openStoreRating().catch(() => {}) }}
+            >
+              <Star size={18} color={Colors.ink500} />
+              <Text style={[styles.rowLabel, { flex: 1 }]}>{STORE_RATING_LABEL}</Text>
+              <ChevronRight size={16} color={Colors.ink400} />
+            </Pressable>
+          )}
 
           <Pressable
             style={({ pressed }) => [styles.row, faqExpanded && styles.rowBorder, pressed && styles.rowPressed]}

@@ -156,6 +156,16 @@ reflect the latest commits, that's expected, not a bug to fix.
   cover before the kitchen cooks them; `warn_low_balance()` at 8 PM IST warns about tomorrow.
   Both notify through `notify_user()` (in-app row + Expo push via pg_net). List jobs with
   `select * from cron.job`. Order creation is still the Vercel cron (1 AM IST).
+- **Meal ratings and app feedback (064, 2026-10-19).** Customers rate each delivered lunch / dinner
+  (1–5★, chips, optional comment) from Home's card, a 3 PM / 9 PM push (`send_rating_asks`,
+  template `rate_meal`, tap data `{type:'rate_meal', date, slot}`) or Order history (7-day window),
+  and send feedback from Account. Every write goes through `rate_meal` / `dismiss_rating_prompt` /
+  `send_app_feedback`; `my_rating_prompt()` picks the meal to ask about and records the ask — how
+  often is `feedback_settings` (admin → Feedback). Customers can read only some columns of their own
+  `meal_ratings`. 1–2★ ratings and feedback from live customers alert the admins (`notify_admins`).
+  The rating sheet is app-wide (`RatingSheetHost` in the (app) layout, opened via `useRatingStore`).
+  Account's "Rate us on the App Store" uses the write-review URL; Apple's automatic prompt
+  (`expo-store-review`) needs a native build, so it waits for the next one.
 - **Refunds** go through the admin Money tab: to wallet (store credit, `refundToWallet`) or to
   the bank via Cashfree (`admin-refund` edge function, `--no-verify-jwt`, INTERNAL_FN_SECRET),
   which debits the wallet first and is completed/reversed by `REFUND_STATUS_WEBHOOK`. Ledger:
