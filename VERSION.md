@@ -52,6 +52,27 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.12 — 2026-10-19
+- Build 9, OTA 12.
+- **Rate your meals.** Once a meal is marked delivered, Home shows "How was
+  your lunch?" — tap a star for a sheet with 1–5 stars, chips ("What went
+  wrong?" / "What did you like?") and an optional comment; closing it after
+  picking stars still saves them. Order history shows each meal's rating and
+  lets customers rate or change it for 7 days. A "How was your lunch?" push
+  (3 PM / 9 PM, switched on from admin → Notifications after this update)
+  opens the same sheet. How often customers are asked is set in admin →
+  Feedback (migration 064); 1–2★ ratings alert the team.
+- **Send feedback** (Account): idea / problem / compliment / other, goes to
+  admin → Feedback with the app version.
+- **Rate us on the App Store** (Account, iPhone only): opens the App Store's
+  write-review page. Apple's automatic rating prompt needs a native build.
+- **Who's bringing your meal** (delivery partner app): My Plan shows "On the
+  way with {rider}" with a Call button while it's out for delivery, then
+  "Delivered at 1:05 pm by {rider}"; Order history shows the delivery time.
+- **WhatsApp code for the phone number** on the onboarding phone screen —
+  stays off (the number is saved directly, as before) until WhatsApp is set
+  up on the server.
+
 ### 1.9.11 — 2026-10-14
 - Build 9, OTA 11.
 - **Meal edits feel instant.** Portions, add-ons, swaps, skips and undo-skip
