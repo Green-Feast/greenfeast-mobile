@@ -2,14 +2,14 @@
   "expo": {
     "name": "GreenFeast",
     "slug": "greenfeast-app",
-    "version": "1.9.0",
+    "version": "1.10.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "greenfeast",
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.greenfeast.app",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "supportsTablet": false,
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -34,7 +34,7 @@
     },
     "android": {
       "package": "com.greenfeast.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "usesCleartextTraffic": true,
       "softwareKeyboardLayoutMode": "resize",
       "googleServicesFile": "./google-services.json",

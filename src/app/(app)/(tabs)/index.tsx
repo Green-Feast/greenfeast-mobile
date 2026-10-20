@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   View,
   Text,
@@ -37,6 +37,7 @@ import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/avai
 import { useCategoriesStore, categoryEmoji } from '@/store/categories'
 import { useHomeCacheStore, readHomeCache } from '@/store/homeCache'
 import { useRatingStore } from '@/store/rating'
+import { maybeAskStoreReview } from '@/lib/storeReview'
 import { fetchRatingPrompt, toPrompt, dismissRatingPrompt, snoozePrompt, promptSnoozed, type RatingPrompt } from '@/lib/ratings'
 import { Colors, Fonts } from '@/constants/colors'
 import { STORY_SLIDES, CHEF_NOTES } from '@/constants/homeContent'
@@ -176,6 +177,8 @@ export default function Home() {
   // "How was your lunch?" — the meal the server wants rated now, if any.
   const [ratingPrompt, setRatingPrompt] = useState<RatingPrompt | null>(null)
   const ratingVersion = useRatingStore((s) => s.version)
+  const ratingPromptRef = useRef<RatingPrompt | null>(null)
+  ratingPromptRef.current = ratingPrompt
   const [reloading, setReloading] = useState(false)
   // Bell: everything GreenFeast sent this customer + this device's update notes.
   const localNotes = useNotificationStore((s) => s.local)
@@ -205,6 +208,16 @@ export default function Home() {
       setRatingPrompt(null)
     }
   }, [user])
+
+  // Apple's / Google's own rating pop-up, once per launch at most and only for
+  // happy customers (see lib/storeReview.ts) — not while a meal card is up.
+  useEffect(() => {
+    if (!user?.id) return
+    const t = setTimeout(() => {
+      if (!ratingPromptRef.current) maybeAskStoreReview(user.id)
+    }, 8000)
+    return () => clearTimeout(t)
+  }, [user?.id])
 
   // A rating was saved (here, from Order history or a push): the card moves on.
   useEffect(() => {

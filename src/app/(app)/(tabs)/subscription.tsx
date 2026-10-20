@@ -27,6 +27,7 @@ import { useAvailabilityStore, isMealAvailable, isAddonAvailable } from '@/store
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import SubscribeGate from '@/components/SubscribeGate'
+import { maybeAskStoreReview } from '@/lib/storeReview'
 import RenewPlanSheet, { type RenewConfig, type RenewPaymentState, type RenewPlanOption } from '@/components/RenewPlanSheet'
 import { useOnboardingStore } from '@/store/onboarding'
 import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
@@ -609,6 +610,8 @@ export default function SubscriptionScreen() {
         await fetchAll()
         setRenewState('done')
         setRenewMessage('Your new plan is active and your meals are being scheduled.')
+        // A renewed plan is a happy moment — let the store ask for a rating.
+        setTimeout(() => maybeAskStoreReview(user?.id, { afterRenewal: true }), 3000)
         return
       }
       await new Promise((r) => setTimeout(r, 2000))

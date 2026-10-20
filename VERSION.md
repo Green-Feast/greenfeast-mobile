@@ -52,6 +52,22 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.0 — 2026-10-20
+- Build 10, OTA 0.
+- **Requires a new native build, not just an OTA update** — adds the
+  `expo-store-review` native module. `expo.version` is 1.10.0, so this build
+  has its own runtime version (1.9.0 phones never receive code that needs the
+  module); iOS buildNumber 3, Android versionCode 3.
+- **Apple's / Google's own "rate this app" pop-up**, only for happy customers:
+  at least 8 meals delivered, one delivered in the last day (not required right
+  after a renewal payment), no 1–2★ rating or failed drop in 14 days
+  (`store_review_check`, migration 065), at most once per 120 days per phone,
+  never while a meal-rating card is showing. Asked on Home shortly after
+  opening, and after a plan renewal is confirmed.
+- Includes everything in 1.9.12 below (meal ratings, Send feedback, rider and
+  delivered time, WhatsApp code step).
+- First build for the Google Play organisation account.
+
 ### 1.9.12 — 2026-10-19
 - Build 9, OTA 12.
 - **Rate your meals.** Once a meal is marked delivered, Home shows "How was
