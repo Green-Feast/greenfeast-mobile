@@ -29,6 +29,11 @@ export default function RulerPicker({
   const lastScrollValue = useRef(value)
   const [rulerWidth, setRulerWidth] = useState(0)
   const didInitialScroll = useRef(false)
+  // What the pill shows: follows the ruler live while it's being dragged or
+  // gliding, so the number moves with the finger. `value` (the parent's) is
+  // only committed when the scroll settles (handleScrollEnd).
+  const [liveValue, setLiveValue] = useState(value)
+  useEffect(() => { setLiveValue(value) }, [value])
 
   // Each tick's slot is TICK_SPACING wide with its line centered inside, so
   // the scroll offset that puts tick v exactly under the fixed center
@@ -66,6 +71,7 @@ export default function RulerPicker({
     const derived = Math.min(max, Math.max(min, valueForX(x)))
     if (derived !== lastHapticValue.current) {
       lastHapticValue.current = derived
+      setLiveValue(derived)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     }
   }
@@ -74,6 +80,7 @@ export default function RulerPicker({
     const x = event.nativeEvent.contentOffset.x
     const derived = Math.min(max, Math.max(min, valueForX(x)))
     lastScrollValue.current = derived
+    setLiveValue(derived)
     if (derived !== value) onChange(derived)
   }
 
@@ -92,7 +99,7 @@ export default function RulerPicker({
       {/* Always-visible value pill */}
       <View style={styles.pillRow}>
         <View style={styles.pill}>
-          <Text style={styles.pillText}>{value} {unit}</Text>
+          <Text style={styles.pillText}>{liveValue} {unit}</Text>
         </View>
       </View>
 
