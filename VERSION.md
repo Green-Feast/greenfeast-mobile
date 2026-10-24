@@ -52,6 +52,13 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.1 — 2026-10-24
+- Build 10, OTA 1.
+- **Ruler pickers show the value live.** Height, weight, protein and fibre
+  (onboarding) updated the number above the ruler only once the scroll
+  stopped; it now follows the finger. The saved value is still committed
+  when the ruler settles. JS-only.
+
 ### 1.10.0 — 2026-10-20
 - Build 10, OTA 0.
 - **Requires a new native build, not just an OTA update** — adds the
