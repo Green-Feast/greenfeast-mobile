@@ -52,6 +52,16 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.2 — 2026-10-25
+- Build 10, OTA 2.
+- **Sunday is our day off.** My Plan shows a "Sunday is our day off" card
+  with a green Contact us pill (WhatsApp) instead of an empty slot; a Sunday
+  meal the office set up is view-only. Add to day (Menu / dish detail) no
+  longer offers Sundays, and Home's one-tap add skips them. The server side
+  shipped separately and already applies to every app version: add-dish,
+  switch-meal, update-day-cart and remove-dish refuse Sunday meals for
+  customers (only the admin can put a meal on a Sunday). JS-only.
+
 ### 1.10.1 — 2026-10-24
 - Build 10, OTA 1.
 - **Ruler pickers show the value live.** Height, weight, protein and fibre
