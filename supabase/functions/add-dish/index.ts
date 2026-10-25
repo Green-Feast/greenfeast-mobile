@@ -1,5 +1,10 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
+// Sunday is GreenFeast's day off: customers can't add, swap, resize or remove
+// anything on a Sunday. Only the office (admin, which doesn't use this
+// function) can put a meal there, for special cases.
+const isSunday = (iso: string) => new Date(iso + 'T00:00:00Z').getUTCDay() === 0
+
 // Add an extra dish to a delivery slot. The dish is NOT charged here — it's
 // billed ON DELIVERY like every other meal: advance_batch_delivered debits
 // its cart_total and burns one delivery from the counter. The row is flagged
@@ -152,6 +157,8 @@ Deno.serve(async (req) => {
     // out, but a client check is UX only) and allowed on plans, meals left.
     // Also the subscription's slot batches (orders without an address ride
     // them) and the next slot_seq for this (subscription, date, slot).
+    if (isSunday(effectiveDate)) return json({ error: 'Sunday is our day off — message us on WhatsApp if you need something special.' }, 400)
+
     const [
       { data: locked }, { data: closed }, { data: unavailable }, { data: dish }, { data: sub }, { data: existing },
     ] = await Promise.all([

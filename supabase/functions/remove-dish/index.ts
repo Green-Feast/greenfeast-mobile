@@ -1,5 +1,10 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
+// Sunday is GreenFeast's day off: customers can't add, swap, resize or remove
+// anything on a Sunday. Only the office (admin, which doesn't use this
+// function) can put a meal there, for special cases.
+const isSunday = (iso: string) => new Date(iso + 'T00:00:00Z').getUTCDay() === 0
+
 // Remove an extra dish that was added via add-dish (extra_dish=true). Soft
 // delete — sets status='cancelled' rather than a hard delete, matching how
 // pause/cancel/skip all soft-delete via status elsewhere in this app.
@@ -63,6 +68,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Cannot remove a delivered, cancelled, or skipped dish' }, 400)
     }
 
+    if (isSunday(order.delivery_date)) return json({ error: 'Sunday is our day off — message us on WhatsApp if you need something special.' }, 400)
     const { data: locked } = await supabase.rpc('is_slot_locked', {
       p_date: order.delivery_date, p_slot: order.meal_slot,
     })

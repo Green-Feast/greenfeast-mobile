@@ -29,7 +29,7 @@ import MealDetailModal, { type MealDetail, type MealDetailPrimaryAction } from '
 import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/withTimeout'
 import { logColdStart } from '@/lib/coldStartLog'
-import { istToday, istHour, addDaysISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
+import { istToday, istHour, addDaysISO, isSlotLocked, isDayOff, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore, mergedNotifications } from '@/store/notifications'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
@@ -147,6 +147,7 @@ function findNextAddTarget(orders: UpcomingOrder[]): AddTarget | null {
   const dates = [...byDate.keys()].sort()
   const slotRank = (slot: string) => (slot === 'lunch' ? 0 : slot === 'dinner' ? 1 : 2)
   for (const d of dates) {
+    if (isDayOff(d)) continue // Sunday: never a customer add target
     const slotOrder = [...byDate.get(d)!].sort((a, b) => slotRank(a.meal_slot) - slotRank(b.meal_slot))
     for (const base of slotOrder) {
       const slot = base.meal_slot as 'lunch' | 'dinner'

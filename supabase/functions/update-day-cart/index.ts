@@ -1,5 +1,10 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
+// Sunday is GreenFeast's day off: customers can't add, swap, resize or remove
+// anything on a Sunday. Only the office (admin, which doesn't use this
+// function) can put a meal there, for special cases.
+const isSunday = (iso: string) => new Date(iso + 'T00:00:00Z').getUTCDay() === 0
+
 // Edit a single day's cart on an EXISTING base order:
 //
 //   op = 'add_addon'      { addon_id }  — attach an add-on to the day, at quantity 1.
@@ -76,6 +81,7 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'This delivery can no longer be changed' }, 400)
     }
+    if (isSunday(order.delivery_date)) return json({ error: 'Sunday is our day off — message us on WhatsApp if you need something special.' }, 400)
     const [{ data: locked }, { data: sub }] = await Promise.all([
       supabase.rpc('is_slot_locked', { p_date: order.delivery_date, p_slot: order.meal_slot }),
       supabase

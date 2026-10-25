@@ -25,7 +25,8 @@ import { useAuthStore } from '@/store/auth'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { useAvailabilityStore, isMealAvailable, isAddonAvailable } from '@/store/availability'
 import { Colors, Fonts } from '@/constants/colors'
-import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, SLOT_CUTOFF_HOUR } from '@/lib/ist'
+import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, isDayOff, SLOT_CUTOFF_HOUR } from '@/lib/ist'
+import DayOffCard from '@/components/DayOffCard'
 import SubscribeGate from '@/components/SubscribeGate'
 import { maybeAskStoreReview } from '@/lib/storeReview'
 import RenewPlanSheet, { type RenewConfig, type RenewPaymentState, type RenewPlanOption } from '@/components/RenewPlanSheet'
@@ -808,6 +809,7 @@ export default function SubscriptionScreen() {
     : null
   const heroLocked =
     isSlotLocked(selectedDay, selectedSlot) ||
+    isDayOff(selectedDay) || // Sunday: view-only, even a meal the office set up
     heroOrders.some(o => o.status === 'preparing' || o.status === 'out_for_delivery' || o.status === 'delivered')
   const heroIsToday = selectedDay === todayStr
   // Meals the customer skipped in this slot — can be brought back until cutoff.
@@ -1146,6 +1148,8 @@ export default function SubscriptionScreen() {
               </Pressable>
             </View>
           </View>
+        ) : isDayOff(selectedDay) ? (
+          <DayOffCard key="hero-day-off" />
         ) : (
           <View key="hero-empty" style={s.heroEmpty}>
             {slotSkipped.length > 0 && !closures.has(`${selectedDay}|${selectedSlot}`) ? (

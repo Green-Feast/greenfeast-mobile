@@ -12,7 +12,7 @@ import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { useAvailabilityStore, isMealAvailable } from '@/store/availability'
-import { istToday, addDaysISO, isSlotLocked, isDayFullyLocked, dowMon0 } from '@/lib/ist'
+import { istToday, addDaysISO, isSlotLocked, isDayFullyLocked, dowMon0, isDayOff } from '@/lib/ist'
 import { Colors, Fonts } from '@/constants/colors'
 import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import { warmFunctions } from '@/lib/warmFunctions'
@@ -64,7 +64,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
     setLoading(true)
     ;(async () => {
       const today = istToday()
-      const end = addDaysISO(today, 6)
+      const end = addDaysISO(today, 7) // 7 days skipping Sunday reach a week + 1
       const { data: subData } = await supabase
         .from('subscriptions')
         .select('id')
@@ -85,8 +85,10 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
         .in('status', ['scheduled', 'confirmed', 'preparing'])
 
       const list: DayInfo[] = []
-      for (let i = 0; i <= 6; i++) {
+      // Seven delivery days — Sundays (our day off) aren't offered.
+      for (let i = 0; list.length < 7; i++) {
         const date = addDaysISO(today, i)
+        if (isDayOff(date)) continue
         const dayOrders = (orders ?? []).filter((o) => o.delivery_date === date)
         const label = i === 0 ? 'Today' : i === 1 ? 'Tom' : WEEKDAY[dowMon0(date)]
         list.push({

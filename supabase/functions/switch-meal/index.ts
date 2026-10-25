@@ -1,5 +1,10 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
+// Sunday is GreenFeast's day off: customers can't add, swap, resize or remove
+// anything on a Sunday. Only the office (admin, which doesn't use this
+// function) can put a meal there, for special cases.
+const isSunday = (iso: string) => new Date(iso + 'T00:00:00Z').getUTCDay() === 0
+
 // Swap a day's meal for any subscription dish. Swaps are free (052 removed the
 // ₹20 "Meal switch" fee); the meal is billed on delivery like any other, at
 // the order's own rate. The kitchen's ingredient snapshot follows the new dish.
@@ -62,6 +67,8 @@ Deno.serve(async (req) => {
     if (order.meal_template_id === meal_template_id) {
       return json({ ok: true, charged: false, fee_paise: 0 }) // nothing to do
     }
+
+    if (isSunday(order.delivery_date)) return json({ error: 'Sunday is our day off — message us on WhatsApp if you need something special.' }, 400)
 
     // Lock, availability (the app greys these out, but a client check is UX
     // only) and subscription_valid (menu-visible-but-takeaway-only dishes),

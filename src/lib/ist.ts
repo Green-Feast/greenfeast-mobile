@@ -53,3 +53,10 @@ export function isSlotLocked(dateStr: string, slot: 'lunch' | 'dinner'): boolean
 export function isDayFullyLocked(dateStr: string): boolean {
   return isSlotLocked(dateStr, 'lunch') && isSlotLocked(dateStr, 'dinner')
 }
+
+// Sunday is GreenFeast's day off: customers can't order or change anything
+// for it (add-dish / switch-meal / update-day-cart / remove-dish refuse it
+// too). Only the office can put a meal on a Sunday, for special cases.
+export function isDayOff(iso: string): boolean {
+  return dowMon0(iso) === 6
+}
