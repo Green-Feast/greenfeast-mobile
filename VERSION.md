@@ -111,6 +111,12 @@ of what changed. Newest first.
 - Includes everything in 1.9.12 below (meal ratings, Send feedback, rider and
   delivered time, WhatsApp code step).
 - First build for the Google Play organisation account.
+- **The first iOS build of 1.10.0 failed** (2026-10-20, Xcode: "cannot find
+  'SceneGeometry' in scope" in expo-store-review 56.0.4, which needs a newer
+  expo-modules-core than this project's 56.0.17). Pinned expo-store-review to
+  56.0.3 (same JS API, finds the scene itself) and rebuilt iOS on 2026-10-27.
+  Until that build is approved, App Store phones stay on runtime 1.9.0 and
+  only receive 1.9.x updates — the 1.10.x OTAs reach Android only.
 
 ### 1.9.12 — 2026-10-19
 - Build 9, OTA 12.
