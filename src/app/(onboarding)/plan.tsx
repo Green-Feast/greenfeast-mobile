@@ -39,7 +39,7 @@ const SMOOTHIE_OPTIONS = ['Berry Banana Protein', 'Watermelon Mint Chia', 'Cream
 const CHEESE_OPTIONS = ['Feta', 'Parmesan', 'Cheddar']
 
 function fmt(paise: number) {
-  return `₹${(paise / 100).toFixed(0)}`
+  return `₹${Math.round(paise / 100).toLocaleString('en-IN')}`
 }
 
 export default function PlanScreen() {
@@ -73,6 +73,10 @@ export default function PlanScreen() {
   }, [])
 
   const plan = plans.find((p) => p.id === selectedPlan)
+  // Cheapest per meal (not the trial): "Best value".
+  const bestValueId = plans
+    .filter((p) => p.id !== 'trial')
+    .sort((a, b) => a.base_price / a.meals_total - b.base_price / b.meals_total)[0]?.id
 
   const totalAddons = addons
     .filter((a) => selectedAddons[a.id])
@@ -160,7 +164,12 @@ export default function PlanScreen() {
                 <Text style={[styles.planMealsLabel, isSelected && styles.textPrimary]}>meals</Text>
               </View>
               <View style={styles.planCardRight}>
-                <Text style={[styles.planName, isSelected && styles.textPrimary]}>{p.name}</Text>
+                <View style={styles.planNameRow}>
+                  <Text style={[styles.planName, isSelected && styles.textPrimary]}>{p.name}</Text>
+                  {p.id === bestValueId && (
+                    <View style={styles.bestValue}><Text style={styles.bestValueText}>Best value</Text></View>
+                  )}
+                </View>
                 <Text style={styles.planPerMeal}>{fmt(perMeal)}/meal</Text>
                 <Text style={[styles.planTotal, isSelected && styles.textPrimary]}>{fmt(p.base_price)} total</Text>
               </View>
@@ -337,6 +346,9 @@ const styles = StyleSheet.create({
   planMealsLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted },
   planCardRight: { flex: 1 },
   planName: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginBottom: 2 },
+  planNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  bestValue: { backgroundColor: Colors.green700, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, marginBottom: 2 },
+  bestValueText: { fontFamily: Fonts.bodySemi, fontSize: 10, color: '#fff', letterSpacing: 0.3 },
   planPerMeal: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 2 },
   planTotal: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text },
   textPrimary: { color: Colors.primary },

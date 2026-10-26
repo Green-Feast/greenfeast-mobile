@@ -30,16 +30,14 @@ import { couponsAllowed, type CouponQuote } from '@/lib/coupons'
 type Method = 'cashfree' | 'cod'
 type Phase = 'summary' | 'creating' | 'success'
 
-const PLAN_AMOUNTS: Record<string, number> = {
-  trial: 149900,
-  plan15: 405000,
-  plan30: 749900,
-}
-
-const PLAN_DELIVERIES: Record<string, number> = {
-  trial: 5,
-  plan15: 15,
-  plan30: 30,
+// What this screen shows until the plan's row loads (the plans table, below,
+// is the real price — and the server charges from it). A new plan must be
+// added here too (AGENTS.md). allowCod: cash on delivery offered (067).
+const PLAN_FALLBACK: Record<string, { price: number; meals: number; allowCod: boolean }> = {
+  trial: { price: 149900, meals: 5, allowCod: true },
+  plan15: { price: 405000, meals: 15, allowCod: true },
+  plan30: { price: 749900, meals: 30, allowCod: true },
+  plan60: { price: 1434000, meals: 60, allowCod: false },
 }
 
 const DAY_MAP: Record<string, number> = {
@@ -85,8 +83,24 @@ export default function PaymentScreen() {
   const [subscriptionId, setSubscriptionId] = useState('')
   const [firstDelivery, setFirstDelivery] = useState('')
 
-  const planAmount = PLAN_AMOUNTS[store.planId ?? ''] ?? 149900
-  const planMeals = PLAN_DELIVERIES[store.planId ?? ''] ?? 5
+  const [planRow, setPlanRow] = useState<{ base_price: number; meals_total: number; allow_cod: boolean } | null>(null)
+  useEffect(() => {
+    if (!store.planId) return
+    supabase
+      .from('plans')
+      .select('base_price, meals_total, allow_cod')
+      .eq('id', store.planId)
+      .maybeSingle()
+      .then(({ data }) => { if (data) setPlanRow(data as { base_price: number; meals_total: number; allow_cod: boolean }) })
+  }, [store.planId])
+  const fallback = PLAN_FALLBACK[store.planId ?? ''] ?? PLAN_FALLBACK.trial
+  const planAmount = planRow?.base_price ?? fallback.price
+  const planMeals = planRow?.meals_total ?? fallback.meals
+  // Online-only plans (e.g. the 60-meal plan): no cash on delivery.
+  const allowCod = planRow?.allow_cod ?? fallback.allowCod
+  useEffect(() => {
+    if (!allowCod) setMethod('cashfree')
+  }, [allowCod])
   const addonPerMeal = store.addOns.reduce((s, a) => s + a.pricePerMeal, 0)
   const addonTotal = addonPerMeal * planMeals
   // A coupon lowers the price of one meal (migration 066); the server re-checks
@@ -430,21 +444,25 @@ export default function PaymentScreen() {
           <Text style={styles.methodIcon}>💳</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.methodCard, method === 'cod' && styles.methodCardActive]}
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMethod('cod') }}
-        >
-          <View style={[styles.radio, method === 'cod' && styles.radioActive]}>
-            {method === 'cod' && <View style={styles.radioDot} />}
-          </View>
-          <View style={styles.methodText}>
-            <Text style={styles.methodTitle}>Cash on Delivery</Text>
-            <Text style={styles.methodDesc}>
-              {fmtRupees(cod.upfront)} now · {fmtRupees(cod.cash)} cash on your first delivery
-            </Text>
-          </View>
-          <Text style={styles.methodIcon}>💵</Text>
-        </TouchableOpacity>
+        {allowCod ? (
+          <TouchableOpacity
+            style={[styles.methodCard, method === 'cod' && styles.methodCardActive]}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMethod('cod') }}
+          >
+            <View style={[styles.radio, method === 'cod' && styles.radioActive]}>
+              {method === 'cod' && <View style={styles.radioDot} />}
+            </View>
+            <View style={styles.methodText}>
+              <Text style={styles.methodTitle}>Cash on Delivery</Text>
+              <Text style={styles.methodDesc}>
+                {fmtRupees(cod.upfront)} now · {fmtRupees(cod.cash)} cash on your first delivery
+              </Text>
+            </View>
+            <Text style={styles.methodIcon}>💵</Text>
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.codNote}>Cash on delivery isn't available for this plan — pay online with UPI, cards or net banking.</Text>
+        )}
 
         {method === 'cashfree' && (
           <View style={styles.infoBox}>
@@ -541,6 +559,7 @@ const styles = StyleSheet.create({
   recapPlan: { fontFamily: Fonts.heading, fontSize: 17, color: Colors.green700 },
   recapAmount: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.ink900 },
   recapAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  codNote: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, lineHeight: 19, marginBottom: 12, marginTop: 2 },
   recapStrike: { fontFamily: Fonts.body, fontSize: 15, color: Colors.ink400, textDecorationLine: 'line-through' },
   recapRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   addonRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },

@@ -16,7 +16,7 @@ import { Image } from 'expo-image'
 import { Check } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
-import { useOnboardingStore, type AddOnSelection } from '@/store/onboarding'
+import { useOnboardingStore, type AddOnSelection, type PlanId } from '@/store/onboarding'
 import { MENU_LABELS, CONSTRAINT_LABELS } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
@@ -99,6 +99,16 @@ export default function RecommendationScreen() {
   const total = plan ? plan.base_price + addonPerMeal * mealsTotal : 0
   const trialTotal = trialPlan ? trialPlan.base_price + addonPerMeal * trialPlan.meals_total : 0
 
+  // "Go bigger and save": the cheapest-per-meal plan bigger than the
+  // recommended one (the 60-meal plan, migration 067), if any.
+  const rateOf = (p: Plan) => Math.round(p.base_price / Math.max(p.meals_total, 1))
+  const upgrade = plan
+    ? plans
+        .filter((p) => p.id !== 'trial' && p.meals_total > plan.meals_total && rateOf(p) < baseMealRate)
+        .sort((a, b) => rateOf(a) - rateOf(b))[0] ?? null
+    : null
+  const upgradeSaving = upgrade ? Math.round((baseMealRate - rateOf(upgrade)) / 100) : 0
+
   const proteinNum = parseInt(proteinTarget)
   const showProtein = !isNaN(proteinNum) && proteinNum > 0
   const fibreNum = parseInt(fibreTarget)
@@ -143,6 +153,12 @@ export default function RecommendationScreen() {
   function handleAccept() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     setPlan(recommendedPlanId, planName, buildAddOns())
+    router.push('/(onboarding)/days')
+  }
+  function handleUpgrade() {
+    if (!upgrade) return
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    setPlan(upgrade.id as PlanId, planName, buildAddOns())
     router.push('/(onboarding)/days')
   }
   function handleTrial() {
@@ -341,6 +357,18 @@ export default function RecommendationScreen() {
         <View style={styles.padded}>
           <Button onPress={handleAccept} style={{ marginBottom: 12 }}>Get this plan →</Button>
 
+          {upgrade && (
+            <TouchableOpacity style={styles.upgradeBtn} onPress={handleUpgrade} activeOpacity={0.85}>
+              <Text style={styles.upgradeEyebrow}>Go bigger and save</Text>
+              <Text style={styles.upgradeTitle}>
+                {upgrade.meals_total} meals at {fmt(rateOf(upgrade))}/meal
+              </Text>
+              {upgradeSaving > 0 && (
+                <Text style={styles.upgradeSub}>₹{upgradeSaving} less per meal · {fmt(upgrade.base_price + addonPerMeal * upgrade.meals_total)} total</Text>
+              )}
+            </TouchableOpacity>
+          )}
+
           {/* 5-meal trial — styled like the CTA but not green */}
           <TouchableOpacity style={styles.trialBtn} onPress={handleTrial} activeOpacity={0.85}>
             <Text style={styles.trialBtnText}>Try 5 meals first · {fmt(trialTotal)}</Text>
@@ -468,6 +496,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cream50,
   },
   trialBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.green700 },
+  upgradeBtn: {
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: Colors.green50,
+    borderWidth: 1.5,
+    borderColor: Colors.green200,
+  },
+  upgradeEyebrow: { fontFamily: Fonts.bodySemi, fontSize: 10, color: Colors.green700, textTransform: 'uppercase', letterSpacing: 1.5 },
+  upgradeTitle: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.green900, marginTop: 2 },
+  upgradeSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.ink600, marginTop: 2 },
   rejectLink: { alignItems: 'center' },
   rejectLinkText: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500, textDecorationLine: 'underline' },
 })

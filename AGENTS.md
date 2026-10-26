@@ -176,6 +176,15 @@ reflect the latest commits, that's expected, not a bug to fix.
   pending plan, never a top-up) and records it on the payment; `cashfree-webhook` calls
   `apply_payment_coupon()` before activating, so orders are made at the coupon price. The app
   previews with `preview_coupon` / `my_coupon_offers` (`CouponField`).
+- **Plans are data (`plans` table)** — trial 5, plan15, plan30, and plan60 (067: 60 meals,
+  ₹14,340 = ₹239/meal, coupons allowed). Almost everything reads the table; the exceptions to update
+  when adding a plan are `(onboarding)/payment.tsx`'s `PLAN_FALLBACK` (first draw before the row
+  loads) and the `PlanId` type in `lib/recommendation.ts`. `plans.allow_cod` = cash on delivery is
+  offered in the app (false for plan60 — `cashfree-create-order` refuses it; the admin can still set
+  a cash plan up by hand). `cashfree-create-order` also refuses a payment whose on-screen amount
+  (`amount_paise`) is lower than the real charge — an old app that doesn't know a plan's price.
+  A new plan is inserted `is_active = false` and switched on once the app update that knows it is
+  out.
 - **Refunds** go through the admin Money tab: to wallet (store credit, `refundToWallet`) or to
   the bank via Cashfree (`admin-refund` edge function, `--no-verify-jwt`, INTERNAL_FN_SECRET),
   which debits the wallet first and is completed/reversed by `REFUND_STATUS_WEBHOOK`. Ledger:

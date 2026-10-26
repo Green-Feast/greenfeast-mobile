@@ -51,6 +51,7 @@ type SubData = {
   pause_from: string | null
   pause_until: string | null
   cod_due_paise: number | null
+  meal_price_paise: number | null // coupon price per meal, else null (066)
   plans: { name: string; meals_total: number; days_per_week: number; base_price: number } | null
 }
 
@@ -233,7 +234,7 @@ export default function SubscriptionScreen() {
 
     const planQuery = () => supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, plans ( name, meals_total, days_per_week, base_price )')
+      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, meal_price_paise, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
       .in('status', ['active', 'paused'])
       .order('created_at', { ascending: false })
@@ -834,7 +835,8 @@ export default function SubscriptionScreen() {
   // action — force it rather than trusting addMode (which resets on open).
   const effectiveAddMode = !dayOrder || addMode
 
-  const baseRate = sub.plans ? Math.round(sub.plans.base_price / Math.max(sub.plans.meals_total, 1)) : 0
+  // The plan's meal price: its coupon price if bought with one (066).
+  const baseRate = sub.meal_price_paise ?? (sub.plans ? Math.round(sub.plans.base_price / Math.max(sub.plans.meals_total, 1)) : 0)
   const dayAllOrders = daySlotOrders
   const orderBase = (o: OrderItem) => (o.unit_price ?? baseRate) * (o.quantity ?? 1)
   const addonLinesCost = (o: OrderItem) =>

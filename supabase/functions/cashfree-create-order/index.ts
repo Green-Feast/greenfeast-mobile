@@ -73,11 +73,11 @@ Deno.serve(async (req) => {
     // Verify the subscription belongs to this user
     const { data: sub, error: subErr } = await supabase
       .from('subscriptions')
-      .select('id, status, meals_lunch, meals_dinner, plan_id, plans ( base_price, meals_total )')
+      .select('id, status, meals_lunch, meals_dinner, plan_id, plans ( name, base_price, meals_total, allow_cod )')
       .eq('id', subscription_id)
       .eq('user_id', user.id)
       .single()
-    const plan = (sub as any)?.plans as { base_price: number; meals_total: number } | null
+    const plan = (sub as any)?.plans as { name: string; base_price: number; meals_total: number; allow_cod: boolean } | null
     if (subErr || !sub || !plan) {
       return new Response(
         JSON.stringify({ error: 'Subscription not found' }),
@@ -144,6 +144,13 @@ Deno.serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+      // Some plans are online-only in the app (plans.allow_cod, migration 067).
+      if (plan.allow_cod === false) {
+        return new Response(
+          JSON.stringify({ error: `The ${plan.name} can only be paid online.` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
       const perMeal = mealPrice + addonPerMeal
       const split = codSplit(planTotal, perMeal, ((sub as any).meals_lunch ?? 0) + ((sub as any).meals_dinner ?? 0))
       amount_paise = split.upfront
@@ -151,6 +158,14 @@ Deno.serve(async (req) => {
     }
     if (clientAmount != null && clientAmount !== amount_paise) {
       console.warn('cashfree-create-order: app showed', clientAmount, 'but this charge is', amount_paise, subscription_id)
+      // Never charge more than the app showed: an old app version that doesn't
+      // know a plan's price (e.g. the 60-meal plan, 067) shows a wrong amount.
+      if (typeof clientAmount === 'number' && clientAmount < amount_paise) {
+        return new Response(
+          JSON.stringify({ error: 'The price in your app is out of date — please update GreenFeast and try again.' }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
     // The cash part is collected on delivery and recorded by the admin; the
     // plan activates (cashfree-webhook) once this payment lands either way.

@@ -12,7 +12,9 @@
 export type HealthGoal = 'build-muscle' | 'lose-weight' | 'improve-wellness' | 'boost-energy'
 // One weekly menu for everyone since migration 052 (the M2 track is gone).
 export type MenuType = 'M1'
-export type PlanId = 'trial' | 'plan15' | 'plan30'
+// Plans live in the plans table; plan60 (067) is never a recommendation — the
+// recommendation screen offers it as an upgrade.
+export type PlanId = 'trial' | 'plan15' | 'plan30' | 'plan60'
 
 export type Recommendation = {
   planName: string
