@@ -31,6 +31,7 @@ import { useOtaNotifications } from '@/hooks/useOtaNotifications'
 import { Colors } from '@/constants/colors'
 import { LEGAL_LAST_UPDATED } from '@/constants/legal'
 import ChangePasswordSheet from '@/components/ChangePasswordSheet'
+import StoreUpdatePrompt from '@/components/StoreUpdatePrompt'
 
 // Before anything else — a crash during boot is exactly what this needs to
 // catch, and that window closes as soon as the first component renders.
@@ -335,6 +336,8 @@ export default function RootLayout() {
             override this locally with their own <StatusBar style="light">. */}
         <StatusBar style="dark" />
         <AuthGate />
+        {/* 1.9 build only: send iPhones to the App Store once it has the new build. */}
+        <StoreUpdatePrompt />
       </KeyboardProvider>
     </GestureHandlerRootView>
   )
