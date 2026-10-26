@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.3 — 2026-10-26
+- Build 10, OTA 3.
+- **Coupons.** "Have a coupon code?" on the onboarding payment screen and the
+  Renew sheet (repeat / edit), plus tap-to-apply offers the office made for
+  that customer. A coupon lowers the price of one meal on the 15- and 30-meal
+  plans (never the trial, never wallet top-ups): the order box shows the
+  regular price struck through, the new total, the per-meal price and what's
+  saved; the cash-on-delivery split follows. The server re-checks the code
+  and charges its own price (cashfree-create-order `coupon_code`), and the
+  plan keeps the coupon's meal price for every meal (migration 066 — server
+  side already live). Coupons are made in admin → Coupons. JS-only.
+
 ### 1.10.2 — 2026-10-25
 - Build 10, OTA 2.
 - **Sunday is our day off.** My Plan shows a "Sunday is our day off" card
