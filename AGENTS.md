@@ -185,6 +185,15 @@ reflect the latest commits, that's expected, not a bug to fix.
   (`amount_paise`) is lower than the real charge — an old app that doesn't know a plan's price.
   A new plan is inserted `is_active = false` and switched on once the app update that knows it is
   out.
+- **Settling earlier days (068, 2026-10-27).** Ops sometimes forget to mark a day, so the customer
+  isn't charged. The admin settles any earlier day: Operations (day arrows, "never marked" list),
+  the Kitchen grid's amber cells, a customer's "Not marked yet" card → day editor. Delivered bills
+  through `advance_order_delivered` as usual, but an earlier day's `delivered_at` is cleared (the
+  time isn't known) and no "delivered" push goes out; skip = `not_delivered`, nothing charged;
+  `undo_order_delivered()` refunds exactly that meal's debit (reference = order id), puts it back
+  on an active / paused plan and tells the customer (`delivery_reversed`). Kitchen / out-for-delivery
+  steps are refused for an earlier day. The 9:30 AM reminder
+  (`admin_delivery_reminder(…, 'yesterday')`) lists every earlier day in the last 30 not marked.
 - **Refunds** go through the admin Money tab: to wallet (store credit, `refundToWallet`) or to
   the bank via Cashfree (`admin-refund` edge function, `--no-verify-jwt`, INTERNAL_FN_SECRET),
   which debits the wallet first and is completed/reversed by `REFUND_STATUS_WEBHOOK`. Ledger:
