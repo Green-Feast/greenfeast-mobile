@@ -660,7 +660,7 @@ export default function SubscriptionScreen() {
     return setActiveCashfreeCallback(callback)
   }, [])
 
-  async function startRenewal(cfg: RenewConfig) {
+  async function startRenewal(cfg: RenewConfig, couponCode?: string) {
     if (!sub) return
     setRenewState('starting')
     setRenewMessage('')
@@ -676,7 +676,7 @@ export default function SubscriptionScreen() {
       if (renewal.error) throw new Error(await extractFunctionErrorMessage(renewal.error, 'Could not start the renewal.'))
 
       const order = await supabase.functions.invoke('cashfree-create-order', {
-        body: { subscription_id: renewal.data.subscription_id },
+        body: { subscription_id: renewal.data.subscription_id, coupon_code: couponCode },
         headers,
       })
       if (order.error) throw new Error(await extractFunctionErrorMessage(order.error, 'Could not start the payment.'))

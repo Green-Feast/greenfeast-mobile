@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { mealRate } from '../_shared/pricing.ts'
 
 // Sunday is GreenFeast's day off: customers can't add, swap, resize or remove
 // anything on a Sunday. Only the office (admin, which doesn't use this
@@ -86,7 +87,7 @@ Deno.serve(async (req) => {
       supabase.rpc('is_slot_locked', { p_date: order.delivery_date, p_slot: order.meal_slot }),
       supabase
         .from('subscriptions')
-        .select('meals_lunch, meals_dinner, plan_id, plans ( base_price, meals_total )')
+        .select('meals_lunch, meals_dinner, plan_id, meal_price_paise, plans ( base_price, meals_total )')
         .eq('id', order.subscription_id)
         .single(),
     ])
@@ -97,7 +98,7 @@ Deno.serve(async (req) => {
     // Backfill the base-meal rate snapshot on older orders so cart_total is right.
     const plan = (sub as any)?.plans as { base_price: number; meals_total: number } | null
     if (order.unit_price == null && plan) {
-      const rate = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
+      const rate = mealRate(sub as any, plan) as number
       await supabase.from('orders').update({ unit_price: rate }).eq('id', order.id)
       order.unit_price = rate
     }

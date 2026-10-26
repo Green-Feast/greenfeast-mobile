@@ -10,6 +10,8 @@ import {
   Minus, Plus, Check, CheckCircle2, AlertCircle,
 } from 'lucide-react-native'
 import { Colors, Fonts } from '@/constants/colors'
+import CouponField from '@/components/CouponField'
+import { couponsAllowed, type CouponQuote } from '@/lib/coupons'
 
 export type RenewPlanOption = { id: string; name: string; base_price: number; meals_total: number }
 export type RenewAddonOption = { id: string; name: string; price_per_meal: number }
@@ -62,7 +64,8 @@ export default function RenewPlanSheet({
   walletBalance: number | null
   paymentState: RenewPaymentState
   paymentMessage: string
-  onRenew: (cfg: RenewConfig) => void
+  // couponCode: re-checked and priced by the server (migration 066).
+  onRenew: (cfg: RenewConfig, couponCode?: string) => void
   onRedoOnboarding: () => void
   onCancelPlan: () => Promise<void>
 }) {
@@ -70,6 +73,7 @@ export default function RenewPlanSheet({
   const [step, setStep] = useState<Step>('menu')
   const [draft, setDraft] = useState<RenewConfig>(current)
   const [cancelling, setCancelling] = useState(false)
+  const [coupon, setCoupon] = useState<CouponQuote | null>(null)
 
   // Fresh start every time the sheet opens.
   useEffect(() => {
@@ -77,8 +81,12 @@ export default function RenewPlanSheet({
       setStep('menu')
       setDraft(current)
       setCancelling(false)
+      setCoupon(null)
     }
   }, [visible]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A coupon belongs to the step it was applied on (repeat vs edit).
+  useEffect(() => { setCoupon(null) }, [step])
 
   const currentPlan = plans.find((p) => p.id === current.plan_id)
   const currentPrice = priceOf(current, plans, addons)
@@ -127,7 +135,7 @@ export default function RenewPlanSheet({
         </Pressable>
       )}
       {paymentState === 'failed' && (
-        <Pressable style={st.ghostBtn} onPress={() => onRenew(step === 'edit' ? draft : current)}>
+        <Pressable style={st.ghostBtn} onPress={() => onRenew(step === 'edit' ? draft : current, coupon?.code)}>
           <Text style={st.ghostBtnText}>Try again</Text>
         </Pressable>
       )}
@@ -201,12 +209,17 @@ export default function RenewPlanSheet({
                     {walletBalance !== null && walletBalance > 0 && (
                       <Text style={st.walletNote}>The {rupees(walletBalance)} already in your wallet stays and is used first.</Text>
                     )}
+                    {currentPrice !== null && couponsAllowed(current.plan_id) && (
+                      <CouponField planId={current.plan_id} addonIds={current.addon_ids} applied={coupon} onChange={setCoupon} />
+                    )}
                     <Pressable
                       style={[st.primaryBtn, currentPrice === null && st.btnDisabled]}
                       disabled={currentPrice === null}
-                      onPress={() => onRenew(current)}
+                      onPress={() => onRenew(current, coupon?.code)}
                     >
-                      <Text style={st.primaryBtnText}>{currentPrice !== null ? `Pay ${rupees(currentPrice)}` : 'Plan unavailable'}</Text>
+                      <Text style={st.primaryBtnText}>
+                        {currentPrice !== null ? `Pay ${rupees(coupon ? coupon.total : currentPrice)}` : 'Plan unavailable'}
+                      </Text>
                     </Pressable>
                   </>
                 )}
@@ -261,12 +274,19 @@ export default function RenewPlanSheet({
                     })}
 
                     <Text style={st.cardNote}>Delivery days, menu and address stay the same — change them anytime in Plan Settings.</Text>
+                    {draftPrice !== null && couponsAllowed(draft.plan_id) && (
+                      <View style={{ marginTop: 12 }}>
+                        <CouponField planId={draft.plan_id} addonIds={draft.addon_ids} applied={coupon} onChange={setCoupon} />
+                      </View>
+                    )}
                     <Pressable
                       style={[st.primaryBtn, !draftValid && st.btnDisabled]}
                       disabled={!draftValid}
-                      onPress={() => onRenew(draft)}
+                      onPress={() => onRenew(draft, coupon && couponsAllowed(draft.plan_id) ? coupon.code : undefined)}
                     >
-                      <Text style={st.primaryBtnText}>{draftPrice !== null ? `Pay ${rupees(draftPrice)}` : 'Choose a plan'}</Text>
+                      <Text style={st.primaryBtnText}>
+                        {draftPrice !== null ? `Pay ${rupees(coupon && couponsAllowed(draft.plan_id) ? coupon.total : draftPrice)}` : 'Choose a plan'}
+                      </Text>
                     </Pressable>
                   </>
                 )}

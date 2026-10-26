@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { mealRate } from '../_shared/pricing.ts'
 
 // Sunday is GreenFeast's day off: customers can't add, swap, resize or remove
 // anything on a Sunday. Only the office (admin, which doesn't use this
@@ -183,7 +184,7 @@ Deno.serve(async (req) => {
         .maybeSingle(),
       supabase
         .from('subscriptions')
-        .select('plan_id, batch_id_lunch, batch_id_dinner, deliveries_remaining, plans ( base_price, meals_total )')
+        .select('plan_id, batch_id_lunch, batch_id_dinner, deliveries_remaining, meal_price_paise, plans ( base_price, meals_total )')
         .eq('id', subscriptionId)
         .single(),
       supabase
@@ -212,11 +213,12 @@ Deno.serve(async (req) => {
     if ((sub.deliveries_remaining ?? 0) <= 0) {
       return json({ error: 'No deliveries remaining on this plan' }, 400)
     }
-    // Base per-meal rate (paise) from the plan — add-ons are not included.
+    // Base per-meal rate (paise) from the plan — its coupon price if it was
+    // bought with one (it uses up a plan meal too); add-ons are not included.
     const plan = (Array.isArray((sub as any).plans) ? (sub as any).plans[0] : (sub as any).plans) as
       { base_price: number; meals_total: number } | null
     if (!plan) return json({ error: 'Plan not found' }, 404)
-    const rate = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
+    const rate = mealRate(sub as any, plan) as number
 
     // Zero existing rows (the off-day case) resolves to slot_seq 1, leaving 0
     // unused for that (date, slot) — harmless, advance_batch_delivered just

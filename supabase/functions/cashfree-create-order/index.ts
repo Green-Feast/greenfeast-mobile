@@ -42,7 +42,9 @@ Deno.serve(async (req) => {
     // amount_paise from the app is ignored — the price is computed below. It
     // used to be charged as sent, so a modified client could pay Rs 1 for a plan.
     // cod: true → charge only the cash-on-delivery upfront (first day's meals).
-    const { subscription_id, amount_paise: clientAmount, cod } = await req.json()
+    // coupon_code (optional, migration 066): lowers the plan's meal price —
+    // checked and priced by coupon_quote(), never by the app.
+    const { subscription_id, amount_paise: clientAmount, cod, coupon_code } = await req.json()
 
     if (!subscription_id) {
       return new Response(
@@ -92,7 +94,47 @@ Deno.serve(async (req) => {
     const addonPerMeal = (subAddons ?? []).reduce(
       (sum: number, row: any) => sum + (row.addons?.price_per_meal ?? 0), 0
     )
-    const planTotal = plan.base_price + addonPerMeal * plan.meals_total
+    let planTotal = plan.base_price + addonPerMeal * plan.meals_total
+    let mealPrice = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
+
+    // A coupon: only when buying a plan (pending) — never a top-up, never a
+    // plan that's already running. The meal price it sets is what this
+    // payment buys; the webhook copies it onto the plan (apply_payment_coupon).
+    let coupon: { id: string; code: string; meal_price_paise: number; discount_paise: number } | null = null
+    const code = typeof coupon_code === 'string' ? coupon_code.trim() : ''
+    if (code) {
+      if ((sub as any).status !== 'pending') {
+        return new Response(
+          JSON.stringify({ error: 'Codes can only be used when buying a plan.' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      const { data: quote, error: quoteErr } = await supabase.rpc('coupon_quote', {
+        p_user: user.id,
+        p_code: code,
+        p_plan: (sub as any).plan_id,
+        p_addon_per_meal: addonPerMeal,
+        p_kind: null,
+        p_exclude_sub: subscription_id,
+      })
+      if (quoteErr) {
+        console.error('cashfree-create-order: coupon_quote failed:', quoteErr.message)
+        return new Response(
+          JSON.stringify({ error: 'Could not check that code. Please try again.' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      if (!quote?.ok) {
+        return new Response(
+          JSON.stringify({ error: quote?.error ?? "That code isn't valid." }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      coupon = { id: quote.coupon_id, code: quote.code, meal_price_paise: quote.meal_price_paise, discount_paise: quote.discount_paise }
+      planTotal = quote.total_paise
+      mealPrice = quote.meal_price_paise
+    }
+
     let amount_paise = planTotal
     let cash_paise = 0
     if (cod) {
@@ -102,7 +144,7 @@ Deno.serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      const perMeal = Math.round(plan.base_price / Math.max(plan.meals_total, 1)) + addonPerMeal
+      const perMeal = mealPrice + addonPerMeal
       const split = codSplit(planTotal, perMeal, ((sub as any).meals_lunch ?? 0) + ((sub as any).meals_dinner ?? 0))
       amount_paise = split.upfront
       cash_paise = split.cash
@@ -176,6 +218,9 @@ Deno.serve(async (req) => {
       amount: amount_paise,
       status: 'created',
       cf_order_id: orderId,
+      coupon_id: coupon?.id ?? null,
+      meal_price_paise: coupon?.meal_price_paise ?? null,
+      discount_paise: coupon?.discount_paise ?? null,
     })
     if (payErr) {
       console.error('cashfree-create-order: payments insert failed:', payErr.message)
@@ -192,6 +237,8 @@ Deno.serve(async (req) => {
         environment: CASHFREE_ENV,
         amount_paise,
         cash_paise,
+        coupon_code: coupon?.code ?? null,
+        discount_paise: coupon?.discount_paise ?? 0,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

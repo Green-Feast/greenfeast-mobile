@@ -199,6 +199,14 @@ Deno.serve(async (req) => {
         })
         if (retireErr) console.error('cashfree-webhook: retire_previous_subscriptions failed:', retireErr.message)
 
+        // A coupon this payment was priced with sets the plan's meal price —
+        // before activation, so every order is made at that price (066).
+        const { error: couponErr } = await supabase.rpc('apply_payment_coupon', { p_payment: paymentRow.id })
+        if (couponErr) {
+          console.error('cashfree-webhook: apply_payment_coupon failed:', couponErr.message)
+          return new Response(JSON.stringify({ error: 'coupon failed' }), { status: 500 })
+        }
+
         const { error: activateErr } = await supabase
           .from('subscriptions')
           .update({ status: 'active', deliveries_remaining: deliveries })

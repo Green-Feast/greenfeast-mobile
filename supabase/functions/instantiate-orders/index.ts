@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { mealRate } from '../_shared/pricing.ts'
 
 const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -28,7 +29,7 @@ function next14Days(): Date[] {
 async function processSubscription(supabase: any, subId: string): Promise<number> {
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining, start_date')
+    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining, start_date, meal_price_paise')
     .eq('id', subId)
     .single()
 
@@ -98,12 +99,11 @@ async function processSubscription(supabase: any, subId: string): Promise<number
   const hasScheduleDays = Object.keys(scheduleMap).length > 0
   if (!hasScheduleDays && Object.keys(weeklyMenuMap).length === 0 && Object.keys(fixedMap).length === 0) return 0
 
-  // Compute per-meal unit_price (paise) to snapshot on each order.
-  // round(base_price / meals_total) + sum of addon prices.
+  // Compute per-meal unit_price (paise) to snapshot on each order: the plan's
+  // meal price (its coupon price if it was bought with one) + add-ons.
   const addonTotal = (subAddons ?? []).reduce((sum: number, a: any) => sum + (a.addons?.price_per_meal ?? 0), 0)
-  const unitPrice: number | null = plan
-    ? Math.round(plan.base_price / Math.max(plan.meals_total, 1)) + addonTotal
-    : null
+  const rate = mealRate(sub, plan)
+  const unitPrice: number | null = rate == null ? null : rate + addonTotal
 
   // ingredient snapshot cache — avoids re-querying the same meal template
   const ingredientCache: Record<string, any[]> = {}

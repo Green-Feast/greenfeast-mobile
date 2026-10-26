@@ -24,6 +24,8 @@ import { APP_VERSION_STRING } from '@/constants/version'
 import { SUPPORT_WHATSAPP_NUMBER } from '@/constants/links'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
+import CouponField from '@/components/CouponField'
+import { couponsAllowed, type CouponQuote } from '@/lib/coupons'
 
 type Method = 'cashfree' | 'cod'
 type Phase = 'summary' | 'creating' | 'success'
@@ -87,8 +89,13 @@ export default function PaymentScreen() {
   const planMeals = PLAN_DELIVERIES[store.planId ?? ''] ?? 5
   const addonPerMeal = store.addOns.reduce((s, a) => s + a.pricePerMeal, 0)
   const addonTotal = addonPerMeal * planMeals
-  const grandTotal = planAmount + addonTotal
-  const cod = codSplit(grandTotal, Math.round(planAmount / planMeals) + addonPerMeal, store.mealsLunch + store.mealsDinner)
+  // A coupon lowers the price of one meal (migration 066); the server re-checks
+  // it and charges its own price when the payment starts.
+  const [coupon, setCoupon] = useState<CouponQuote | null>(null)
+  const regularTotal = planAmount + addonTotal
+  const grandTotal = coupon ? coupon.total : regularTotal
+  const mealPrice = coupon ? coupon.mealPrice : Math.round(planAmount / planMeals)
+  const cod = codSplit(grandTotal, mealPrice + addonPerMeal, store.mealsLunch + store.mealsDinner)
   // What the server actually charged / left for cash (set when the order is made).
   const [charged, setCharged] = useState<{ upfront: number; cash: number } | null>(null)
   const firstName = userName.split(' ')[0]
@@ -287,6 +294,7 @@ export default function PaymentScreen() {
           subscription_id: subId,
           amount_paise: method === 'cod' ? cod.upfront : grandTotal,
           cod: method === 'cod',
+          coupon_code: coupon?.code,
         },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       })
@@ -375,7 +383,10 @@ export default function PaymentScreen() {
         {/* Order recap */}
         <View style={styles.recapCard}>
           <Text style={styles.recapPlan}>{store.planName || store.planId}</Text>
-          <Text style={styles.recapAmount}>{fmtRupees(grandTotal)}</Text>
+          <View style={styles.recapAmountRow}>
+            <Text style={styles.recapAmount}>{fmtRupees(grandTotal)}</Text>
+            {coupon && <Text style={styles.recapStrike}>{fmtRupees(regularTotal)}</Text>}
+          </View>
           <View style={styles.recapRow}>
             <Text style={styles.recapDetail}>{store.selectedDays.length} days/week</Text>
             <Text style={styles.recapDot}>·</Text>
@@ -385,12 +396,22 @@ export default function PaymentScreen() {
           </View>
           {addonTotal > 0 && (
             <View style={styles.addonRow}>
-              <Text style={styles.recapDetail}>Plan: {fmtRupees(planAmount)}</Text>
+              <Text style={styles.recapDetail}>Plan: {fmtRupees(coupon ? coupon.mealPrice * planMeals : planAmount)}</Text>
               <Text style={styles.recapDot}>+</Text>
               <Text style={styles.recapDetail}>Add-ons: {fmtRupees(addonTotal)}</Text>
             </View>
           )}
         </View>
+
+        {couponsAllowed(store.planId) && (
+          <CouponField
+            planId={store.planId!}
+            addonIds={store.addOns.map((a) => a.id)}
+            applied={coupon}
+            onChange={setCoupon}
+            disabled={phase === 'creating'}
+          />
+        )}
 
         {/* Payment method */}
         <Text style={styles.sectionTitle}>Payment method</Text>
@@ -519,6 +540,8 @@ const styles = StyleSheet.create({
   },
   recapPlan: { fontFamily: Fonts.heading, fontSize: 17, color: Colors.green700 },
   recapAmount: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.ink900 },
+  recapAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  recapStrike: { fontFamily: Fonts.body, fontSize: 15, color: Colors.ink400, textDecorationLine: 'line-through' },
   recapRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   addonRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   recapDetail: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500 },

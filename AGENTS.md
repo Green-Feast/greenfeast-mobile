@@ -166,6 +166,16 @@ reflect the latest commits, that's expected, not a bug to fix.
   The rating sheet is app-wide (`RatingSheetHost` in the (app) layout, opened via `useRatingStore`).
   Account's "Rate us on the App Store" uses the write-review URL; Apple's automatic prompt
   (`expo-store-review`) needs a native build, so it waits for the next one.
+- **Coupons (066, 2026-10-26).** A coupon (admin → Coupons) sets its own price for one meal on the
+  15- and 30-meal plans (`plans.allow_coupons`; never the trial). A plan bought with one keeps that
+  price in `subscriptions.meal_price_paise` (null = regular), and **every place that prices a meal
+  must use it**: `subscription_meal_rate()` in SQL, `_shared/pricing.ts` (`mealRate`) in edge
+  functions, `lib/pricing.ts` in the admin — otherwise a discounted wallet runs out before the plan
+  ends. `coupon_quote()` is the only place that checks a code (who: new / renewal / selected
+  customers; dates; per-plan price; limits). `cashfree-create-order` takes `coupon_code` (only for a
+  pending plan, never a top-up) and records it on the payment; `cashfree-webhook` calls
+  `apply_payment_coupon()` before activating, so orders are made at the coupon price. The app
+  previews with `preview_coupon` / `my_coupon_offers` (`CouponField`).
 - **Refunds** go through the admin Money tab: to wallet (store credit, `refundToWallet`) or to
   the bank via Cashfree (`admin-refund` edge function, `--no-verify-jwt`, INTERNAL_FN_SECRET),
   which debits the wallet first and is completed/reversed by `REFUND_STATUS_WEBHOOK`. Ledger:
