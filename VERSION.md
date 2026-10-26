@@ -52,6 +52,21 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.4 — 2026-10-27
+- Build 10, OTA 4.
+- **60-meal plan** (₹239 a meal, ₹14,340 — migration 067). The
+  recommendation screen offers it as "Go bigger and save" under "Get this
+  plan"; the plan list marks the cheapest-per-meal plan "Best value" and
+  prices have thousands commas; the payment screen now prices the chosen
+  plan from the plans table (fallback table has plan60) and hides cash on
+  delivery for online-only plans (plans.allow_cod — plan60 is online only).
+  Coupons work on it. The plan is switched on once this update is out.
+- My Plan and Plan settings use a coupon plan's own meal price (was the
+  regular price).
+- Server side (already live, all app versions): cashfree-create-order refuses
+  cash on delivery for online-only plans and any payment whose on-screen
+  amount is lower than the real charge ("update the app"). JS-only.
+
 ### 1.10.3 — 2026-10-26
 - Build 10, OTA 3.
 - **Coupons.** "Have a coupon code?" on the onboarding payment screen and the
