@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.9.13 — 2026-10-27 (1.9 build only — branch `ota-1.9-store-update`)
+- Build 9, OTA 13. Published from branch `ota-1.9-store-update` (1.9.12 +
+  this), **not main** — main's code needs the 1.10 build (expo-store-review)
+  and would crash the 1.9 build.
+- **"Update GreenFeast" prompt** for iPhones still on the 1.9 build:
+  "Update on the App Store" opens GreenFeast's App Store page; "Later" hides
+  it for 12 hours. It asks Apple's public lookup when the App Store's current
+  version was released and shows only once that's later than the 1.9 build's
+  release (2026-10-02, App Store version "1.1.0" — store version numbers don't
+  follow the app's own), so it appears by itself when Apple approves the new
+  build. iOS only.
+
 ### 1.10.4 — 2026-10-27
 - Build 10, OTA 4.
 - **60-meal plan** (₹239 a meal, ₹14,340 — migration 067). The
