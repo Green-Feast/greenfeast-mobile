@@ -29,7 +29,8 @@
           "kiwi",
           "simplypayupi",
           "whatsapp"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
