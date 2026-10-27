@@ -52,10 +52,36 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.5 — 2026-10-28
+- Build 10, OTA 5. Published per platform (`--platform ios`, then
+  `--platform android`). The 1.10 build is live on the App Store (store
+  version 1.2.0, released 2026-10-27), so 1.10.x updates now reach iPhones on
+  it as well as Android.
+- **Renew from 2 meals left.** My Plan shows "Only 2 meals left — renew now so
+  your meals keep coming without a gap" for an active plan with no cash due
+  (when the renewal reminder goes out). The sheet says the meals left move to
+  the new plan and offers Repeat / Edit; Build a new plan and Cancel appear
+  once the meals are used up. On payment the old plan's undelivered meals move
+  to the new one at their own price and its meals left are added (migration
+  069, `carried_meals` — server side already live for every app version).
+  Totals on My Plan, Plan settings and Home count the carried meals.
+- **Plan settings shows "Finished"** once a plan's meals are used up.
+- **Skip / customize deadline on My Plan** (made 2026-10-27, first shipped
+  here): under the meal card, "Skip or customize until 8 AM today / tomorrow /
+  on Thu 29" (lunch 8 AM, dinner 1 PM), or "Changes closed at 1 PM today".
+- JS-only.
+- Also replaces the update labelled "1.9.13: App Store update prompt"
+  (2026-10-27 09:13 UTC), published from this folder by mistake: it went to
+  runtime 1.10.0 on iOS — the new App Store build — instead of the 1.9 build,
+  carrying main's code at commit f029daf, the same app code as 1.10.4, so
+  iPhones on 1.10 saw no change.
+
 ### 1.9.13 — 2026-10-27 (1.9 build only — branch `ota-1.9-store-update`)
 - Build 9, OTA 13. Published from branch `ota-1.9-store-update` (1.9.12 +
   this), **not main** — main's code needs the 1.10 build (expo-store-review)
-  and would crash the 1.9 build.
+  and would crash the 1.9 build. Publish it from `greenfeast-app-1.9`
+  (app.json 1.9.0 → runtime 1.9.0): the first attempt (2026-10-27) ran from
+  main and went to runtime 1.10.0 instead (see 1.10.5).
 - **"Update GreenFeast" prompt** for iPhones still on the 1.9 build:
   "Update on the App Store" opens GreenFeast's App Store page; "Later" hides
   it for 12 hours. It asks Apple's public lookup when the App Store's current
