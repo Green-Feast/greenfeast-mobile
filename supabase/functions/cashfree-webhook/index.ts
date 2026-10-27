@@ -181,23 +181,25 @@ Deno.serve(async (req) => {
       }
 
       if (paymentRow.subscription_id) {
-        const { data: sub } = await supabase
-          .from('subscriptions')
-          .select('plan_id, plan_name, payment_method, cod_due_paise, plans ( meals_total )')
-          .eq('id', paymentRow.subscription_id)
-          .single()
-
-        const planRow = Array.isArray((sub as any)?.plans) ? (sub as any).plans[0] : (sub as any)?.plans
-        const deliveries = planRow?.meals_total ?? 0
-
         // A renewal (or a new plan after the old one ran out) first closes the
-        // customer's finished plan — only one live plan per customer is
+        // customer's previous plan — only one live plan per customer is
         // allowed (migration 049) — and inherits its delivery batch, before
-        // instantiate-orders below so the new orders get that batch.
+        // instantiate-orders below so the new orders get that batch. A plan
+        // renewed before its meals ran out passes them on: its orders move
+        // over and its meal count lands in carried_meals (069), read below.
         const { error: retireErr } = await supabase.rpc('retire_previous_subscriptions', {
           p_new_sub: paymentRow.subscription_id,
         })
         if (retireErr) console.error('cashfree-webhook: retire_previous_subscriptions failed:', retireErr.message)
+
+        const { data: sub } = await supabase
+          .from('subscriptions')
+          .select('plan_id, plan_name, payment_method, cod_due_paise, carried_meals, plans ( meals_total )')
+          .eq('id', paymentRow.subscription_id)
+          .single()
+
+        const planRow = Array.isArray((sub as any)?.plans) ? (sub as any).plans[0] : (sub as any)?.plans
+        const deliveries = (planRow?.meals_total ?? 0) + ((sub as any)?.carried_meals ?? 0)
 
         // A coupon this payment was priced with sets the plan's meal price —
         // before activation, so every order is made at that price (066).

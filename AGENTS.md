@@ -205,6 +205,17 @@ reflect the latest commits, that's expected, not a bug to fix.
   `renewed_from`), redo onboarding, or cancel. Payment goes through `cashfree-create-order` like a
   first purchase; on activation `retire_previous_subscriptions()` expires the finished plan,
   cancels its leftover orders and passes on its delivery batches.
+- **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
+  (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
+  cash due — `renew-subscription` refuses paused / cash-due plans with meals left before any
+  payment. On activation the plan being renewed (`renewed_from`) hands over everything still to
+  come: its undelivered orders move to the new plan at their own price, and its meals left go
+  into `subscriptions.carried_meals`, which the webhook (and the admin's activatePendingPlan)
+  add to the new plan's meals. Totals shown to the customer are meals_total + carried_meals.
+  The sheet hides "Build a new plan" / "Cancel" while meals are left (onboarding can't set
+  `renewed_from`). A plan with 0 meals left stays `active` until renewed; the admin shows it as
+  Finished. The customer insert guard also resets `meal_price_paise`, `coupon_id` and
+  `carried_meals`.
 
 # UI/UX design system
 

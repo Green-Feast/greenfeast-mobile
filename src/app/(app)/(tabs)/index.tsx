@@ -65,6 +65,7 @@ type Subscription = {
   status: string
   deliveries_remaining: number
   plan_name: string | null
+  carried_meals?: number // meals passed on by a plan renewed early (069)
   plans: { meals_total: number } | null
 }
 
@@ -290,7 +291,7 @@ export default function Home() {
           supabase.from('users').select('name').eq('id', user.id).single(),
           supabase
             .from('subscriptions')
-            .select('id, status, deliveries_remaining, plan_name, plans ( meals_total )')
+            .select('id, status, deliveries_remaining, plan_name, carried_meals, plans ( meals_total )')
             .eq('user_id', user.id)
             .in('status', ['active', 'paused'])
             .order('created_at', { ascending: false })
@@ -508,6 +509,10 @@ export default function Home() {
     )
   }
 
+  // The plan's meals plus any passed on by the plan it renewed early (069).
+  const mealsTotal = (subscription?.plans?.meals_total ?? 0) + (subscription?.carried_meals ?? 0)
+  const mealsEnjoyed = Math.max(0, mealsTotal - (subscription?.deliveries_remaining ?? 0))
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -655,16 +660,16 @@ export default function Home() {
             <MacroRing
               size={84}
               strokeWidth={9}
-              centerValue={String(Math.max(0, subscription.plans.meals_total - subscription.deliveries_remaining))}
-              centerLabel={`of ${subscription.plans.meals_total}`}
+              centerValue={String(mealsEnjoyed)}
+              centerLabel={`of ${mealsTotal}`}
               segments={[
-                { value: Math.max(0, subscription.plans.meals_total - subscription.deliveries_remaining), color: Colors.green700 },
+                { value: mealsEnjoyed, color: Colors.green700 },
                 { value: subscription.deliveries_remaining, color: Colors.border },
               ]}
             />
             <View style={{ flex: 1 }}>
               <Text style={styles.ringTitle}>
-                {Math.max(0, subscription.plans.meals_total - subscription.deliveries_remaining)} of {subscription.plans.meals_total} meals enjoyed
+                {mealsEnjoyed} of {mealsTotal} meals enjoyed
               </Text>
               <Text style={styles.ringSub}>{subscription.deliveries_remaining} left on your plan</Text>
             </View>

@@ -4,7 +4,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 // customer's current one — same settings ("repeat"), or with a different plan
 // size / meals per day / add-ons ("edit"). The app then pays for it through
 // cashfree-create-order like any first purchase; on payment the webhook
-// activates it and retire_previous_subscriptions() closes the finished plan.
+// activates it and retire_previous_subscriptions() closes the plan it renews —
+// a plan renewed before its meals ran out passes them on to the new one (069).
 //
 // Body: { from_subscription_id, plan_id?, meals_lunch?, meals_dinner?, addon_ids? }
 // Returns: { subscription_id, amount } (amount in paise, server-computed).
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
 
     const { data: old } = await supabase
       .from('subscriptions')
-      .select('id, user_id, status, plan_id, plan_name, menu_type, delivery_mode, meals_lunch, meals_dinner, batch_id_lunch, batch_id_dinner')
+      .select('id, user_id, status, plan_id, plan_name, menu_type, delivery_mode, meals_lunch, meals_dinner, batch_id_lunch, batch_id_dinner, deliveries_remaining, cod_due_paise')
       .eq('id', fromId)
       .eq('user_id', user.id)
       .maybeSingle()
@@ -43,12 +44,23 @@ Deno.serve(async (req) => {
     if (!['active', 'paused', 'expired'].includes(old.status)) {
       return json({ error: 'This plan can’t be renewed.' }, 400)
     }
+    // Meals still left: the renewal takes them over once paid — only from a
+    // running plan with nothing owed (retire_previous_subscriptions, 069).
+    // Refused here, before any payment, so nobody pays for a plan that can't start.
+    if (old.status !== 'expired' && (old.deliveries_remaining ?? 0) > 0) {
+      if (old.status === 'paused') {
+        return json({ error: 'Resume your plan to renew it early, or renew once its meals are used up.' }, 400)
+      }
+      if ((old.cod_due_paise ?? 0) > 0) {
+        return json({ error: 'Please pay the cash due on your current plan first, or renew once its meals are used up.' }, 400)
+      }
+    }
 
     // ── Settings for the new plan: the old ones, with any edits ──────────────
     const planId: string = body.plan_id ?? old.plan_id
     const { data: plan } = await supabase
       .from('plans')
-      .select('id, base_price, meals_total, is_active')
+      .select('id, name, base_price, meals_total, is_active')
       .eq('id', planId)
       .maybeSingle()
     if (!plan || !plan.is_active) return json({ error: 'That plan isn’t available.' }, 400)
@@ -82,7 +94,9 @@ Deno.serve(async (req) => {
       .insert({
         user_id: user.id,
         plan_id: plan.id,
-        plan_name: old.plan_name,
+        // Same plan: keep its name; a different size takes that plan's name
+        // (a trial renewed into the 30-meal plan isn't a "5-Meal Trial").
+        plan_name: (plan.id === old.plan_id ? old.plan_name : null) ?? plan.name,
         menu_type: 'M1', // one menu since 052
         status: 'pending',
         payment_method: 'online',

@@ -36,6 +36,7 @@ type SubData = {
   pause_from: string | null
   pause_until: string | null
   meal_price_paise: number | null // coupon price per meal, else null (066)
+  carried_meals: number // meals passed on by the plan this one renewed early (069)
   plans: { name: string; meals_total: number; days_per_week: number; base_price: number } | null
   subscription_addons: { addons: { price_per_meal: number } | null }[]
 }
@@ -81,7 +82,7 @@ export default function PlanSettingsScreen() {
     if (!user) return
     const { data } = await supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_name, deliveries_remaining, end_date, pause_from, pause_until, meal_price_paise, plans ( name, meals_total, days_per_week, base_price ), subscription_addons ( addons ( price_per_meal ) )')
+      .select('id, status, payment_method, plan_name, deliveries_remaining, end_date, pause_from, pause_until, meal_price_paise, carried_meals, plans ( name, meals_total, days_per_week, base_price ), subscription_addons ( addons ( price_per_meal ) )')
       .eq('user_id', user.id)
       .in('status', ['active', 'paused'])
       .order('created_at', { ascending: false })
@@ -122,12 +123,14 @@ export default function PlanSettingsScreen() {
   }
 
   const planName = sub.plan_name || sub.plans?.name || 'Your Plan'
-  const mealsTotal = sub.plans?.meals_total ?? 0
+  const planMeals = sub.plans?.meals_total ?? 0
+  // Meals passed on by a plan renewed early count towards this one (069).
+  const mealsTotal = planMeals + (sub.carried_meals ?? 0)
   const remaining = sub.deliveries_remaining
   const progress = mealsTotal > 0 ? Math.min(100, (remaining / mealsTotal) * 100) : 0
   const addonPerMeal = (sub.subscription_addons ?? []).reduce((s, a) => s + (a.addons?.price_per_meal ?? 0), 0)
   // A plan bought with a coupon costs its coupon meal price × meals (066).
-  const totalAmount = (sub.meal_price_paise ? sub.meal_price_paise * mealsTotal : (sub.plans?.base_price ?? 0)) + addonPerMeal * mealsTotal
+  const totalAmount = (sub.meal_price_paise ? sub.meal_price_paise * planMeals : (sub.plans?.base_price ?? 0)) + addonPerMeal * planMeals
 
   async function handleResume() {
     if (!sub) return
@@ -170,7 +173,7 @@ export default function PlanSettingsScreen() {
             <View style={s.planCardTop}>
               <Text style={s.planCardNameLight}>{planName}</Text>
               <View style={s.activeBadge}>
-                <Text style={s.activeBadgeText}>{sub.status === 'paused' ? 'Paused' : 'Active'}</Text>
+                <Text style={s.activeBadgeText}>{remaining <= 0 ? 'Finished' : sub.status === 'paused' ? 'Paused' : 'Active'}</Text>
               </View>
             </View>
             {sub.plans && (

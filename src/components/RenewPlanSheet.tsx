@@ -1,7 +1,10 @@
-// "Renew plan" sheet, shown when a plan's meals are used up. Four ways on:
-// repeat the same plan, edit it, build a new plan through onboarding, or
-// cancel. Repeat/edit are paid through Cashfree by the parent (My Plan owns the
-// payment callback); this sheet only collects the choice and shows progress.
+// "Renew plan" sheet, shown when a plan's meals run low or are used up. Four
+// ways on: repeat the same plan, edit it, build a new plan through onboarding,
+// or cancel. With meals still left only repeat/edit: those renew this plan, so
+// its meals left move to the new one when it's paid (069) — a plan from
+// onboarding can't take them over. Repeat/edit are paid through Cashfree by the
+// parent (My Plan owns the payment callback); this sheet only collects the
+// choice and shows progress.
 import { useEffect, useMemo, useState } from 'react'
 import { View, Text, Pressable, Modal, ScrollView, StyleSheet, ActivityIndicator } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -45,6 +48,7 @@ export default function RenewPlanSheet({
   visible,
   onClose,
   planName,
+  mealsLeft,
   current,
   plans,
   addons,
@@ -58,6 +62,7 @@ export default function RenewPlanSheet({
   visible: boolean
   onClose: () => void
   planName: string | null
+  mealsLeft: number
   current: RenewConfig
   plans: RenewPlanOption[]
   addons: RenewAddonOption[]
@@ -170,7 +175,9 @@ export default function RenewPlanSheet({
                 {step === 'menu' && (
                   <>
                     <Text style={st.lead}>
-                      All the meals on your {planName ?? 'plan'} are used up. How would you like to continue?
+                      {mealsLeft > 0
+                        ? `You have ${mealsLeft} meal${mealsLeft === 1 ? '' : 's'} left on your ${planName ?? 'plan'}. Renew now and ${mealsLeft === 1 ? 'it moves' : 'they move'} to your new plan, so your deliveries carry on without a gap.`
+                        : `All the meals on your ${planName ?? 'plan'} are used up. How would you like to continue?`}
                     </Text>
                     {[
                       {
@@ -181,8 +188,10 @@ export default function RenewPlanSheet({
                         onPress: () => setStep('repeat'),
                       },
                       { icon: SlidersHorizontal, title: 'Edit plan', sub: 'Change plan size, meals per day or add-ons', onPress: () => setStep('edit') },
-                      { icon: ClipboardList, title: 'Build a new plan', sub: 'Answer a few questions again for a fresh recommendation', onPress: onRedoOnboarding },
-                      { icon: XCircle, title: 'Cancel plan', sub: 'Stop your meals. Money in your wallet stays yours.', onPress: () => setStep('cancel'), danger: true },
+                      ...(mealsLeft > 0 ? [] : [
+                        { icon: ClipboardList, title: 'Build a new plan', sub: 'Answer a few questions again for a fresh recommendation', onPress: onRedoOnboarding },
+                        { icon: XCircle, title: 'Cancel plan', sub: 'Stop your meals. Money in your wallet stays yours.', onPress: () => setStep('cancel'), danger: true },
+                      ]),
                     ].map(({ icon: Icon, title, sub, onPress, danger }) => (
                       <Pressable key={title} style={({ pressed }) => [st.option, pressed && { opacity: 0.8 }]} onPress={onPress}>
                         <View style={[st.optionIcon, danger && { backgroundColor: Colors.dangerLight }]}>

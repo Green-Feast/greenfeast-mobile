@@ -35,6 +35,7 @@ export type CachedSubscription = {
   status: string
   deliveries_remaining: number
   plan_name: string | null
+  carried_meals?: number
   plans: { meals_total: number } | null
 }
 

@@ -52,6 +52,7 @@ type SubData = {
   pause_until: string | null
   cod_due_paise: number | null
   meal_price_paise: number | null // coupon price per meal, else null (066)
+  carried_meals: number // meals passed on by the plan this one renewed early (069)
   plans: { name: string; meals_total: number; days_per_week: number; base_price: number } | null
 }
 
@@ -160,6 +161,10 @@ function statusLabel(status: string) {
   return 'Scheduled'
 }
 
+// Renew shows up at this many meals left — when the renewal reminder goes out
+// (LOW_DELIVERIES_THRESHOLD in the admin's renewal-reminders cron).
+const RENEW_FROM_MEALS_LEFT = 2
+
 // Calendar strip covers today through the end of this month, extending into
 // next month when fewer than 14 days of the current month remain (so the
 // visible range always covers at least the order-instantiation horizon).
@@ -234,7 +239,7 @@ export default function SubscriptionScreen() {
 
     const planQuery = () => supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, meal_price_paise, plans ( name, meals_total, days_per_week, base_price )')
+      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, meal_price_paise, carried_meals, plans ( name, meals_total, days_per_week, base_price )')
       .eq('user_id', user.id)
       .in('status', ['active', 'paused'])
       .order('created_at', { ascending: false })
@@ -766,12 +771,16 @@ export default function SubscriptionScreen() {
     )
   }
 
-  const mealsTotal = sub.plans?.meals_total ?? 0
+  const mealsTotal = (sub.plans?.meals_total ?? 0) + (sub.carried_meals ?? 0)
   const remaining = sub.deliveries_remaining
   const progress = mealsTotal > 0 ? Math.min(100, (remaining / mealsTotal) * 100) : 0
   // Cash on delivery: the first day was paid online at signup; the rest is
   // cash for the delivery partner, credited to the wallet when it's recorded.
   const codDue = sub.payment_method === 'cod' ? (sub.cod_due_paise ?? 0) : 0
+  // Renew is offered once the meals run low (the meals left move to the new
+  // plan), or once they're used up — not early for a paused plan or one with
+  // cash still due (renew-subscription refuses those).
+  const renewEarly = remaining > 0 && remaining <= RENEW_FROM_MEALS_LEFT && sub.status === 'active' && codDue === 0
 
   // ── Active / paused home view ─────────────────────────────────────────────
 
@@ -1313,14 +1322,20 @@ export default function SubscriptionScreen() {
           </View>
         )}
 
-        {/* PLAN FINISHED — renew (repeat / edit / new plan) or cancel */}
-        {remaining === 0 && (
+        {/* RENEW — meals running low or used up: repeat / edit (and, once used up, new plan or cancel) */}
+        {(remaining === 0 || renewEarly) && (
           <View style={s.renewalAlert}>
             <View style={s.renewalAlertContent}>
               <AlertCircle size={20} color={Colors.accent} style={{ marginRight: 10 }} />
               <View style={{ flex: 1 }}>
-                <Text style={s.renewalAlertTitle}>Your plan's meals are used up</Text>
-                <Text style={s.renewalAlertText}>Renew to keep your meals coming.</Text>
+                <Text style={s.renewalAlertTitle}>
+                  {remaining === 0 ? "Your plan's meals are used up" : `Only ${remaining} meal${remaining === 1 ? '' : 's'} left`}
+                </Text>
+                <Text style={s.renewalAlertText}>
+                  {remaining === 0
+                    ? 'Renew to keep your meals coming.'
+                    : 'Renew now so your meals keep coming without a gap. The meals you have left move to your new plan.'}
+                </Text>
               </View>
             </View>
             <View style={s.renewalAlertBtns}>
@@ -1340,6 +1355,7 @@ export default function SubscriptionScreen() {
         visible={showRenew}
         onClose={() => { if (renewState === 'done') setRenewState('idle'); setShowRenew(false) }}
         planName={sub.plan_name}
+        mealsLeft={Math.max(remaining, 0)}
         current={{
           plan_id: sub.plan_id ?? 'plan15',
           meals_lunch: sub.meals_lunch ?? 1,
