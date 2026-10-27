@@ -15,7 +15,7 @@ import {
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight, History, MapPin, RotateCcw, Banknote, CalendarDays, Phone, Bike } from 'lucide-react-native'
+import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight, History, MapPin, RotateCcw, Banknote, CalendarDays, Phone, Bike, Clock } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
 import { CFSession, CFEnvironment } from 'cashfree-pg-api-contract'
@@ -911,6 +911,14 @@ export default function SubscriptionScreen() {
   const heroEyebrow = heroIsToday
     ? `Today's ${selectedSlot}`
     : `${dowShort(selectedDay)} ${dayNum(selectedDay)}'s ${selectedSlot}`
+  // When this meal can still be changed: the slot's same-day cutoff.
+  const cutoffClock = selectedSlot === 'lunch' ? '8 AM' : '1 PM'
+  const cutoffDay = heroIsToday ? 'today' : selectedDay === addDaysISO(todayStr, 1) ? 'tomorrow' : `on ${dowShort(selectedDay)} ${dayNum(selectedDay)}`
+  const heroDeadline = !heroLocked
+    ? `Skip or customize until ${cutoffClock} ${cutoffDay}`
+    : heroIsToday && !heroDone
+      ? `Changes closed at ${cutoffClock} today`
+      : null
 
   return (
     <View style={s.container}>
@@ -1100,6 +1108,12 @@ export default function SubscriptionScreen() {
                 <Text style={s.heroCustomizeText}>{heroLocked ? 'View details →' : 'Customize →'}</Text>
               </Pressable>
             </View>
+            {heroDeadline && (
+              <View style={s.heroDeadline}>
+                <Clock size={13} color={Colors.textMuted} strokeWidth={2} />
+                <Text style={s.heroDeadlineText}>{heroDeadline}</Text>
+              </View>
+            )}
           </View>
         ) : heroOrders.length > 0 ? (
           // Extras-only slot: dishes were added here but there's no base
@@ -2155,6 +2169,8 @@ const s = StyleSheet.create({
 
   // Hero action buttons
   heroCardBtns: { flexDirection: 'row', gap: 10, paddingHorizontal: 18, paddingBottom: 18 },
+  heroDeadline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginTop: -6, paddingBottom: 16, paddingHorizontal: 18 },
+  heroDeadlineText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
   heroSkipBtn: {
     flex: 1, height: 48, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: 'transparent',
     borderRadius: 999, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
