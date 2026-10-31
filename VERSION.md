@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.6 — 2026-11-01
+- Build 10, OTA 6. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production` (the local
+  `.env` carries dev-only `EXPO_PUBLIC_*` values that must not ship).
+- **Sunday card on My Plan**: "Sunday's our day off for subscriptions — you
+  can order via Zomato or Swiggy. For any specific requirement, just ask."
+  with Swiggy, Zomato and Contact us (WhatsApp) buttons. No emojis, no
+  "kitchen is resting" line.
+- JS-only. Also on main since 1.10.5 but not app code: app.json
+  `ITSAppUsesNonExemptEncryption` (takes effect on the next iOS build) and
+  server migrations 070–074 (already live for every app version).
+
 ### 1.10.5 — 2026-10-28
 - Build 10, OTA 5. Published per platform (`--platform ios`, then
   `--platform android`). The 1.10 build is live on the App Store (store
