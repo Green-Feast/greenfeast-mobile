@@ -1,31 +1,54 @@
-// My Plan on a Sunday: our day off, said nicely, with a way to reach us for
-// anything special (only the office can put a meal on a Sunday).
+// My Plan on a Sunday: our day off for subscriptions. Points to Swiggy/Zomato
+// for a meal anyway, and to WhatsApp for anything specific (only the office
+// can put a meal on a Sunday).
 import { View, Text, Pressable, StyleSheet, Linking } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { MessageCircle } from 'lucide-react-native'
-import { supportWhatsAppUrl } from '@/constants/links'
+import { MessageCircle, ExternalLink } from 'lucide-react-native'
+import { supportWhatsAppUrl, SWIGGY_URL, ZOMATO_URL, isConfigured } from '@/constants/links'
 import { Colors, Fonts } from '@/constants/colors'
+
+function open(url: string) {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+  Linking.openURL(url).catch(() => {})
+}
 
 export default function DayOffCard() {
   return (
     <View style={st.card}>
-      <Text style={st.emoji}>🌿☕</Text>
-      <Text style={st.title}>Sunday is our day off</Text>
-      <Text style={st.script}>The kitchen is resting up for Monday.</Text>
+      <Text style={st.title}>Sunday&apos;s our day off for subscriptions</Text>
       <Text style={st.body}>
-        No meals go out on Sundays, so there's nothing to add or change today. Need something special? Just ask.
+        You can order via Zomato or Swiggy. For any specific requirement, just ask.
       </Text>
-      <Pressable
-        style={({ pressed }) => [st.pill, pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] }]}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
-          Linking.openURL(supportWhatsAppUrl('My Plan > Sunday')).catch(() => {})
-        }}
-        accessibilityRole="button"
-      >
-        <MessageCircle size={16} color="#fff" />
-        <Text style={st.pillText}>Contact us</Text>
-      </Pressable>
+      <View style={st.row}>
+        {isConfigured(SWIGGY_URL) && (
+          <Pressable
+            style={({ pressed }) => [st.pill, { backgroundColor: '#FC8019' }, pressed && st.pressed]}
+            onPress={() => open(SWIGGY_URL)}
+            accessibilityRole="link"
+          >
+            <ExternalLink size={15} color="#fff" />
+            <Text style={st.pillText}>Swiggy</Text>
+          </Pressable>
+        )}
+        {isConfigured(ZOMATO_URL) && (
+          <Pressable
+            style={({ pressed }) => [st.pill, { backgroundColor: '#E23744' }, pressed && st.pressed]}
+            onPress={() => open(ZOMATO_URL)}
+            accessibilityRole="link"
+          >
+            <ExternalLink size={15} color="#fff" />
+            <Text style={st.pillText}>Zomato</Text>
+          </Pressable>
+        )}
+        <Pressable
+          style={({ pressed }) => [st.pill, { backgroundColor: Colors.green700 }, pressed && st.pressed]}
+          onPress={() => open(supportWhatsAppUrl('My Plan > Sunday'))}
+          accessibilityRole="button"
+        >
+          <MessageCircle size={15} color="#fff" />
+          <Text style={st.pillText}>Contact us</Text>
+        </Pressable>
+      </View>
     </View>
   )
 }
@@ -36,13 +59,13 @@ const st = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, paddingVertical: 28, paddingHorizontal: 24,
     alignItems: 'center',
   },
-  emoji: { fontSize: 34, marginBottom: 8 },
   title: { fontFamily: Fonts.heading, fontSize: 22, color: Colors.ink900, textAlign: 'center' },
-  script: { fontFamily: Fonts.script, fontSize: 20, color: Colors.green700, marginTop: 2, textAlign: 'center' },
   body: { fontFamily: Fonts.body, fontSize: 14, color: Colors.textMuted, lineHeight: 20, textAlign: 'center', marginTop: 10 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 20 },
   pill: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18,
-    backgroundColor: Colors.green700, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    borderRadius: 999, paddingHorizontal: 18, paddingVertical: 11,
   },
-  pillText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
+  pillText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: '#fff' },
 })
