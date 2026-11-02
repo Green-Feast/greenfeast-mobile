@@ -52,6 +52,16 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.8 — 2026-11-02
+- Build 10, OTA 8. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **Plan Settings shows a pause set for later**: "Pausing 6 Nov – 16 Nov", a
+  note that meals carry on until then, and a Cancel pause button in place of
+  Pause. The plan stays Active until its first paused day (migration 076).
+- JS-only. Also on main but not app code, already live for every app version:
+  pauses starting and ending by themselves, the restart reminder (076), and the
+  plan price rounding credit (077).
+
 ### 1.10.7 — 2026-11-02
 - Build 10, OTA 7. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.
