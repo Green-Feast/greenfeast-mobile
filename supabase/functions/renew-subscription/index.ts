@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
 
     const { data: old } = await supabase
       .from('subscriptions')
-      .select('id, user_id, status, plan_id, plan_name, menu_type, delivery_mode, meals_lunch, meals_dinner, batch_id_lunch, batch_id_dinner, deliveries_remaining, cod_due_paise')
+      .select('id, user_id, status, plan_id, plan_name, menu_type, delivery_mode, meals_lunch, meals_dinner, batch_id_lunch, batch_id_dinner, deliveries_remaining, cod_due_paise, pause_from')
       .eq('id', fromId)
       .eq('user_id', user.id)
       .maybeSingle()
@@ -48,7 +48,8 @@ Deno.serve(async (req) => {
     // running plan with nothing owed (retire_previous_subscriptions, 069).
     // Refused here, before any payment, so nobody pays for a plan that can't start.
     if (old.status !== 'expired' && (old.deliveries_remaining ?? 0) > 0) {
-      if (old.status === 'paused') {
+      // A pause set for later counts too: the new plan wouldn't carry its dates.
+      if (old.status === 'paused' || old.pause_from) {
         return json({ error: 'Resume your plan to renew it early, or renew once its meals are used up.' }, 400)
       }
       if ((old.cod_due_paise ?? 0) > 0) {

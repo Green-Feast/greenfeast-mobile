@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
 
     const { data: sub } = await supabase
       .from('subscriptions')
-      .select('id, status, user_id, deliveries_remaining')
+      .select('id, status, user_id, deliveries_remaining, pause_from')
       .eq('id', subscription_id)
       .eq('user_id', user.id)
       .single()
@@ -87,10 +87,31 @@ Deno.serve(async (req) => {
       if (!pause_from || !pause_until) return json({ error: 'pause_from and pause_until required' }, 400)
       if (pause_from < today()) return json({ error: 'Pause cannot start in the past' }, 400)
 
+      // A pause for later leaves the plan active until its first day, when
+      // sync_pauses (076) starts it; the dates alone mark it until then.
       await supabase
         .from('subscriptions')
-        .update({ status: 'paused', pause_from, pause_until })
+        .update({ status: pause_from <= today() ? 'paused' : 'active', pause_from, pause_until })
         .eq('id', subscription_id)
+
+      // New dates replace a pause set for later (older app versions can do
+      // this): the old dates' meals come back unless the new dates cover them.
+      if (sub.pause_from) {
+        const { data: earlier } = await supabase
+          .from('orders')
+          .select('id, delivery_date, meal_slot')
+          .eq('subscription_id', subscription_id)
+          .gte('delivery_date', today())
+          .eq('status', 'cancelled')
+          .eq('skip_reason', 'pause')
+        const toRevive = await withoutLockedToday(supabase, (earlier ?? []) as OrderRef[])
+        if (toRevive.length > 0) {
+          await supabase
+            .from('orders')
+            .update({ status: 'scheduled', skip_reason: null })
+            .in('id', toRevive)
+        }
+      }
 
       const { data: inRange } = await supabase
         .from('orders')
@@ -115,7 +136,8 @@ Deno.serve(async (req) => {
     // ── resume ───────────────────────────────────────────────────────────────
 
     if (action === 'resume') {
-      if (sub.status !== 'paused') return json({ error: 'Subscription is not paused' }, 400)
+      // Also cancels a pause set for later: same dates cleared, same meals back.
+      if (sub.status !== 'paused' && !sub.pause_from) return json({ error: 'Subscription is not paused' }, 400)
 
       await supabase
         .from('subscriptions')

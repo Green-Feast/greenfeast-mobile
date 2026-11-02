@@ -148,9 +148,14 @@ export default function PlanSettingsScreen() {
     { label: 'Address book',          Icon: MapPin,          onPress: () => router.push('/(app)/addresses') },
   ]
 
+  // A pause set for later: the plan stays Active until its first day (076).
+  const pauseSetForLater = sub.status !== 'paused' && !!sub.pause_from
+
   const actions = sub.status === 'paused'
     ? [{ label: 'Resume subscription', Icon: Play, onPress: handleResume }, ...sharedActions]
-    : [{ label: 'Pause subscription',  Icon: Pause, onPress: () => setPauseOpen(true) }, ...sharedActions]
+    : pauseSetForLater
+      ? [{ label: 'Cancel pause', Icon: Play, onPress: handleResume }, ...sharedActions]
+      : [{ label: 'Pause subscription',  Icon: Pause, onPress: () => setPauseOpen(true) }, ...sharedActions]
 
   return (
     <View style={s.container}>
@@ -194,6 +199,15 @@ export default function PlanSettingsScreen() {
                   <Text style={s.metaValue}>{fmtDate(sub.pause_from)} – {fmtDate(sub.pause_until)}</Text>
                 </View>
                 <Text style={s.pauseNote}>You can resume anytime before then — see below.</Text>
+              </>
+            )}
+            {pauseSetForLater && (
+              <>
+                <View style={s.metaRow}>
+                  <Text style={s.metaLabel}>Pausing</Text>
+                  <Text style={s.metaValue}>{fmtDate(sub.pause_from)} – {fmtDate(sub.pause_until)}</Text>
+                </View>
+                <Text style={s.pauseNote}>Your meals carry on until then. You can cancel it below.</Text>
               </>
             )}
             <View>

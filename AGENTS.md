@@ -205,10 +205,18 @@ reflect the latest commits, that's expected, not a bug to fix.
   `renewed_from`), redo onboarding, or cancel. Payment goes through `cashfree-create-order` like a
   first purchase; on activation `retire_previous_subscriptions()` expires the finished plan,
   cancels its leftover orders and passes on its delivery batches.
+- **Pauses start and end by themselves (076, 2026-11-02).** A plan stays `active` until its first
+  paused day (`pause_from` set on an active plan = a pause for later; `resume` cancels it).
+  `sync_pauses()` runs at 00:05 IST, before the 1 AM order run: it starts the ones due and ends the
+  finished ones the way Resume does. `remind_pause_ending()` tells the customer at 6 PM on the last
+  day (template `pause_ending`).
+- **Rounding on the plan price (077, 2026-11-02).** 30 × ₹249.97 is 10 paise over the ₹7,499 plan,
+  so when a plan goes pending → active the trigger credits the difference (`plan_rounding_credit`,
+  reference `rounding_<subscription>`, once per plan); otherwise the last meal is skipped at cutoff.
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
-  cash due — `renew-subscription` refuses paused / cash-due plans with meals left before any
-  payment. On activation the plan being renewed (`renewed_from`) hands over everything still to
+  cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for
+  later, with meals left before any payment. On activation the plan being renewed (`renewed_from`) hands over everything still to
   come: its undelivered orders move to the new plan at their own price, and its meals left go
   into `subscriptions.carried_meals`, which the webhook (and the admin's activatePendingPlan)
   add to the new plan's meals. Totals shown to the customer are meals_total + carried_meals.
