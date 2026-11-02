@@ -52,6 +52,14 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.7 — 2026-11-02
+- Build 10, OTA 7. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **Cutoffs are now 9 AM for lunch and 2 PM for dinner** (were 8 AM / 1 PM):
+  meal locks, My Plan's deadline line, Add to day, FAQ and Terms. Server side
+  already live for every app version (migration 075).
+- JS-only. The next-meal message when a plan starts is also server side (075).
+
 ### 1.10.6 — 2026-11-01
 - Build 10, OTA 6. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production` (the local
