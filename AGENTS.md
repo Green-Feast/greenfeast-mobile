@@ -152,7 +152,7 @@ reflect the latest commits, that's expected, not a bug to fix.
   partner collects is a `cash_reports` row until the office records it. Customers see their
   rider via `my_riders(date)`.
 - **Scheduled jobs live in the database (pg_cron, UTC), not only on Vercel.** Migration 045:
-  `enforce_slot_balance('lunch'|'dinner')` at 8 AM / 1 PM IST skips orders the wallet can't
+  `enforce_slot_balance('lunch'|'dinner')` at 9 AM / 2 PM IST skips orders the wallet can't
   cover before the kitchen cooks them; `warn_low_balance()` at 8 PM IST warns about tomorrow.
   Both notify through `notify_user()` (in-app row + Expo push via pg_net). List jobs with
   `select * from cron.job`. Order creation is still the Vercel cron (1 AM IST).
