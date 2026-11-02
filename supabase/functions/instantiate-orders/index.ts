@@ -8,8 +8,8 @@ function toISO(date: Date): string {
 }
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
-// Same cutoffs as is_slot_locked (migration 031): 8 AM lunch, 1 PM dinner, IST.
-const SLOT_CUTOFF_HOUR: Record<'lunch' | 'dinner', number> = { lunch: 8, dinner: 13 }
+// Same cutoffs as is_slot_locked (migrations 031, 075): 9 AM lunch, 2 PM dinner, IST.
+const SLOT_CUTOFF_HOUR: Record<'lunch' | 'dinner', number> = { lunch: 9, dinner: 14 }
 
 // The 14-day window starts from today's IST date. It used the UTC date, which
 // at the nightly 1 AM IST run is still yesterday — so the window started a day

@@ -134,8 +134,8 @@ function seedFromDate(dateStr: string): number {
 // reference order for a one-tap "add this dish to my next delivery" flow,
 // exactly like subscription.tsx's own addRefOrder derivation. Checked per
 // (date, slot), not per date — a date can have one slot already locked (e.g.
-// today's lunch, past 8 AM) while the other is still open (today's dinner,
-// before 1 PM), and picking the wrong one would hand back an add target the
+// today's lunch, past 9 AM) while the other is still open (today's dinner,
+// before 2 PM), and picking the wrong one would hand back an add target the
 // server immediately rejects.
 function findNextAddTarget(orders: UpcomingOrder[]): AddTarget | null {
   const byDate = new Map<string, UpcomingOrder[]>()

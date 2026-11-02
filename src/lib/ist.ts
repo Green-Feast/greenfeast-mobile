@@ -28,12 +28,12 @@ export function endOfMonthISO(iso: string): string {
   return d.toISOString().split('T')[0]
 }
 
-// Per-slot, same-day cutoffs: lunch locks 8 AM, dinner locks 1 PM, both IST,
+// Per-slot, same-day cutoffs: lunch locks 9 AM, dinner locks 2 PM, both IST,
 // both on the delivery date itself (not the night before — the kitchen needs
 // a hard stop before it starts on each slot, not a day's advance notice).
 export const SLOT_CUTOFF_HOUR: Record<'lunch' | 'dinner', number> = {
-  lunch: 8,
-  dinner: 13,
+  lunch: 9,
+  dinner: 14,
 }
 
 // A slot is locked (can't be swapped/added-to/skipped) if its delivery date is

@@ -808,7 +808,7 @@ export default function SubscriptionScreen() {
   const heroProtein = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.protein ?? 0) * (o.quantity ?? 1)), 0)
   const heroCarbs = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.carbs ?? 0) * (o.quantity ?? 1)), 0)
   const heroFat = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.fat ?? 0) * (o.quantity ?? 1)), 0)
-  // Locked once the slot's cutoff passes (8 AM lunch / 1 PM dinner, same day),
+  // Locked once the slot's cutoff passes (9 AM lunch / 2 PM dinner, same day),
   // or once the kitchen has already started on it — unlocking "today" under
   // the new same-day cutoff would otherwise expose Skip/Swap/Remove on a meal
   // that's already `preparing`.
@@ -921,7 +921,7 @@ export default function SubscriptionScreen() {
     ? `Today's ${selectedSlot}`
     : `${dowShort(selectedDay)} ${dayNum(selectedDay)}'s ${selectedSlot}`
   // When this meal can still be changed: the slot's same-day cutoff.
-  const cutoffClock = selectedSlot === 'lunch' ? '8 AM' : '1 PM'
+  const cutoffClock = selectedSlot === 'lunch' ? '9 AM' : '2 PM'
   const cutoffDay = heroIsToday ? 'today' : selectedDay === addDaysISO(todayStr, 1) ? 'tomorrow' : `on ${dowShort(selectedDay)} ${dayNum(selectedDay)}`
   const heroDeadline = !heroLocked
     ? `Skip or customize until ${cutoffClock} ${cutoffDay}`
@@ -1653,7 +1653,7 @@ export default function SubscriptionScreen() {
                         🔒 Changes for this day are locked
                       </Text>
                       <Text style={s.dayModalLockSub}>
-                        {selectedSlot === 'lunch' ? 'Lunch closes at 8 AM' : 'Dinner closes at 1 PM'} on delivery day
+                        {selectedSlot === 'lunch' ? 'Lunch closes at 9 AM' : 'Dinner closes at 2 PM'} on delivery day
                       </Text>
                     </View>
                   ) : (

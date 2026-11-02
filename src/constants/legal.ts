@@ -15,7 +15,7 @@ GreenFeast delivers freshly prepared meals to subscribers in Jaipur on a recurri
 You're responsible for the accuracy of the information you provide (name, phone number, delivery address, dietary preferences) and for keeping your account credentials secure. You must be able to enter into a binding contract to use the Service.
 
 3. Subscriptions, Billing & Cancellation
-Subscription plans are billed as described at checkout. You can pause, skip individual deliveries, change your plan, or cancel from the My Plan section of the app, subject to the cutoff times shown there (8 AM for lunch and 1 PM for dinner, both on the delivery day). Refunds for undelivered meals are credited to your in-app wallet unless otherwise stated.
+Subscription plans are billed as described at checkout. You can pause, skip individual deliveries, change your plan, or cancel from the My Plan section of the app, subject to the cutoff times shown there (9 AM for lunch and 2 PM for dinner, both on the delivery day). Refunds for undelivered meals are credited to your in-app wallet unless otherwise stated.
 
 4. Delivery
 We aim to deliver within the windows shown in the app. Delays can occur due to weather, traffic, or circumstances outside our control. Please ensure someone is available to receive deliveries, or provide accurate address/landmark details.
@@ -88,7 +88,7 @@ Approved refunds are credited to your GreenFeast wallet, not to your original pa
 - Change of mind, or a meal you simply did not enjoy.
 - Delivery inside the window shown in the app, even if it felt late.
 - Nobody available to receive the order, an unreachable phone number, or an incorrect address or landmark.
-- Deliveries you skipped, paused or cancelled after the cutoff (8 AM for lunch, 1 PM for dinner, both on the delivery day).
+- Deliveries you skipped, paused or cancelled after the cutoff (9 AM for lunch, 2 PM for dinner, both on the delivery day).
 - Allergens or dietary restrictions that were not recorded in your profile.
 - Normal variation in portion size, colour or appearance.
 

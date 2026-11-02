@@ -101,7 +101,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
       // Default to the first day with an order, at least one open slot, and
       // this meal actually available — same-day cutoffs mean a day can have
       // one slot locked and the other still open (e.g. today's lunch past
-      // 8 AM but dinner still open until 1 PM), and availability is on top
+      // 9 AM but dinner still open until 2 PM), and availability is on top
       // of that: no point landing on a day where this dish can't be added.
       const firstOpen = list.find(
         (d) => d.refOrderId && !isDayFullyLocked(d.date) && isMealAvailable({ unavailableMeals }, d.date, meal.id)
@@ -258,7 +258,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
               </View>
 
               <Text style={styles.hint}>
-                Billed on delivery. Removable from My Plan until {slot === 'lunch' ? '8 AM' : '1 PM'} on delivery day.
+                Billed on delivery. Removable from My Plan until {slot === 'lunch' ? '9 AM' : '2 PM'} on delivery day.
               </Text>
 
               {selectedMealUnavailable ? (

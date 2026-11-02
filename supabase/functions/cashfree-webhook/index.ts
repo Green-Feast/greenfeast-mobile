@@ -255,6 +255,10 @@ Deno.serve(async (req) => {
           console.error('cashfree-webhook: plan wallet credit failed:', fundErr.message)
           return new Response(JSON.stringify({ error: 'credit failed' }), { status: 500 })
         }
+
+        // Tell them when their next meal is (once per plan, 075). Never fails the payment.
+        const { error: nextErr } = await supabase.rpc('notify_next_meal', { p_sub: paymentRow.subscription_id })
+        if (nextErr) console.error('cashfree-webhook: notify_next_meal failed:', nextErr.message)
       }
     }
 
