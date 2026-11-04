@@ -107,7 +107,15 @@ export default function PaymentScreen() {
   // it and charges its own price when the payment starts.
   const [coupon, setCoupon] = useState<CouponQuote | null>(null)
   const regularTotal = planAmount + addonTotal
-  const grandTotal = coupon ? coupon.total : regularTotal
+  const listTotal = coupon ? coupon.total : regularTotal
+  // Extra money in the account's wallet comes off the price (078). The server
+  // recomputes it when charging, with the same ₹1 minimum.
+  const [walletExtra, setWalletExtra] = useState(0)
+  useEffect(() => {
+    supabase.rpc('my_renewal_credit').then(({ data }) => setWalletExtra(data ?? 0))
+  }, [])
+  const walletOff = Math.min(walletExtra, Math.max(listTotal - 100, 0))
+  const grandTotal = listTotal - walletOff
   const mealPrice = coupon ? coupon.mealPrice : Math.round(planAmount / planMeals)
   const cod = codSplit(grandTotal, mealPrice + addonPerMeal, store.mealsLunch + store.mealsDinner)
   // What the server actually charged / left for cash (set when the order is made).
@@ -399,8 +407,11 @@ export default function PaymentScreen() {
           <Text style={styles.recapPlan}>{store.planName || store.planId}</Text>
           <View style={styles.recapAmountRow}>
             <Text style={styles.recapAmount}>{fmtRupees(grandTotal)}</Text>
-            {coupon && <Text style={styles.recapStrike}>{fmtRupees(regularTotal)}</Text>}
+            {(coupon || walletOff > 0) && <Text style={styles.recapStrike}>{fmtRupees(regularTotal)}</Text>}
           </View>
+          {walletOff > 0 && (
+            <Text style={styles.recapDetail}>{fmtRupees(walletOff)} extra in your wallet comes off this price.</Text>
+          )}
           <View style={styles.recapRow}>
             <Text style={styles.recapDetail}>{store.selectedDays.length} days/week</Text>
             <Text style={styles.recapDot}>·</Text>

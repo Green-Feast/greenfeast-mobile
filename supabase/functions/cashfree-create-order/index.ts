@@ -135,6 +135,23 @@ Deno.serve(async (req) => {
       mealPrice = quote.meal_price_paise
     }
 
+    // The wallet belongs to the account: extra money in it comes off any plan
+    // being bought (078). It stays in the wallet, so paid + extra = the plan's
+    // price. Cashfree needs at least ₹1 to make an order.
+    let wallet_credit_paise = 0
+    if ((sub as any).status === 'pending') {
+      const { data: extra, error: extraErr } = await supabase.rpc('renewal_credit', { p_user: user.id })
+      if (extraErr) {
+        console.error('cashfree-create-order: renewal_credit failed:', extraErr.message)
+        return new Response(
+          JSON.stringify({ error: 'Could not start the payment. Please try again.' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      wallet_credit_paise = Math.min(extra ?? 0, Math.max(planTotal - 100, 0))
+      planTotal -= wallet_credit_paise
+    }
+
     let amount_paise = planTotal
     let cash_paise = 0
     if (cod) {
@@ -156,7 +173,9 @@ Deno.serve(async (req) => {
       amount_paise = split.upfront
       cash_paise = split.cash
     }
-    if (clientAmount != null && clientAmount !== amount_paise) {
+    // With wallet money off, the app's figure may be for the full price; the
+    // cash-on-delivery split can land either side of it, so it's not comparable.
+    if (wallet_credit_paise === 0 && clientAmount != null && clientAmount !== amount_paise) {
       console.warn('cashfree-create-order: app showed', clientAmount, 'but this charge is', amount_paise, subscription_id)
       // Never charge more than the app showed: an old app version that doesn't
       // know a plan's price (e.g. the 60-meal plan, 067) shows a wrong amount.
@@ -236,6 +255,7 @@ Deno.serve(async (req) => {
       coupon_id: coupon?.id ?? null,
       meal_price_paise: coupon?.meal_price_paise ?? null,
       discount_paise: coupon?.discount_paise ?? null,
+      wallet_credit_paise,
     })
     if (payErr) {
       console.error('cashfree-create-order: payments insert failed:', payErr.message)
@@ -254,6 +274,7 @@ Deno.serve(async (req) => {
         cash_paise,
         coupon_code: coupon?.code ?? null,
         discount_paise: coupon?.discount_paise ?? 0,
+        wallet_credit_paise,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

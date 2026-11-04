@@ -13,6 +13,7 @@ import {
   Minus, Plus, Check, CheckCircle2, AlertCircle,
 } from 'lucide-react-native'
 import { Colors, Fonts } from '@/constants/colors'
+import { supabase } from '@/lib/supabase'
 import CouponField from '@/components/CouponField'
 import { couponsAllowed, type CouponQuote } from '@/lib/coupons'
 
@@ -79,6 +80,9 @@ export default function RenewPlanSheet({
   const [draft, setDraft] = useState<RenewConfig>(current)
   const [cancelling, setCancelling] = useState(false)
   const [coupon, setCoupon] = useState<CouponQuote | null>(null)
+  // Extra wallet money, which comes off the price (078). The server recomputes
+  // it when charging; this is only what the sheet shows.
+  const [walletExtra, setWalletExtra] = useState(0)
 
   // Fresh start every time the sheet opens.
   useEffect(() => {
@@ -87,8 +91,13 @@ export default function RenewPlanSheet({
       setDraft(current)
       setCancelling(false)
       setCoupon(null)
+      setWalletExtra(0)
+      supabase.rpc('my_renewal_credit').then(({ data }) => setWalletExtra(data ?? 0))
     }
   }, [visible]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Same cap as cashfree-create-order: at least ₹1 is always charged.
+  const usedExtra = (total: number) => Math.min(walletExtra, Math.max(total - 100, 0))
 
   // A coupon belongs to the step it was applied on (repeat vs edit).
   useEffect(() => { setCoupon(null) }, [step])
@@ -215,8 +224,8 @@ export default function RenewPlanSheet({
                       <Text style={st.cardLine}>{currentAddonNames ? `Add-ons: ${currentAddonNames}` : 'No add-ons'}</Text>
                       <Text style={st.cardNote}>Delivery days, menu and address stay the same.</Text>
                     </View>
-                    {walletBalance !== null && walletBalance > 0 && (
-                      <Text style={st.walletNote}>The {rupees(walletBalance)} already in your wallet stays and is used first.</Text>
+                    {currentPrice !== null && usedExtra(coupon ? coupon.total : currentPrice) > 0 && (
+                      <Text style={st.walletNote}>{rupees(usedExtra(coupon ? coupon.total : currentPrice))} extra in your wallet comes off this price.</Text>
                     )}
                     {currentPrice !== null && couponsAllowed(current.plan_id) && (
                       <CouponField planId={current.plan_id} addonIds={current.addon_ids} applied={coupon} onChange={setCoupon} />
@@ -227,7 +236,7 @@ export default function RenewPlanSheet({
                       onPress={() => onRenew(current, coupon?.code)}
                     >
                       <Text style={st.primaryBtnText}>
-                        {currentPrice !== null ? `Pay ${rupees(coupon ? coupon.total : currentPrice)}` : 'Plan unavailable'}
+                        {currentPrice !== null ? `Pay ${rupees((coupon ? coupon.total : currentPrice) - usedExtra(coupon ? coupon.total : currentPrice))}` : 'Plan unavailable'}
                       </Text>
                     </Pressable>
                   </>
@@ -288,13 +297,16 @@ export default function RenewPlanSheet({
                         <CouponField planId={draft.plan_id} addonIds={draft.addon_ids} applied={coupon} onChange={setCoupon} />
                       </View>
                     )}
+                    {draftPrice !== null && usedExtra(coupon && couponsAllowed(draft.plan_id) ? coupon.total : draftPrice) > 0 && (
+                      <Text style={st.walletNote}>{rupees(usedExtra(coupon && couponsAllowed(draft.plan_id) ? coupon.total : draftPrice))} extra in your wallet comes off this price.</Text>
+                    )}
                     <Pressable
                       style={[st.primaryBtn, !draftValid && st.btnDisabled]}
                       disabled={!draftValid}
                       onPress={() => onRenew(draft, coupon && couponsAllowed(draft.plan_id) ? coupon.code : undefined)}
                     >
                       <Text style={st.primaryBtnText}>
-                        {draftPrice !== null ? `Pay ${rupees(coupon && couponsAllowed(draft.plan_id) ? coupon.total : draftPrice)}` : 'Choose a plan'}
+                        {draftPrice !== null ? `Pay ${rupees((coupon && couponsAllowed(draft.plan_id) ? coupon.total : draftPrice) - usedExtra(coupon && couponsAllowed(draft.plan_id) ? coupon.total : draftPrice))}` : 'Choose a plan'}
                       </Text>
                     </Pressable>
                   </>

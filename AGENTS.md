@@ -213,6 +213,11 @@ reflect the latest commits, that's expected, not a bug to fix.
 - **Rounding on the plan price (077, 2026-11-02).** 30 × ₹249.97 is 10 paise over the ₹7,499 plan,
   so when a plan goes pending → active the trigger credits the difference (`plan_rounding_credit`,
   reference `rounding_<subscription>`, once per plan); otherwise the last meal is skipped at cutoff.
+- **Extra wallet money comes off the next plan (078, 2026-11-04).** The meal counter and wallet
+  stay separate; the wallet belongs to the account. `renewal_credit()` = wallet minus open orders
+  minus unscheduled meals on the live plan (0 with cash owed); `cashfree-create-order` charges that
+  much less on any pending plan (renewal or new, online or cash on delivery), keeps at least ₹1,
+  and records `payments.wallet_credit_paise`. No wallet debit: the money stays and funds the plan.
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for
