@@ -52,6 +52,15 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.9 — 2026-11-04
+- Build 10, OTA 9. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **Extra wallet money comes off the next plan**: the Renew sheet and the
+  onboarding payment screen show "₹X extra in your wallet comes off this price"
+  and the lower amount to pay. Server side already live for every app version
+  (migration 078, `cashfree-create-order`).
+- JS-only.
+
 ### 1.10.8 — 2026-11-02
 - Build 10, OTA 8. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.
