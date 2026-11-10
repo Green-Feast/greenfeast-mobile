@@ -23,6 +23,7 @@ import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday, addDaysISO } from '@/lib/ist'
 import BookingCalendar from '@/components/BookingCalendar'
+import PlanDefaults from '@/components/PlanDefaults'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -216,6 +217,9 @@ export default function PlanSettingsScreen() {
             </View>
           </View>
         </View>
+
+        {/* Default meal, delivery days and dishes (080) */}
+        <PlanDefaults subId={sub.id} onChanged={fetchSub} />
 
         {/* Actions */}
         <View style={s.actionCard}>

@@ -189,6 +189,9 @@ Deno.serve(async (req) => {
         .eq('id', order.id)
     }
 
+    // Changed by hand: plan-default changes leave this day alone (080).
+    await supabase.from('orders').update({ cart_edited: true }).eq('id', order.id)
+
     // Re-snapshot the cart total and report the wallet balance for warnings.
     const [{ data: cartTotal }, { data: wallet }] = await Promise.all([
       supabase.rpc('recompute_order_cart', { p_order: order.id }),

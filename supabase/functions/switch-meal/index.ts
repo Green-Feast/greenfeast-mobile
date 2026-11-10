@@ -106,6 +106,8 @@ Deno.serve(async (req) => {
         .update({
           meal_template_id,
           is_customized: true,
+          // Changed by hand: plan-default changes leave this day alone (080).
+          cart_edited: true,
           switch_fee_paise: 0,
           updated_at: new Date().toISOString(),
         })

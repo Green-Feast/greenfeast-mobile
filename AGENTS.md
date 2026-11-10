@@ -229,6 +229,14 @@ reflect the latest commits, that's expected, not a bug to fix.
   (`renew-subscription`, `cashfree-create-order`). The webhook funds the wallet **before**
   activating and scheduling. `retire_previous_subscriptions` now closes every other live plan
   and moves its open orders over (cash-owed plans: cancelled instead); `carried_meals` is unused.
+- **Customers set their own defaults (080, 2026-11-10).** Plan & settings (`components/PlanDefaults.tsx`)
+  edits portions per slot, default add-ons, delivery days (`set_my_plan_defaults`) and a dish of
+  their own per slot / weekday (`set_my_meal_rule`, `customer_meal_rules.set_by = 'customer'`;
+  refused while an admin rule exists for that slot, and the admin's `setFixedDish` clears the
+  customer's picks). Both call `resync_plan_orders(sub)`, which re-prices / re-dishes open,
+  unlocked meals and cancels ones on days or slots now off (`skip_reason 'off_day'`); the app then
+  runs instantiate-orders for new days. **Any per-day edit must set `orders.cart_edited`**
+  (update-day-cart, switch-meal, admin per-day editors do) so default changes leave that day alone.
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for
