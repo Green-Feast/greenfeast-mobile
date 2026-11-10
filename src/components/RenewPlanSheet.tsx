@@ -1,8 +1,8 @@
-// "Renew plan" sheet, shown when a plan's meals run low or are used up. Four
-// ways on: repeat the same plan, edit it, build a new plan through onboarding,
-// or cancel. With meals still left only repeat/edit: those renew this plan, so
-// its meals left move to the new one when it's paid (069) — a plan from
-// onboarding can't take them over. Repeat/edit are paid through Cashfree by the
+// "Renew plan" sheet, shown when the wallet runs low or runs out. Four ways
+// on: repeat the same plan, edit it, build a new plan through onboarding, or
+// cancel. With meals still left only repeat/edit. A plan is money worth N
+// default meals (079): what's left in the wallet stays there and the new
+// plan's money is added to it. Repeat/edit are paid through Cashfree by the
 // parent (My Plan owns the payment callback); this sheet only collects the
 // choice and shows progress.
 import { useEffect, useMemo, useState } from 'react'
@@ -185,8 +185,8 @@ export default function RenewPlanSheet({
                   <>
                     <Text style={st.lead}>
                       {mealsLeft > 0
-                        ? `You have ${mealsLeft} meal${mealsLeft === 1 ? '' : 's'} left on your ${planName ?? 'plan'}. Renew now and ${mealsLeft === 1 ? 'it moves' : 'they move'} to your new plan, so your deliveries carry on without a gap.`
-                        : `All the meals on your ${planName ?? 'plan'} are used up. How would you like to continue?`}
+                        ? `Your wallet has about ${mealsLeft} meal${mealsLeft === 1 ? '' : 's'} left on your ${planName ?? 'plan'}. Renew now and ${mealsLeft === 1 ? 'it stays' : 'they stay'} in your wallet, so your deliveries carry on without a gap.`
+                        : `Your wallet on the ${planName ?? 'plan'} has run out. How would you like to continue?`}
                     </Text>
                     {[
                       {
@@ -220,7 +220,7 @@ export default function RenewPlanSheet({
                   <>
                     <View style={st.card}>
                       <Text style={st.cardTitle}>{currentPlan?.name ?? 'Your plan'}</Text>
-                      <Text style={st.cardLine}>{currentPlan ? `${currentPlan.meals_total} meals` : ''}{currentPlan ? ' · ' : ''}{mealsLine(current)}</Text>
+                      <Text style={st.cardLine}>{currentPlan ? `${currentPlan.meals_total} meals' worth` : ''}{currentPlan ? ' · ' : ''}{mealsLine(current)}</Text>
                       <Text style={st.cardLine}>{currentAddonNames ? `Add-ons: ${currentAddonNames}` : 'No add-ons'}</Text>
                       <Text style={st.cardNote}>Delivery days, menu and address stay the same.</Text>
                     </View>
@@ -251,7 +251,7 @@ export default function RenewPlanSheet({
                         <Pressable key={p.id} style={[st.choice, on && st.choiceOn]} onPress={() => setDraft((d) => ({ ...d, plan_id: p.id }))}>
                           <View style={{ flex: 1 }}>
                             <Text style={st.choiceTitle}>{p.name}</Text>
-                            <Text style={st.choiceSub}>{p.meals_total} meals · {rupees(p.base_price)}</Text>
+                            <Text style={st.choiceSub}>{p.meals_total} meals' worth · {rupees(p.base_price)}</Text>
                           </View>
                           {on && <Check size={18} color={Colors.primary} />}
                         </Pressable>

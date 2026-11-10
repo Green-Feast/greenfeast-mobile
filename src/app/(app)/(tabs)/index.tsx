@@ -509,9 +509,11 @@ export default function Home() {
     )
   }
 
-  // The plan's meals plus any passed on by the plan it renewed early (069).
-  const mealsTotal = (subscription?.plans?.meals_total ?? 0) + (subscription?.carried_meals ?? 0)
-  const mealsEnjoyed = Math.max(0, mealsTotal - (subscription?.deliveries_remaining ?? 0))
+  // The wallet is the plan (079): meals left is how many default meals the
+  // wallet pays for, so it can be more than the plan's size (money carried
+  // over) — the ring is filled against whichever is bigger.
+  const mealsLeft = Math.max(0, subscription?.deliveries_remaining ?? 0)
+  const ringScale = Math.max(subscription?.plans?.meals_total ?? 0, mealsLeft)
 
   return (
     <View style={styles.container}>
@@ -660,18 +662,18 @@ export default function Home() {
             <MacroRing
               size={84}
               strokeWidth={9}
-              centerValue={String(mealsEnjoyed)}
-              centerLabel={`of ${mealsTotal}`}
+              centerValue={String(mealsLeft)}
+              centerLabel="left"
               segments={[
-                { value: mealsEnjoyed, color: Colors.green700 },
-                { value: subscription.deliveries_remaining, color: Colors.border },
+                { value: mealsLeft, color: Colors.green700 },
+                { value: Math.max(ringScale - mealsLeft, 0), color: Colors.border },
               ]}
             />
             <View style={{ flex: 1 }}>
               <Text style={styles.ringTitle}>
-                {mealsEnjoyed} of {mealsTotal} meals enjoyed
+                About {mealsLeft} meal{mealsLeft === 1 ? '' : 's'} left
               </Text>
-              <Text style={styles.ringSub}>{subscription.deliveries_remaining} left on your plan</Text>
+              <Text style={styles.ringSub}>Your wallet pays for about {mealsLeft} default meal{mealsLeft === 1 ? '' : 's'}. Add-ons and extra portions use it faster.</Text>
             </View>
           </Animated.View>
         )}

@@ -5,6 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const RENEW_FROM_MEALS_LEFT = 2 // a new plan only once the live one is down to this (079)
+
 // 'sandbox' until CASHFREE_ENV=production is set once live keys replace the
 // test ones — flip this one env var (plus the keys) to go live, nothing else.
 const CASHFREE_ENV = Deno.env.get('CASHFREE_ENV') === 'production' ? 'production' : 'sandbox'
@@ -83,6 +85,24 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: 'Subscription not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // The wallet is the plan (079): no buying more mid-plan. A new plan or a
+    // renewal is only for when the live plan's wallet is running low.
+    if ((sub as any).status === 'pending') {
+      const { data: live } = await supabase
+        .from('subscriptions')
+        .select('deliveries_remaining')
+        .eq('user_id', user.id)
+        .in('status', ['active', 'paused'])
+        .neq('id', subscription_id)
+        .maybeSingle()
+      if (live && (live.deliveries_remaining ?? 0) > RENEW_FROM_MEALS_LEFT) {
+        return new Response(
+          JSON.stringify({ error: `You still have about ${live.deliveries_remaining} meals in your wallet. You can renew once about ${RENEW_FROM_MEALS_LEFT} are left.` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     // Server-side price, same formula the app displays (payment.tsx grandTotal):

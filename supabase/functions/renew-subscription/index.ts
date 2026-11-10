@@ -19,6 +19,7 @@ const json = (body: object, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
 const MAX_MEALS_PER_SLOT = 3
+const RENEW_FROM_MEALS_LEFT = 2 // same as the app's My Plan and the renewal reminder
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -47,6 +48,11 @@ Deno.serve(async (req) => {
     // Meals still left: the renewal takes them over once paid — only from a
     // running plan with nothing owed (retire_previous_subscriptions, 069).
     // Refused here, before any payment, so nobody pays for a plan that can't start.
+    // The wallet is the plan (079): no adding money mid-plan — a renewal is
+    // only for a wallet that's running low (the app offers it from 2 meals).
+    if (old.status !== 'expired' && (old.deliveries_remaining ?? 0) > RENEW_FROM_MEALS_LEFT) {
+      return json({ error: `You can renew once about ${RENEW_FROM_MEALS_LEFT} meals are left in your wallet.` }, 400)
+    }
     if (old.status !== 'expired' && (old.deliveries_remaining ?? 0) > 0) {
       // A pause set for later counts too: the new plan wouldn't carry its dates.
       if (old.status === 'paused' || old.pause_from) {

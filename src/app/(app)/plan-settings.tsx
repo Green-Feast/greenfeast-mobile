@@ -124,10 +124,9 @@ export default function PlanSettingsScreen() {
 
   const planName = sub.plan_name || sub.plans?.name || 'Your Plan'
   const planMeals = sub.plans?.meals_total ?? 0
-  // Meals passed on by a plan renewed early count towards this one (069).
-  const mealsTotal = planMeals + (sub.carried_meals ?? 0)
-  const remaining = sub.deliveries_remaining
-  const progress = mealsTotal > 0 ? Math.min(100, (remaining / mealsTotal) * 100) : 0
+  // The wallet is the plan (079): meals left is how many default meals the
+  // wallet pays for — an estimate, since extras use the same money.
+  const remaining = Math.max(sub.deliveries_remaining, 0)
   const addonPerMeal = (sub.subscription_addons ?? []).reduce((s, a) => s + (a.addons?.price_per_meal ?? 0), 0)
   // A plan bought with a coupon costs its coupon meal price × meals (066).
   const totalAmount = (sub.meal_price_paise ? sub.meal_price_paise * planMeals : (sub.plans?.base_price ?? 0)) + addonPerMeal * planMeals
@@ -183,15 +182,11 @@ export default function PlanSettingsScreen() {
             </View>
             {sub.plans && (
               <Text style={s.planCardMetaLight}>
-                {sub.plans.meals_total} meals · {sub.plans.days_per_week} days/week · ₹{fmt(totalAmount)}
+                {sub.plans.meals_total} meals' worth · ₹{fmt(totalAmount)}
               </Text>
             )}
           </View>
           <View style={s.planCardBody}>
-            <View style={s.metaRow}>
-              <Text style={s.metaLabel}>Next renewal</Text>
-              <Text style={s.metaValue}>{fmtDate(sub.end_date)}</Text>
-            </View>
             {sub.status === 'paused' && sub.pause_until && (
               <>
                 <View style={s.metaRow}>
@@ -212,12 +207,12 @@ export default function PlanSettingsScreen() {
             )}
             <View>
               <View style={s.metaRow}>
-                <Text style={s.metaLabel}>Deliveries remaining</Text>
-                <Text style={s.metaValueGreen}>{remaining}/{mealsTotal}</Text>
+                <Text style={s.metaLabel}>Meals left</Text>
+                <Text style={s.metaValueGreen}>about {remaining}</Text>
               </View>
-              <View style={s.progressTrack}>
-                <View style={[s.progressFill, { width: `${progress}%` }]} />
-              </View>
+              <Text style={s.pauseNote}>
+                Your wallet pays for about {remaining} default meal{remaining === 1 ? '' : 's'}. Add-ons and extra portions use it faster.
+              </Text>
             </View>
           </View>
         </View>

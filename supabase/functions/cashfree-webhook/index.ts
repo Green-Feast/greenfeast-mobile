@@ -181,58 +181,15 @@ Deno.serve(async (req) => {
       }
 
       if (paymentRow.subscription_id) {
-        // A renewal (or a new plan after the old one ran out) first closes the
-        // customer's previous plan — only one live plan per customer is
-        // allowed (migration 049) — and inherits its delivery batch, before
-        // instantiate-orders below so the new orders get that batch. A plan
-        // renewed before its meals ran out passes them on: its orders move
-        // over and its meal count lands in carried_meals (069), read below.
-        const { error: retireErr } = await supabase.rpc('retire_previous_subscriptions', {
-          p_new_sub: paymentRow.subscription_id,
-        })
-        if (retireErr) console.error('cashfree-webhook: retire_previous_subscriptions failed:', retireErr.message)
-
         const { data: sub } = await supabase
           .from('subscriptions')
-          .select('plan_id, plan_name, payment_method, cod_due_paise, carried_meals, plans ( meals_total )')
+          .select('plan_id, plan_name, payment_method, cod_due_paise')
           .eq('id', paymentRow.subscription_id)
           .single()
 
-        const planRow = Array.isArray((sub as any)?.plans) ? (sub as any).plans[0] : (sub as any)?.plans
-        const deliveries = (planRow?.meals_total ?? 0) + ((sub as any)?.carried_meals ?? 0)
-
-        // A coupon this payment was priced with sets the plan's meal price —
-        // before activation, so every order is made at that price (066).
-        const { error: couponErr } = await supabase.rpc('apply_payment_coupon', { p_payment: paymentRow.id })
-        if (couponErr) {
-          console.error('cashfree-webhook: apply_payment_coupon failed:', couponErr.message)
-          return new Response(JSON.stringify({ error: 'coupon failed' }), { status: 500 })
-        }
-
-        const { error: activateErr } = await supabase
-          .from('subscriptions')
-          .update({ status: 'active', deliveries_remaining: deliveries })
-          .eq('id', paymentRow.subscription_id)
-          .eq('status', 'pending') // idempotent guard — don't overwrite if already active
-        if (activateErr) {
-          // e.g. the customer still has another live plan with meals left.
-          console.error('cashfree-webhook: could not activate', paymentRow.subscription_id, activateErr.message)
-        }
-
-
-        // Instantiate orders for next 14 days now that subscription is active
-        const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-        const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-        await fetch(`${SUPABASE_URL}/functions/v1/instantiate-orders`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SERVICE_KEY}`,
-          },
-          body: JSON.stringify({ subscription_id: paymentRow.subscription_id }),
-        }).catch(err => console.error('Failed to trigger instantiate-orders:', err))
-
-        // Fund the wallet here directly rather than over HTTP via
+        // Fund the wallet first: the wallet is the plan (079), so the plan's
+        // meals left — and how many meals instantiate-orders schedules below —
+        // come from this money. Done here directly rather than over HTTP via
         // fund-subscription-wallet: that function sits behind the gateway's JWT
         // check, and this runtime's SUPABASE_SERVICE_ROLE_KEY is an sb_secret_…
         // key, not a JWT, so that call was always rejected. Credits the amount
@@ -255,6 +212,46 @@ Deno.serve(async (req) => {
           console.error('cashfree-webhook: plan wallet credit failed:', fundErr.message)
           return new Response(JSON.stringify({ error: 'credit failed' }), { status: 500 })
         }
+
+        // A renewal (or any new plan) closes the customer's other live plan —
+        // only one is allowed (migration 049) — which hands over its meals
+        // still to come and its delivery batch (079), before instantiate-orders
+        // below so the new orders get that batch.
+        const { error: retireErr } = await supabase.rpc('retire_previous_subscriptions', {
+          p_new_sub: paymentRow.subscription_id,
+        })
+        if (retireErr) console.error('cashfree-webhook: retire_previous_subscriptions failed:', retireErr.message)
+
+        // A coupon this payment was priced with sets the plan's meal price —
+        // before activation, so every order is made at that price (066).
+        const { error: couponErr } = await supabase.rpc('apply_payment_coupon', { p_payment: paymentRow.id })
+        if (couponErr) {
+          console.error('cashfree-webhook: apply_payment_coupon failed:', couponErr.message)
+          return new Response(JSON.stringify({ error: 'coupon failed' }), { status: 500 })
+        }
+
+        // Meals left is set by the database from the wallet (079).
+        const { error: activateErr } = await supabase
+          .from('subscriptions')
+          .update({ status: 'active' })
+          .eq('id', paymentRow.subscription_id)
+          .eq('status', 'pending') // idempotent guard — don't overwrite if already active
+        if (activateErr) {
+          // e.g. the customer still has another live plan.
+          console.error('cashfree-webhook: could not activate', paymentRow.subscription_id, activateErr.message)
+        }
+
+        // Instantiate orders for next 14 days now that subscription is active
+        const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+        const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+        await fetch(`${SUPABASE_URL}/functions/v1/instantiate-orders`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SERVICE_KEY}`,
+          },
+          body: JSON.stringify({ subscription_id: paymentRow.subscription_id }),
+        }).catch(err => console.error('Failed to trigger instantiate-orders:', err))
 
         // Tell them when their next meal is (once per plan, 075). Never fails the payment.
         const { error: nextErr } = await supabase.rpc('notify_next_meal', { p_sub: paymentRow.subscription_id })

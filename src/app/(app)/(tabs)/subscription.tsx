@@ -201,7 +201,16 @@ export default function SubscriptionScreen() {
   const [swapError, setSwapError] = useState('')
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
-  const [showAddMoney, setShowAddMoney] = useState(false)
+  const [showWallet, setShowWallet] = useState(false)
+  // One default meal's price on the live plan (079), for the wallet sheet.
+  const [mealCost, setMealCost] = useState<number | null>(null)
+  useEffect(() => {
+    if (!showWallet) return
+    supabase.rpc('my_meal_cost').then(({ data }) => {
+      const cost = (data as { meal_cost?: number } | null)?.meal_cost
+      setMealCost(typeof cost === 'number' && cost > 0 ? cost : null)
+    })
+  }, [showWallet])
   // Kitchen closures (admin → Operations) in the strip's range: "date|slot" → reason.
   const [closures, setClosures] = useState<Map<string, string | null>>(new Map())
   const [riders, setRiders] = useState<Map<string, Rider>>(new Map())
@@ -217,9 +226,6 @@ export default function SubscriptionScreen() {
   // Where an added dish goes (one portion home, one to the office…).
   const [addAddressId, setAddAddressId] = useState<string | null>(null)
   const [skipError, setSkipError] = useState('')
-  const [topupAmountPaise, setTopupAmountPaise] = useState(50000) // ₹500 default
-  const [topupCustom, setTopupCustom] = useState('')
-  const [creatingTopup, setCreatingTopup] = useState(false)
   const didAutoSync = useRef(false)
   const stripRef = useRef<ScrollView | null>(null)
   const unavailableMeals = useAvailabilityStore((st) => st.unavailableMeals)
@@ -463,7 +469,7 @@ export default function SubscriptionScreen() {
       })
       if (error) throw new Error(await extractFunctionErrorMessage(error, 'Could not add dish. Try again.'))
       if (data?.error === 'insufficient_balance') {
-        setSwapError('Insufficient wallet balance for an extra dish. Add money first.')
+        setSwapError('Not enough balance in your wallet for an extra dish.')
         return
       }
       if (data?.error) throw new Error(data.error)
@@ -493,7 +499,7 @@ export default function SubscriptionScreen() {
       })
       if (error) throw new Error(await extractFunctionErrorMessage(error, 'Could not add dish. Try again.'))
       if (data?.error === 'insufficient_balance') {
-        setSwapError('Insufficient wallet balance for an extra dish. Add money first.')
+        setSwapError('Not enough balance in your wallet for an extra dish.')
         return
       }
       if (data?.error) throw new Error(data.error)
@@ -724,33 +730,11 @@ export default function SubscriptionScreen() {
     router.push('/(onboarding)/health' as any)
   }
 
-  async function createTopupOrder() {
-    if (!user) return
-    const amount = topupCustom ? Math.round(parseFloat(topupCustom) * 100) : topupAmountPaise
-    if (!amount || amount < 10000) return // min ₹100
-    setCreatingTopup(true)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) throw new Error('Not authenticated')
-      const { data, error } = await supabase.functions.invoke('wallet-topup', {
-        body: { amount_paise: amount },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-      if (error || data?.error) throw new Error(data?.error ?? 'Failed to create order')
-      setShowAddMoney(false)
-      const cfSession = new CFSession(
-        data.payment_session_id,
-        data.order_id,
-        data.environment === 'production' ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX
-      )
-      CFPaymentGatewayService.doWebPayment(cfSession)
-      // Native checkout UI takes over the screen until onVerify/onError fires
-      // (registered once on mount below).
-    } catch (e: any) {
-      console.error('createTopupOrder:', e)
-    } finally {
-      setCreatingTopup(false)
-    }
+  function openRenew() {
+    setShowWallet(false)
+    setRenewState('idle')
+    setRenewMessage('')
+    setShowRenew(true)
   }
 
   if (loading) {
@@ -771,16 +755,18 @@ export default function SubscriptionScreen() {
     )
   }
 
-  const mealsTotal = (sub.plans?.meals_total ?? 0) + (sub.carried_meals ?? 0)
+  // The wallet is the plan (079): meals left is an estimate — how many default
+  // meals the wallet (plus any cash still owed) pays for. Add-ons, extra
+  // portions and extra dishes use the same money, so they leave fewer.
   const remaining = sub.deliveries_remaining
-  const progress = mealsTotal > 0 ? Math.min(100, (remaining / mealsTotal) * 100) : 0
   // Cash on delivery: the first day was paid online at signup; the rest is
   // cash for the delivery partner, credited to the wallet when it's recorded.
   const codDue = sub.payment_method === 'cod' ? (sub.cod_due_paise ?? 0) : 0
-  // Renew is offered once the meals run low (the meals left move to the new
-  // plan), or once they're used up — not early for a paused plan or one with
-  // cash still due (renew-subscription refuses those).
+  // Renew is offered once the wallet runs low (what's left stays in it), or
+  // once it's run out — not early for a paused plan or one with cash still
+  // due (renew-subscription refuses those). No top-ups in between.
   const renewEarly = remaining > 0 && remaining <= RENEW_FROM_MEALS_LEFT && sub.status === 'active' && codDue === 0
+  const canRenew = remaining === 0 || renewEarly
 
   // ── Active / paused home view ─────────────────────────────────────────────
 
@@ -1248,11 +1234,11 @@ export default function SubscriptionScreen() {
         <View style={s.infoTilesRow}>
           <Pressable
             style={({ pressed }) => [s.infoTile, pressed && { opacity: 0.75 }]}
-            onPress={() => setShowAddMoney(true)}
+            onPress={() => setShowWallet(true)}
           >
             <View style={s.infoTileIcon}><Wallet size={19} color={Colors.primary} strokeWidth={1.75} /></View>
             <View>
-              <Text style={s.infoTileCaption}>Balance</Text>
+              <Text style={s.infoTileCaption}>Wallet</Text>
               <Text style={s.infoTileValue}>
                 {walletBalance !== null ? `₹${(walletBalance / 100).toLocaleString('en-IN')}` : '—'}
               </Text>
@@ -1284,21 +1270,21 @@ export default function SubscriptionScreen() {
           <ChevronRight size={15} color={Colors.textMuted} strokeWidth={2} />
         </Pressable>
 
-        {/* DELIVERIES REMAINING */}
-        <View style={s.progressCard}>
+        {/* MEALS LEFT — an estimate from the wallet (079) */}
+        <Pressable
+          style={({ pressed }) => [s.progressCard, pressed && { opacity: 0.85 }]}
+          onPress={() => setShowWallet(true)}
+        >
           <View style={s.progressRow}>
-            <Text style={s.progressLabel}>Deliveries remaining</Text>
-            <Text style={s.progressCount}>{remaining}/{mealsTotal}</Text>
+            <Text style={s.progressLabel}>Meals left</Text>
+            <Text style={s.progressCount}>about {Math.max(remaining, 0)}</Text>
           </View>
-          <View style={s.progressTrack}>
-            <View style={[s.progressFill, { width: `${progress}%` }]} />
-          </View>
-          {sub.end_date && (
-            <Text style={s.renewNote}>Renews {fmtDate(sub.end_date)}</Text>
-          )}
-        </View>
+          <Text style={s.renewNote}>
+            Your wallet pays for about {Math.max(remaining, 0)} default meal{remaining === 1 ? '' : 's'}. Add-ons and extra portions use it faster.
+          </Text>
+        </Pressable>
 
-        {/* LOW WALLET — meals left on the plan, but not the money for the next one */}
+        {/* LOW WALLET — default meals left, but not the money for the next meal with its extras */}
         {remaining > 0 && nextMealCost > 0 && walletBalance !== null && walletBalance < nextMealCost && (
           <View style={s.renewalAlert}>
             <View style={s.renewalAlertContent}>
@@ -1307,41 +1293,45 @@ export default function SubscriptionScreen() {
                 <Text style={s.renewalAlertTitle}>Your wallet is running low</Text>
                 <Text style={s.renewalAlertText}>
                   Your next meal costs ₹{fmt(nextMealCost)} and your wallet has ₹{fmt(Math.max(walletBalance, 0))}.
-                  Top up before the cutoff so it isn't skipped.
+                  {canRenew
+                    ? ' Remove an extra or renew before the cutoff so it isn\'t skipped.'
+                    : ' Remove an extra before the cutoff so it isn\'t skipped.'}
                 </Text>
               </View>
             </View>
-            <View style={s.renewalAlertBtns}>
-              <Pressable
-                style={({ pressed }) => [s.renewalAlertBtn, s.renewalAlertBtnPrimary, pressed && { opacity: 0.85 }]}
-                onPress={() => setShowAddMoney(true)}
-              >
-                <Text style={s.renewalAlertBtnText}>Add money</Text>
-              </Pressable>
-            </View>
+            {canRenew && (
+              <View style={s.renewalAlertBtns}>
+                <Pressable
+                  style={({ pressed }) => [s.renewalAlertBtn, s.renewalAlertBtnPrimary, pressed && { opacity: 0.85 }]}
+                  onPress={openRenew}
+                >
+                  <Text style={s.renewalAlertBtnText}>Renew plan</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         )}
 
-        {/* RENEW — meals running low or used up: repeat / edit (and, once used up, new plan or cancel) */}
-        {(remaining === 0 || renewEarly) && (
+        {/* RENEW — wallet running low or empty: repeat / edit (and, once empty, new plan or cancel) */}
+        {canRenew && (
           <View style={s.renewalAlert}>
             <View style={s.renewalAlertContent}>
               <AlertCircle size={20} color={Colors.accent} style={{ marginRight: 10 }} />
               <View style={{ flex: 1 }}>
                 <Text style={s.renewalAlertTitle}>
-                  {remaining === 0 ? "Your plan's meals are used up" : `Only ${remaining} meal${remaining === 1 ? '' : 's'} left`}
+                  {remaining === 0 ? 'Your wallet has run out' : `About ${remaining} meal${remaining === 1 ? '' : 's'} left`}
                 </Text>
                 <Text style={s.renewalAlertText}>
                   {remaining === 0
                     ? 'Renew to keep your meals coming.'
-                    : 'Renew now so your meals keep coming without a gap. The meals you have left move to your new plan.'}
+                    : 'Renew now so your meals keep coming without a gap. What\'s left in your wallet stays there.'}
                 </Text>
               </View>
             </View>
             <View style={s.renewalAlertBtns}>
               <Pressable
                 style={({ pressed }) => [s.renewalAlertBtn, s.renewalAlertBtnPrimary, pressed && { opacity: 0.85 }]}
-                onPress={() => { setRenewState('idle'); setRenewMessage(''); setShowRenew(true) }}
+                onPress={openRenew}
               >
                 <Text style={s.renewalAlertBtnText}>Renew plan</Text>
               </Pressable>
@@ -1599,10 +1589,10 @@ export default function SubscriptionScreen() {
                     {lowBalance && (
                       <Pressable
                         style={s.lowBalRow}
-                        onPress={() => { setShowDayModal(false); setShowAddMoney(true) }}
+                        onPress={() => { setShowDayModal(false); setShowWallet(true) }}
                       >
                         <AlertCircle size={14} color={Colors.accentText} />
-                        <Text style={s.lowBalText}>Low wallet balance for delivery — top up →</Text>
+                        <Text style={s.lowBalText}>Your wallet doesn't cover this day — see wallet →</Text>
                       </Pressable>
                     )}
                   </View>
@@ -1696,8 +1686,8 @@ export default function SubscriptionScreen() {
                         <View style={s.swapErrorRow}>
                           <Text style={s.dayModalSwapError}>{swapError}</Text>
                           {swapError.includes('balance') && (
-                            <Pressable onPress={() => { setShowDayModal(false); setSwapError(''); setShowAddMoney(true) }}>
-                              <Text style={s.swapErrorLink}>Add money →</Text>
+                            <Pressable onPress={() => { setShowDayModal(false); setSwapError(''); setShowWallet(true) }}>
+                              <Text style={s.swapErrorLink}>See wallet →</Text>
                             </Pressable>
                           )}
                         </View>
@@ -1821,69 +1811,58 @@ export default function SubscriptionScreen() {
         </Pressable>
       </Modal>
 
-      {/* Add money modal */}
+      {/* Wallet sheet — balance, meals it pays for, renew (no top-ups since 079) */}
       <Modal
-        visible={showAddMoney}
+        visible={showWallet}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowAddMoney(false)}
+        onRequestClose={() => setShowWallet(false)}
       >
-        <Pressable style={s.dayModalOverlay} onPress={() => setShowAddMoney(false)}>
+        <Pressable style={s.dayModalOverlay} onPress={() => setShowWallet(false)}>
           <Pressable style={s.dayModalSheet} onPress={(e) => e.stopPropagation()}>
             <View style={s.dayModalHandle} />
             <View style={s.dayModalHeader}>
-              <Text style={s.dayModalDate}>Add money to wallet</Text>
-              <Pressable onPress={() => setShowAddMoney(false)} hitSlop={10}>
+              <Text style={s.dayModalDate}>Your wallet</Text>
+              <Pressable onPress={() => setShowWallet(false)} hitSlop={10}>
                 <X size={20} color={Colors.textMuted} />
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 20 + insets.bottom }} showsVerticalScrollIndicator={false}>
-              <Text style={s.amountDisplayLabel}>Select amount</Text>
-
-              {/* Quick chips */}
-              <View style={s.topupChips}>
-                {[50000, 100000, 200000].map((amt) => (
-                  <Pressable
-                    key={amt}
-                    style={[s.topupChip, topupAmountPaise === amt && !topupCustom && s.topupChipActive]}
-                    onPress={() => { setTopupAmountPaise(amt); setTopupCustom('') }}
-                  >
-                    <Text style={[s.topupChipText, topupAmountPaise === amt && !topupCustom && s.topupChipTextActive]}>
-                      ₹{amt / 100}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={[s.amountDisplayLabel, { marginTop: 16 }]}>Or enter a custom amount</Text>
-              <TextInput
-                style={s.topupInput}
-                keyboardType="number-pad"
-                placeholder="₹ Amount (min ₹100)"
-                placeholderTextColor={Colors.textLight}
-                value={topupCustom}
-                onChangeText={setTopupCustom}
-              />
-
+              <Text style={s.amountDisplayLabel}>Balance</Text>
               <Text style={s.amountDisplay}>
-                ₹{topupCustom
-                  ? (parseFloat(topupCustom) || 0).toLocaleString('en-IN')
-                  : fmt(topupAmountPaise)}
+                {walletBalance !== null ? `₹${fmt(walletBalance)}` : '—'}
+              </Text>
+              <Text style={s.walletMealsLine}>
+                About {Math.max(remaining, 0)} default meal{remaining === 1 ? '' : 's'} left
+                {mealCost ? ` · ₹${fmt(mealCost)} per meal` : ''}
+              </Text>
+              {codDue > 0 && (
+                <Text style={s.walletNote}>Includes ₹{fmt(codDue)} you'll pay in cash.</Text>
+              )}
+
+              <Text style={s.walletHowTitle}>How your wallet works</Text>
+              <Text style={s.walletNote}>
+                Your plan's money sits here and each meal is paid from it when it's delivered.
+                Add-ons, extra portions and extra dishes come from the same money, so they leave fewer meals.
+              </Text>
+              <Text style={s.walletNote}>
+                {canRenew
+                  ? 'Your wallet is running low — renew to keep your meals coming. What\'s left stays in your wallet.'
+                  : `You can renew once about ${RENEW_FROM_MEALS_LEFT} meals are left. What's left then stays in your wallet.`}
               </Text>
 
-              <Pressable
-                style={({ pressed }) => [s.addMoneyBtn, pressed && { opacity: 0.8 }, creatingTopup && { opacity: 0.6 }]}
-                onPress={createTopupOrder}
-                disabled={creatingTopup}
-              >
-                {creatingTopup
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={s.addMoneyBtnText}>Add money</Text>}
-              </Pressable>
+              {canRenew && (
+                <Pressable
+                  style={({ pressed }) => [s.addMoneyBtn, pressed && { opacity: 0.8 }]}
+                  onPress={openRenew}
+                >
+                  <Text style={s.addMoneyBtnText}>Renew plan</Text>
+                </Pressable>
+              )}
 
               <Pressable
                 style={({ pressed }) => [s.viewTransactionsBtn, pressed && { opacity: 0.75 }]}
-                onPress={() => { setShowAddMoney(false); fetchTransactions(); setShowTransactions(true) }}
+                onPress={() => { setShowWallet(false); fetchTransactions(); setShowTransactions(true) }}
               >
                 <Text style={s.viewTransactionsBtnText}>View transactions</Text>
               </Pressable>
@@ -2078,19 +2057,11 @@ const s = StyleSheet.create({
     borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: 'transparent',
   },
   viewTransactionsBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
-  topupChips: { flexDirection: 'row', gap: 10, marginBottom: 4 },
-  topupChip: {
-    flex: 1, borderRadius: 12, paddingVertical: 12, borderWidth: 1.5,
-    borderColor: Colors.border, backgroundColor: '#fff', alignItems: 'center',
-  },
-  topupChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  topupChipText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.textMuted },
-  topupChipTextActive: { color: Colors.primary },
-  topupInput: {
-    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border,
-    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12,
-    fontFamily: Fonts.body, fontSize: 16, color: Colors.text, marginBottom: 4,
-  },
+
+  // Wallet sheet
+  walletMealsLine: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.primary, marginTop: -12, marginBottom: 6 },
+  walletHowTitle: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.text, marginTop: 18, marginBottom: 6 },
+  walletNote: { fontFamily: Fonts.body, fontSize: 13, lineHeight: 19, color: Colors.textMuted, marginBottom: 10 },
 
   // Swap error with link
   swapErrorRow: { marginBottom: 10 },

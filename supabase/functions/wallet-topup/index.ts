@@ -9,6 +9,7 @@ const corsHeaders = {
 }
 
 const MIN_TOPUP_PAISE = 10000  // ₹100 minimum
+const TOPUPS_CLOSED = true      // 079: a plan is the only way to add money
 
 const CASHFREE_ENV = Deno.env.get('CASHFREE_ENV') === 'production' ? 'production' : 'sandbox'
 const CASHFREE_BASE = CASHFREE_ENV === 'production'
@@ -43,6 +44,12 @@ Deno.serve(async (req) => {
     const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token)
     if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+
+    // The wallet is the plan (079): money goes in only by buying or renewing a
+    // plan. Older app versions still show the top-up form; they get this.
+    if (TOPUPS_CLOSED) {
+      return json({ error: 'Top-ups have moved to plans — renew your plan in My Plan to add meals.' }, 400)
+    }
 
     const { amount_paise } = await req.json()
     if (!amount_paise || typeof amount_paise !== 'number' || amount_paise < MIN_TOPUP_PAISE) {

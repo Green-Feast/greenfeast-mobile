@@ -117,17 +117,16 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     return ingredientCache[templateId]
   }
 
-  // Never schedule more meals than the plan has left: what's already
-  // scheduled counts against deliveries_remaining, and once it's used up the
-  // plan is finished until it's renewed.
-  const allowance = sub.deliveries_remaining ?? 0
-  const { data: upcoming } = await supabase
-    .from('orders')
-    .select('quantity')
-    .eq('subscription_id', subId)
-    .gte('delivery_date', toISO(new Date(Date.now() + IST_OFFSET_MS)))
-    .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery'])
-  let capacity = allowance - (upcoming ?? []).reduce((s: number, o: any) => s + (o.quantity ?? 1), 0)
+  // The wallet is the plan (079): never schedule more than the money left
+  // after every meal already made (extras included) — wallet plus any cash
+  // still owed on the plan. Once it can't pay for a default meal the plan is
+  // finished until it's renewed.
+  const { data: freePaise, error: freeErr } = await supabase.rpc('schedulable_paise', { p_user: sub.user_id })
+  if (freeErr) {
+    console.error(`schedulable_paise failed for ${subId}:`, freeErr.message)
+    return 0
+  }
+  let capacity: number = freePaise ?? 0
 
   // Kitchen closed (holiday etc., admin → Operations): no orders for those
   // slots. The meals stay on the plan and get scheduled on later days.
@@ -176,7 +175,10 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       if (!mealTemplateId) continue
 
       const slotQty = slot === 'lunch' ? (sub.meals_lunch ?? 1) : (sub.meals_dinner ?? 1)
-      if (slotQty > capacity) continue
+      // No price (plan row missing) → nothing can be billed, so nothing is made.
+      if (unitPrice == null) continue
+      const orderCost = unitPrice * slotQty
+      if (orderCost > capacity) continue
 
       const { data: order, error: insertErr } = await supabase
         .from('orders')
@@ -231,7 +233,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       }
 
       created++
-      capacity -= slotQty
+      capacity -= orderCost
     }
   }
 

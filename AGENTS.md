@@ -218,6 +218,17 @@ reflect the latest commits, that's expected, not a bug to fix.
   minus unscheduled meals on the live plan (0 with cash owed); `cashfree-create-order` charges that
   much less on any pending plan (renewal or new, online or cash on delivery), keeps at least ₹1,
   and records `payments.wallet_credit_paise`. No wallet debit: the money stays and funds the plan.
+- **The wallet is the plan (079, 2026-11-10).** A plan is money worth N default meals; add-ons,
+  extra portions and extra dishes spend the same wallet. `subscriptions.deliveries_remaining` is
+  now derived on live plans: a BEFORE trigger sets it to `meals_left_estimate()` =
+  floor((wallet + cod_due_paise) / `default_meal_cost(sub)`), and wallet / default add-on changes
+  refresh it — **writing it on a live plan does nothing** (give meals as wallet money:
+  `default_meal_cost × n`). `instantiate-orders` schedules by money (`schedulable_paise(user)`),
+  the cutoff calls a base meal the wallet can't cover "plan finished", `wallet-topup` refuses,
+  and a new plan / renewal is refused while the live plan has more than 2 meals left
+  (`renew-subscription`, `cashfree-create-order`). The webhook funds the wallet **before**
+  activating and scheduling. `retire_previous_subscriptions` now closes every other live plan
+  and moves its open orders over (cash-owed plans: cancelled instead); `carried_meals` is unused.
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for
