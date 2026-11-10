@@ -52,6 +52,22 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.10 — 2026-11-10
+- Build 10, OTA 10. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **The wallet is the plan** (079): My Plan, Home and Plan & settings show
+  "about N meals left" from the wallet; a "Your wallet" sheet with Renew
+  replaces Add money (top-ups are closed server side).
+- **Plan & settings: My default meal and My dishes** (080): portions per slot,
+  default add-ons with flavours, delivery days, live price / meals-left
+  preview, and a dish of their own per slot for every day or a weekday.
+- **Referrals** (081): "Joining through a friend?" on the payment screen;
+  Account's share card shows the customer's code and friends joined.
+- **Pickup and dine-in** (082): "Collect" in My Plan's day sheet (takeaway /
+  dine-in with a 6-digit code), "How you get your meals" in Plan & settings,
+  and "Eat at our café" walk-ins on Home — 30- and 60-meal plans.
+- JS-only (no new native modules).
+
 ### 1.10.9 — 2026-11-04
 - Build 10, OTA 9. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.
