@@ -246,6 +246,19 @@ reflect the latest commits, that's expected, not a bug to fix.
   `apply_payment_referral()` after activation — first paid plan of 15+ meals only, one per friend
   (`referrals.referee_id` unique), references `referral_<id>_in/_out`, templates
   `referral_joined` / `referral_reward`. Account's share card shows the code (`my_referrals()`).
+- **Pickup and dine-in (082, 2026-11-10).** Plans with `plans.allow_pickup` (plan30, plan60) can
+  collect at `pickup_locations` (C-Scheme QSR: takeaway + dine-in, `cooks_own`; Jawahar Nagar:
+  takeaway). `orders.fulfilment` ('delivery' | 'pickup' | 'dine_in') + `pickup_location_id`; a
+  trigger gives non-deliveries a 6-digit `pickup_code` and **no batch** (the batch trigger, the
+  address-moved trigger and `sync_order_batches` only touch deliveries), so they're off rider
+  routes and the partner app. Booking: `set_order_fulfilment` (before cutoff, resets to the default
+  meal via `reset_to_default_meal`) and `set_my_collection` (slot default →
+  `subscriptions.fulfilment_*` / `pickup_location_*`, used by instantiate-orders). Walk-ins:
+  `walk_in_quote` / `start_walk_in` (lunch until the place's `lunch_until`, dinner after; an extra
+  meal when one is already coming). Counter: admin `/counter` → `redeem_pickup` (bills via
+  `advance_order_delivered`, stamps `collected_at`). `settle_pickups()` every 15 min bills booked
+  no-shows (`pickup_missed`, template `pickup_missed`) and cancels unused walk-ins
+  (`walk_in_expired`). Day-cart edits are refused on collected meals.
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for

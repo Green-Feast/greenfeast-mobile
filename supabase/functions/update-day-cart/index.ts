@@ -75,13 +75,15 @@ Deno.serve(async (req) => {
     // ── Load + guard the base order ───────────────────────────────────────
     const { data: order } = await supabase
       .from('orders')
-      .select('id, user_id, subscription_id, delivery_date, meal_slot, status, quantity, unit_price')
+      .select('id, user_id, subscription_id, delivery_date, meal_slot, status, quantity, unit_price, fulfilment')
       .eq('id', order_id)
       .single()
     if (!order || order.user_id !== user.id) return json({ error: 'Order not found' }, 404)
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'This delivery can no longer be changed' }, 400)
     }
+    // Pickup / dine-in is always the default meal (082).
+    if (order.fulfilment && order.fulfilment !== 'delivery') return json({ error: 'Pickup and dine-in meals are your default meal — switch the day back to delivery in My Plan to change it.' }, 400)
     if (isSunday(order.delivery_date)) return json({ error: 'Sunday is our day off — message us on WhatsApp if you need something special.' }, 400)
     const [{ data: locked }, { data: sub }] = await Promise.all([
       supabase.rpc('is_slot_locked', { p_date: order.delivery_date, p_slot: order.meal_slot }),

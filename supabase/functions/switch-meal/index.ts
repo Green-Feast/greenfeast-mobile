@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     // Load the order and verify ownership
     const { data: order } = await supabase
       .from('orders')
-      .select('id, user_id, subscription_id, delivery_date, meal_slot, meal_template_id, status')
+      .select('id, user_id, subscription_id, delivery_date, meal_slot, meal_template_id, status, fulfilment')
       .eq('id', order_id)
       .single()
 
@@ -64,6 +64,8 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'Cannot switch a delivered, cancelled, or skipped order' }, 400)
     }
+    // Pickup / dine-in is always the default meal (082).
+    if (order.fulfilment && order.fulfilment !== 'delivery') return json({ error: 'Pickup and dine-in meals are your default meal — switch the day back to delivery in My Plan to change it.' }, 400)
     if (order.meal_template_id === meal_template_id) {
       return json({ ok: true, charged: false, fee_paise: 0 }) // nothing to do
     }

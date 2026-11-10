@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { Minus, Plus, Check, Lock, ChevronRight, X, Sun, Moon } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import PickupSheet, { usePlaces, collectionLabel, type Fulfilment } from '@/components/PickupSheet'
 import { Colors, Fonts } from '@/constants/colors'
 
 type Slot = 'lunch' | 'dinner'
@@ -49,12 +50,19 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
   const [variantFor, setVariantFor] = useState<string | null>(null)
   const [picker, setPicker] = useState<{ slot: Slot; day: number | null } | null>(null)
+  // Delivery or pickup by default, per slot (082) — 30- and 60-meal plans.
+  const places = usePlaces()
+  const [allowPickup, setAllowPickup] = useState(false)
+  const [collection, setCollection] = useState<Record<Slot, { mode: Fulfilment; place: string | null }>>({
+    lunch: { mode: 'delivery', place: null }, dinner: { mode: 'delivery', place: null },
+  })
+  const [collectFor, setCollectFor] = useState<Slot | null>(null)
 
   const load = useCallback(async () => {
     const [subRes, addonRes, costRes, rulesRes, menuRes, dishRes] = await Promise.all([
       supabase
         .from('subscriptions')
-        .select('meals_lunch, meals_dinner, subscription_schedule ( day_of_week ), subscription_addons ( addon_id, sub_option )')
+        .select('meals_lunch, meals_dinner, fulfilment_lunch, fulfilment_dinner, pickup_location_lunch, pickup_location_dinner, plans ( allow_pickup ), subscription_schedule ( day_of_week ), subscription_addons ( addon_id, sub_option )')
         .eq('id', subId)
         .single(),
       supabase.from('addons').select('id, name, price_per_meal, description').eq('is_active', true).order('price_per_meal'),
@@ -64,6 +72,14 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
       supabase.from('meal_templates').select('id, name, category').eq('is_active', true).eq('subscription_valid', true).order('category').order('name'),
     ])
     const sub = subRes.data as any
+    if (sub) {
+      const plan = Array.isArray(sub.plans) ? sub.plans[0] : sub.plans
+      setAllowPickup(!!plan?.allow_pickup)
+      setCollection({
+        lunch: { mode: (sub.fulfilment_lunch ?? 'delivery') as Fulfilment, place: sub.pickup_location_lunch ?? null },
+        dinner: { mode: (sub.fulfilment_dinner ?? 'delivery') as Fulfilment, place: sub.pickup_location_dinner ?? null },
+      })
+    }
     if (sub) {
       const d: Defaults = {
         lunch: sub.meals_lunch ?? 0,
@@ -293,6 +309,25 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
         </Pressable>
       </View>
 
+      {/* ── Collection (082) ────────────────────────────────────────────── */}
+      {allowPickup && slots.length > 0 && (
+        <>
+          <Text style={st.sectionTitle}>How you get your meals</Text>
+          <View style={st.card}>
+            <Text style={st.cardLead}>Delivered, or collected at our café — takeaway or dine-in. Collected meals are always your default meal. You can still change a single day in My Plan.</Text>
+            {slots.map((sl) => (
+              <DishRow
+                key={sl}
+                label={sl === 'lunch' ? 'Lunch' : 'Dinner'}
+                value={collectionLabel(collection[sl].mode, collection[sl].place, places)}
+                own={collection[sl].mode !== 'delivery'}
+                onPress={() => setCollectFor(sl)}
+              />
+            ))}
+          </View>
+        </>
+      )}
+
       {/* ── My dishes ───────────────────────────────────────────────────── */}
       {slots.length > 0 && (
         <>
@@ -346,6 +381,24 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
         </>
       )}
 
+      {collectFor && (
+        <PickupSheet
+          visible
+          title={`${collectFor === 'lunch' ? 'Lunch' : 'Dinner'} — every day`}
+          note="Your upcoming meals follow this from their next cutoff (9 AM lunch, 2 PM dinner). Days you changed by hand stay as they are. A booked meal that isn't collected is still charged."
+          slot={collectFor}
+          current={collection[collectFor]}
+          onPick={async (mode, place) => {
+            const { error } = await supabase.rpc('set_my_collection', { p_slot: collectFor, p_mode: mode, p_location: place })
+            if (error) return error.message || 'Could not save. Please try again.'
+            await load()
+            setMessage({ ok: true, text: 'Saved — your upcoming meals follow it.' })
+            onChanged()
+            return null
+          }}
+          onClose={() => setCollectFor(null)}
+        />
+      )}
       <VariantSheet
         addonId={variantFor}
         current={variantFor ? draft.addons[variantFor] ?? null : null}

@@ -29,6 +29,7 @@ import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, is
 import DayOffCard from '@/components/DayOffCard'
 import SubscribeGate from '@/components/SubscribeGate'
 import { maybeAskStoreReview } from '@/lib/storeReview'
+import PickupSheet, { usePlaces, collectionLabel, slotHours, type Fulfilment } from '@/components/PickupSheet'
 import RenewPlanSheet, { type RenewConfig, type RenewPaymentState, type RenewPlanOption } from '@/components/RenewPlanSheet'
 import { useOnboardingStore } from '@/store/onboarding'
 import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
@@ -53,7 +54,7 @@ type SubData = {
   cod_due_paise: number | null
   meal_price_paise: number | null // coupon price per meal, else null (066)
   carried_meals: number // meals passed on by the plan this one renewed early (069)
-  plans: { name: string; meals_total: number; days_per_week: number; base_price: number } | null
+  plans: { name: string; meals_total: number; days_per_week: number; base_price: number; allow_pickup?: boolean } | null
 }
 
 type SubAddon = { addon_id: string; addons: { name: string; price_per_meal: number } | null }
@@ -93,6 +94,11 @@ type OrderItem = {
   delivered_at: string | null
   meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; carbs: number | null; fat: number | null; image_url: string | null } | null
   order_addons: CartLine[]
+  // Pickup / dine-in (082)
+  fulfilment?: string | null
+  pickup_location_id?: string | null
+  pickup_code?: string | null
+  walk_in?: boolean | null
 }
 
 // Who's bringing today's meal (delivery partner app) — my_riders() gives the
@@ -202,6 +208,9 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showWallet, setShowWallet] = useState(false)
+  // Pickup / dine-in for the selected day (082).
+  const places = usePlaces()
+  const [pickupOpen, setPickupOpen] = useState(false)
   // One default meal's price on the live plan (079), for the wallet sheet.
   const [mealCost, setMealCost] = useState<number | null>(null)
   useEffect(() => {
@@ -245,7 +254,7 @@ export default function SubscriptionScreen() {
 
     const planQuery = () => supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, meal_price_paise, carried_meals, plans ( name, meals_total, days_per_week, base_price )')
+      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, meal_price_paise, carried_meals, plans ( name, meals_total, days_per_week, base_price, allow_pickup )')
       .eq('user_id', user.id)
       .in('status', ['active', 'paused'])
       .order('created_at', { ascending: false })
@@ -255,7 +264,7 @@ export default function SubscriptionScreen() {
     const detailQueries = (subId: string) => Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, delivered_at, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
+        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, delivered_at, fulfilment, pickup_location_id, pickup_code, walk_in, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
         .eq('subscription_id', subId)
         .gte('delivery_date', today)
         .lte('delivery_date', endStr)
@@ -818,6 +827,11 @@ export default function SubscriptionScreen() {
   const dayOrder = daySlotOrders.find(o => !o.extra_dish) ?? null
   const dayExtras = daySlotOrders.filter(o => o.extra_dish)
   const dayLocked = heroLocked
+  // Pickup / dine-in (082) is always the default meal: no editing that day.
+  const dayPickup = !!dayOrder && !!dayOrder.fulfilment && dayOrder.fulfilment !== 'delivery'
+  const dayEditLocked = dayLocked || dayPickup
+  const canCollect = !!sub.plans?.allow_pickup
+  const dayPlace = dayPickup ? places.find((p) => p.id === dayOrder?.pickup_location_id) ?? null : null
 
   // Any non-extra order on this day, in ANY slot — used (a) to decide whether
   // the "Add {slot}" button should appear at all (the day is within the
@@ -863,7 +877,7 @@ export default function SubscriptionScreen() {
 
   // "Deliver to" for one meal: where it's going, with a picker to change it.
   const renderAddressPicker = (order: OrderItem) => {
-    if (dayLocked || addresses.length === 0) return null
+    if (dayEditLocked || addresses.length === 0) return null
     const sel = addresses.find(a => a.id === order.address_id) ?? defaultAddress
     if (pickingAddressForOrder === order.id) {
       return (
@@ -1455,10 +1469,35 @@ export default function SubscriptionScreen() {
                     </View>
                   </View>
 
+                  {/* Delivery or collect it (082) */}
+                  {(canCollect || dayPickup) && (
+                    <View style={s.collectBox}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.qtyLabel}>{collectionLabel(dayOrder.fulfilment as Fulfilment, dayOrder.pickup_location_id, places)}</Text>
+                        <Text style={s.qtySub}>
+                          {dayPickup
+                            ? `${dayPlace ? `${dayPlace.address} · ${slotHours(dayPlace, selectedSlot as 'lunch' | 'dinner')} · ` : ''}Your default meal — show this code at the counter.`
+                            : 'Or collect it at our café — your default meal.'}
+                        </Text>
+                        {dayPickup && !!dayOrder.pickup_code && (
+                          <Text style={s.collectCode}>{dayOrder.pickup_code.slice(0, 3)} {dayOrder.pickup_code.slice(3)}</Text>
+                        )}
+                      </View>
+                      {!dayLocked && canCollect && (
+                        <Pressable
+                          style={({ pressed }) => [s.collectBtn, pressed && { opacity: 0.8 }]}
+                          onPress={() => { setShowDayModal(false); setPickupOpen(true) }}
+                        >
+                          <Text style={s.collectBtnText}>{dayPickup ? 'Change' : 'Collect'}</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  )}
+
                   {renderAddressPicker(dayOrder)}
 
                   {/* Portions stepper for the base meal */}
-                  {!dayLocked && (
+                  {!dayEditLocked && (
                     <View style={s.qtyRow}>
                       <View style={{ flex: 1, paddingRight: 8 }}>
                         <Text style={s.qtyLabel}>Portions</Text>
@@ -1501,7 +1540,7 @@ export default function SubscriptionScreen() {
                         <Plus size={14} color={Colors.primary} />
                         <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
                         <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
-                        {!dayLocked && (
+                        {!dayEditLocked && (
                           <Pressable
                             style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
                             onPress={() => handleRemoveDish(ex.id)}
@@ -1521,7 +1560,7 @@ export default function SubscriptionScreen() {
                       before that. A default add-on's stepper floors at 1
                       rather than letting it reach 0 — mirrors the server's
                       cannot_remove_default_addon guard on remove_addon. */}
-                  {!dayLocked && allAddons.length > 0 && (
+                  {!dayEditLocked && allAddons.length > 0 && (
                     <View style={s.addonEditWrap}>
                       <Text style={s.addonEditHead}>Add-ons for this day</Text>
                       {allAddons.map((a) => {
@@ -1637,13 +1676,15 @@ export default function SubscriptionScreen() {
                   add-dish path instead of the normal reference-order one. */}
               {(dayOrder || addRefOrder || effectiveAddMode) && (
                 <View style={s.dayModalSwapSection}>
-                  {dayLocked ? (
+                  {dayLocked || dayPickup ? (
                     <View style={s.dayModalLockBanner}>
                       <Text style={s.dayModalLockText}>
-                        🔒 Changes for this day are locked
+                        {dayLocked ? '🔒 Changes for this day are locked' : 'Collected meals are your default meal'}
                       </Text>
                       <Text style={s.dayModalLockSub}>
-                        {selectedSlot === 'lunch' ? 'Lunch closes at 9 AM' : 'Dinner closes at 2 PM'} on delivery day
+                        {dayLocked
+                          ? `${selectedSlot === 'lunch' ? 'Lunch closes at 9 AM' : 'Dinner closes at 2 PM'} on delivery day`
+                          : 'Switch this day back to delivery to swap the dish or add something.'}
                       </Text>
                     </View>
                   ) : (
@@ -1810,6 +1851,24 @@ export default function SubscriptionScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Delivery / takeaway / dine-in for the selected meal (082) */}
+      {dayOrder && (
+        <PickupSheet
+          visible={pickupOpen}
+          title={`${selectedSlot === 'lunch' ? 'Lunch' : 'Dinner'} · ${fmtDateLong(selectedDay)}`}
+          note="Takeaway and dine-in are always your default meal. You can change this until 9 AM for lunch and 2 PM for dinner. A booked meal that isn't collected is still charged."
+          slot={selectedSlot as 'lunch' | 'dinner'}
+          current={{ mode: (dayOrder.fulfilment ?? 'delivery') as Fulfilment, place: dayOrder.pickup_location_id ?? null }}
+          onPick={async (mode, place) => {
+            const { error } = await supabase.rpc('set_order_fulfilment', { p_order: dayOrder.id, p_mode: mode, p_location: place })
+            if (error) return error.message || 'Could not change it. Please try again.'
+            await fetchAll()
+            return null
+          }}
+          onClose={() => setPickupOpen(false)}
+        />
+      )}
 
       {/* Wallet sheet — balance, meals it pays for, renew (no top-ups since 079) */}
       <Modal
@@ -2057,6 +2116,15 @@ const s = StyleSheet.create({
     borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: 'transparent',
   },
   viewTransactionsBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
+
+  // Pickup / dine-in (082)
+  collectBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, padding: 14, borderRadius: 14,
+    backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primaryMid,
+  },
+  collectBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: Colors.primary },
+  collectBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
+  collectCode: { fontFamily: Fonts.heading, fontSize: 28, letterSpacing: 4, color: Colors.primary, marginTop: 6 },
 
   // Wallet sheet
   walletMealsLine: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.primary, marginTop: -12, marginBottom: 6 },

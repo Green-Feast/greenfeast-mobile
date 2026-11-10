@@ -29,7 +29,7 @@ function next14Days(): Date[] {
 async function processSubscription(supabase: any, subId: string): Promise<number> {
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining, start_date, meal_price_paise')
+    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining, start_date, meal_price_paise, fulfilment_lunch, fulfilment_dinner, pickup_location_lunch, pickup_location_dinner')
     .eq('id', subId)
     .single()
 
@@ -63,7 +63,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       .eq('menu_type', 'M1'),
     supabase
       .from('plans')
-      .select('base_price, meals_total')
+      .select('base_price, meals_total, allow_pickup')
       .eq('id', sub.plan_id)
       .maybeSingle(),
     // "Same dish every day" rules set by ops (Kitchen / subscriber profile).
@@ -136,6 +136,15 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     .gte('closed_on', toISO(new Date(Date.now() + IST_OFFSET_MS)))
   const closed = new Set((closures ?? []).map((c: any) => `${c.closed_on}|${c.meal_slot}`))
 
+  // The plan's default collection per slot (082) — delivery unless the
+  // customer chose pickup / dine-in in Plan & settings and the plan allows it.
+  function collectionFor(slot: 'lunch' | 'dinner'): { fulfilment: string; pickup_location_id: string | null } {
+    const mode = slot === 'lunch' ? sub.fulfilment_lunch : sub.fulfilment_dinner
+    const place = slot === 'lunch' ? sub.pickup_location_lunch : sub.pickup_location_dinner
+    if (!plan?.allow_pickup || !mode || mode === 'delivery' || !place) return { fulfilment: 'delivery', pickup_location_id: null }
+    return { fulfilment: mode, pickup_location_id: place }
+  }
+
   let created = 0
   const istNow = new Date(Date.now() + IST_OFFSET_MS)
   const todayIST = toISO(istNow)
@@ -188,6 +197,9 @@ async function processSubscription(supabase: any, subId: string): Promise<number
           meal_template_id: mealTemplateId,
           batch_id: (slot === 'lunch' ? sub.batch_id_lunch : sub.batch_id_dinner) ?? null,
           address_id: addr?.id ?? null,
+          // Pickup / dine-in by default for this slot (082): no batch, a code
+          // (both set by the database), only on plans that allow it.
+          ...collectionFor(slot),
           delivery_date: dateStr,
           meal_slot: slot,
           status: 'scheduled',

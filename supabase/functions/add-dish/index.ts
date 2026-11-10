@@ -210,6 +210,18 @@ Deno.serve(async (req) => {
       return json({ error: 'This dish is not available for subscription orders.' }, 400)
     }
     if (!sub) return json({ error: 'Subscription not found' }, 404)
+    // Pickup / dine-in is always the default meal (082): no extra dishes on it.
+    const { data: pickup } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('subscription_id', subscriptionId)
+      .eq('delivery_date', effectiveDate)
+      .eq('meal_slot', effectiveSlot)
+      .neq('fulfilment', 'delivery')
+      .not('status', 'in', '(cancelled,skipped)')
+      .limit(1)
+      .maybeSingle()
+    if (pickup) return json({ error: 'Pickup and dine-in meals are your default meal — switch the day back to delivery in My Plan to change it.' }, 400)
     if ((sub.deliveries_remaining ?? 0) <= 0) {
       return json({ error: 'No deliveries remaining on this plan' }, 400)
     }
