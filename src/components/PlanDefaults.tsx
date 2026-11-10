@@ -53,6 +53,8 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
   // Delivery or pickup by default, per slot (082) — 30- and 60-meal plans.
   const places = usePlaces()
   const [allowPickup, setAllowPickup] = useState(false)
+  // Sunday deliveries are arranged by the office only (083): shown, not editable.
+  const [sundayByOffice, setSundayByOffice] = useState(false)
   const [collection, setCollection] = useState<Record<Slot, { mode: Fulfilment; place: string | null }>>({
     lunch: { mode: 'delivery', place: null }, dinner: { mode: 'delivery', place: null },
   })
@@ -81,6 +83,7 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
       })
     }
     if (sub) {
+      setSundayByOffice(((sub.subscription_schedule ?? []) as { day_of_week: string }[]).some((r) => r.day_of_week === 'Sun'))
       const d: Defaults = {
         lunch: sub.meals_lunch ?? 0,
         dinner: sub.meals_dinner ?? 0,
@@ -280,8 +283,17 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
               </Pressable>
             )
           })}
+          {sundayByOffice && (
+            <View style={[st.dayChip, st.dayChipOn, st.dayChipLocked]}>
+              <Text style={[st.dayChipText, st.dayChipTextOn]}>Su</Text>
+            </View>
+          )}
         </View>
-        <Text style={st.rowSub}>Sunday is our day off.</Text>
+        <Text style={st.rowSub}>
+          {sundayByOffice
+            ? 'Sunday delivery is arranged by GreenFeast — message us on WhatsApp to change it.'
+            : 'Sunday is our day off.'}
+        </Text>
 
         <View style={st.costBox}>
           <View style={st.costRow}>
@@ -549,6 +561,7 @@ const st = StyleSheet.create({
   dayChipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   dayChipText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
   dayChipTextOn: { color: '#fff' },
+  dayChipLocked: { opacity: 0.6 },
   costBox: { backgroundColor: Colors.primaryLight, borderRadius: 12, padding: 12, marginTop: 14, gap: 4 },
   costRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   costLabel: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
