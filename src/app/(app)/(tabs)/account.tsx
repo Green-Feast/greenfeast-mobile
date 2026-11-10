@@ -104,6 +104,15 @@ export default function AccountScreen() {
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleteImpact, setDeleteImpact] = useState<{ walletBalance: number; hasActiveSub: boolean; deliveriesRemaining: number } | null>(null)
   const [deleteImpactLoading, setDeleteImpactLoading] = useState(false)
+  // Their referral code (= customer code) and how many friends joined (081).
+  const [referral, setReferral] = useState<{ code: string | null; canRefer: boolean; joined: number } | null>(null)
+  useEffect(() => {
+    if (!user) { setReferral(null); return }
+    supabase.rpc('my_referrals').then(({ data }) => {
+      const r = data as { code?: string | null; can_refer?: boolean; joined?: number } | null
+      if (r) setReferral({ code: r.code ?? null, canRefer: !!r.can_refer, joined: r.joined ?? 0 })
+    })
+  }, [user])
   const [deleteTypedText, setDeleteTypedText] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
@@ -285,17 +294,36 @@ export default function AccountScreen() {
           </View>
         )}
 
-        {/* Refer a friend */}
+        {/* Refer a friend — with their own code once they've had a plan (081) */}
         <Pressable
           style={({ pressed }) => [styles.referralCard, pressed && { opacity: 0.9 }]}
-          onPress={() => Linking.openURL('https://wa.me/?text=' + encodeURIComponent(REFERRAL_MESSAGE))}
+          onPress={() => {
+            const text = referral?.canRefer && referral.code
+              ? `${REFERRAL_MESSAGE}\n\nUse my code ${referral.code} when you start a plan of 15 meals or more — we both get a free meal.`
+              : REFERRAL_MESSAGE
+            Linking.openURL('https://wa.me/?text=' + encodeURIComponent(text))
+          }}
         >
           <View style={styles.referralIconWrap}>
             <WhatsAppIcon size={22} color="#fff" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.referralTitle}>Give a friend their first GreenFeast</Text>
-            <Text style={styles.referralSub}>Share on WhatsApp →</Text>
+            {referral?.canRefer && referral.code ? (
+              <>
+                <Text style={styles.referralTitle}>Invite a friend — you both get a free meal</Text>
+                <Text style={styles.referralSub}>Your code {referral.code} · Share on WhatsApp →</Text>
+                {referral.joined > 0 && (
+                  <Text style={styles.referralSub}>
+                    {referral.joined} friend{referral.joined === 1 ? '' : 's'} joined · {referral.joined} free meal{referral.joined === 1 ? '' : 's'} for you
+                  </Text>
+                )}
+              </>
+            ) : (
+              <>
+                <Text style={styles.referralTitle}>Give a friend their first GreenFeast</Text>
+                <Text style={styles.referralSub}>Share on WhatsApp →</Text>
+              </>
+            )}
           </View>
         </Pressable>
 

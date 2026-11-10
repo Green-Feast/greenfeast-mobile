@@ -46,7 +46,9 @@ Deno.serve(async (req) => {
     // cod: true → charge only the cash-on-delivery upfront (first day's meals).
     // coupon_code (optional, migration 066): lowers the plan's meal price —
     // checked and priced by coupon_quote(), never by the app.
-    const { subscription_id, amount_paise: clientAmount, cod, coupon_code } = await req.json()
+    // referral_code (optional, migration 081): a friend's customer code. Checked
+    // here and again when the plan starts (apply_payment_referral).
+    const { subscription_id, amount_paise: clientAmount, cod, coupon_code, referral_code } = await req.json()
 
     if (!subscription_id) {
       return new Response(
@@ -153,6 +155,40 @@ Deno.serve(async (req) => {
       coupon = { id: quote.coupon_id, code: quote.code, meal_price_paise: quote.meal_price_paise, discount_paise: quote.discount_paise }
       planTotal = quote.total_paise
       mealPrice = quote.meal_price_paise
+    }
+
+    // A referral code: only on a first plan of 15 meals or more (referral_check).
+    // It doesn't change the price — both people get a meal's worth once the
+    // plan starts (cashfree-webhook → apply_payment_referral).
+    let referral: { code: string; referrer_name: string } | null = null
+    const refCode = typeof referral_code === 'string' ? referral_code.trim() : ''
+    if (refCode) {
+      if ((sub as any).status !== 'pending') {
+        return new Response(
+          JSON.stringify({ error: 'Referral codes can only be used when buying a plan.' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      const { data: check, error: checkErr } = await supabase.rpc('referral_check', {
+        p_user: user.id,
+        p_code: refCode,
+        p_plan: (sub as any).plan_id,
+        p_exclude_sub: subscription_id,
+      })
+      if (checkErr) {
+        console.error('cashfree-create-order: referral_check failed:', checkErr.message)
+        return new Response(
+          JSON.stringify({ error: 'Could not check that referral code. Please try again.' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      if (!check?.ok) {
+        return new Response(
+          JSON.stringify({ error: check?.error ?? "That referral code isn't valid." }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      referral = { code: check.code, referrer_name: check.referrer_name }
     }
 
     // The wallet belongs to the account: extra money in it comes off any plan
@@ -276,6 +312,7 @@ Deno.serve(async (req) => {
       meal_price_paise: coupon?.meal_price_paise ?? null,
       discount_paise: coupon?.discount_paise ?? null,
       wallet_credit_paise,
+      referral_code: referral?.code ?? null,
     })
     if (payErr) {
       console.error('cashfree-create-order: payments insert failed:', payErr.message)
@@ -295,6 +332,7 @@ Deno.serve(async (req) => {
         coupon_code: coupon?.code ?? null,
         discount_paise: coupon?.discount_paise ?? 0,
         wallet_credit_paise,
+        referral_code: referral?.code ?? null,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

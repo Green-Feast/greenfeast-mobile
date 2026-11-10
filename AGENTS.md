@@ -237,6 +237,15 @@ reflect the latest commits, that's expected, not a bug to fix.
   unlocked meals and cancels ones on days or slots now off (`skip_reason 'off_day'`); the app then
   runs instantiate-orders for new days. **Any per-day edit must set `orders.cart_edited`**
   (update-day-cart, switch-meal, admin per-day editors do) so default changes leave that day alone.
+- **Referrals and gifts (081, 2026-11-10).** Both are a meal's worth of wallet money
+  (`meal_worth(user)` = their live plan's `default_meal_cost`, else plan30's rate). Gifts:
+  admin → Referrals, refunds & gifts (`/rewards`, where refunds moved from Money) → `gift_meals()`
+  (table `meal_gifts`, reference `gift_<id>`, template `meal_gift`). Referrals: the code is the
+  customer code; the app's payment screen previews it (`preview_referral`), `cashfree-create-order`
+  checks it (`referral_check`) and stores `payments.referral_code`, and the webhook calls
+  `apply_payment_referral()` after activation — first paid plan of 15+ meals only, one per friend
+  (`referrals.referee_id` unique), references `referral_<id>_in/_out`, templates
+  `referral_joined` / `referral_reward`. Account's share card shows the code (`my_referrals()`).
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for

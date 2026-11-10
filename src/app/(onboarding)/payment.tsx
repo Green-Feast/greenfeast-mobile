@@ -25,6 +25,7 @@ import { SUPPORT_WHATSAPP_NUMBER } from '@/constants/links'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 import CouponField from '@/components/CouponField'
+import ReferralField, { type ReferralApplied } from '@/components/ReferralField'
 import { couponsAllowed, type CouponQuote } from '@/lib/coupons'
 
 type Method = 'cashfree' | 'cod'
@@ -106,6 +107,8 @@ export default function PaymentScreen() {
   // A coupon lowers the price of one meal (migration 066); the server re-checks
   // it and charges its own price when the payment starts.
   const [coupon, setCoupon] = useState<CouponQuote | null>(null)
+  // A friend's referral code (081): no price change, a free meal each later.
+  const [referral, setReferral] = useState<ReferralApplied | null>(null)
   const regularTotal = planAmount + addonTotal
   const listTotal = coupon ? coupon.total : regularTotal
   // Extra money in the account's wallet comes off the price (078). The server
@@ -317,6 +320,7 @@ export default function PaymentScreen() {
           amount_paise: method === 'cod' ? cod.upfront : grandTotal,
           cod: method === 'cod',
           coupon_code: coupon?.code,
+          referral_code: referral?.code,
         },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       })
@@ -434,6 +438,14 @@ export default function PaymentScreen() {
             addonIds={store.addOns.map((a) => a.id)}
             applied={coupon}
             onChange={setCoupon}
+            disabled={phase === 'creating'}
+          />
+        )}
+        {planMeals >= 15 && (
+          <ReferralField
+            planId={store.planId!}
+            applied={referral}
+            onChange={setReferral}
             disabled={phase === 'creating'}
           />
         )}

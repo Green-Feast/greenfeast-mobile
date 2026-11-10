@@ -241,6 +241,12 @@ Deno.serve(async (req) => {
           console.error('cashfree-webhook: could not activate', paymentRow.subscription_id, activateErr.message)
         }
 
+        // A friend's referral code on a first plan: a meal's worth for both
+        // (081). Before scheduling, so the extra meal is scheduled too.
+        // Idempotent; never fails the payment.
+        const { error: refErr } = await supabase.rpc('apply_payment_referral', { p_payment: paymentRow.id })
+        if (refErr) console.error('cashfree-webhook: apply_payment_referral failed:', refErr.message)
+
         // Instantiate orders for next 14 days now that subscription is active
         const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
         const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
