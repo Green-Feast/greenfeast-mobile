@@ -299,7 +299,7 @@ export default function AccountScreen() {
           style={({ pressed }) => [styles.referralCard, pressed && { opacity: 0.9 }]}
           onPress={() => {
             const text = referral?.canRefer && referral.code
-              ? `${REFERRAL_MESSAGE}\n\nUse my code ${referral.code} when you start a plan of 15 meals or more — we both get a free meal.`
+              ? `${REFERRAL_MESSAGE}\n\nUse my code ${referral.code} when you start a plan of 15 meals or more.`
               : REFERRAL_MESSAGE
             Linking.openURL('https://wa.me/?text=' + encodeURIComponent(text))
           }}
@@ -310,11 +310,11 @@ export default function AccountScreen() {
           <View style={{ flex: 1 }}>
             {referral?.canRefer && referral.code ? (
               <>
-                <Text style={styles.referralTitle}>Invite a friend — you both get a free meal</Text>
+                <Text style={styles.referralTitle}>Invite a friend — earn up to 3 free meals</Text>
                 <Text style={styles.referralSub}>Your code {referral.code} · Share on WhatsApp →</Text>
                 {referral.joined > 0 && (
                   <Text style={styles.referralSub}>
-                    {referral.joined} friend{referral.joined === 1 ? '' : 's'} joined · {referral.joined} free meal{referral.joined === 1 ? '' : 's'} for you
+                    {referral.joined} friend{referral.joined === 1 ? '' : 's'} joined
                   </Text>
                 )}
               </>

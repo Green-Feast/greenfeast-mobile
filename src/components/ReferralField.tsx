@@ -72,7 +72,7 @@ export default function ReferralField({
         <CheckCircle2 size={18} color={Colors.primary} />
         <View style={{ flex: 1 }}>
           <Text style={st.appliedTitle}>{`Joining with ${applied.referrerName}'s code`}</Text>
-          <Text style={st.appliedSub}>You and {applied.referrerName} each get a free meal in your wallet once your plan starts.</Text>
+          <Text style={st.appliedSub}>{applied.referrerName} earns free meals for referring you once your plan starts.</Text>
         </View>
         {!disabled && (
           <Pressable onPress={() => { onChange(null); setError('') }} hitSlop={10} accessibilityLabel="Remove referral code">
