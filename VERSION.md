@@ -52,6 +52,15 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.11 — 2026-11-11
+- Build 10, OTA 11. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **Sunday set by the office** shows as a locked chip in Plan & settings and
+  isn't removed by saving (migration 083).
+- **Referral wording**: the referrer earns 1 / 2 / 3 free meals for a friend's
+  15 / 30 / 60-meal plan; the friend gets none (migration 084).
+- JS-only.
+
 ### 1.10.10 — 2026-11-10
 - Build 10, OTA 10. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.
