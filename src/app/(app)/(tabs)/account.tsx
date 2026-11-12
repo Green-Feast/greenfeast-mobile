@@ -519,12 +519,12 @@ export default function AccountScreen() {
                 <View style={styles.deleteImpactBox}>
                   {deleteImpact && deleteImpact.walletBalance > 0 && (
                     <Text style={styles.deleteImpactLine}>
-                      • You'll <Text style={styles.deleteImpactBold}>lose ₹{deleteImpact.walletBalance.toFixed(2)}</Text> currently in your wallet. It cannot be refunded once your account is deleted.
+                      • You'll <Text style={styles.deleteImpactBold}>lose ₹{(deleteImpact.walletBalance / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Text> currently in your wallet. It cannot be refunded once your account is deleted.
                     </Text>
                   )}
                   {deleteImpact?.hasActiveSub && (
                     <Text style={styles.deleteImpactLine}>
-                      • Your <Text style={styles.deleteImpactBold}>active subscription will be cancelled</Text>, including {deleteImpact.deliveriesRemaining} remaining {deleteImpact.deliveriesRemaining === 1 ? 'delivery' : 'deliveries'}. Any deliveries already scheduled will not arrive.
+                      • Your <Text style={styles.deleteImpactBold}>active subscription will be cancelled</Text>, with about {deleteImpact.deliveriesRemaining} {deleteImpact.deliveriesRemaining === 1 ? 'meal' : 'meals'} left. Any deliveries already scheduled will not arrive.
                     </Text>
                   )}
                   <Text style={styles.deleteImpactLine}>
