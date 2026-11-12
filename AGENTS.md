@@ -229,9 +229,11 @@ reflect the latest commits, that's expected, not a bug to fix.
   (`renew-subscription`, `cashfree-create-order`). The webhook funds the wallet **before**
   activating and scheduling. `retire_previous_subscriptions` now closes every other live plan
   and moves its open orders over (cash-owed plans: cancelled instead); `carried_meals` is unused.
-- **Customers set their own defaults (080, 2026-11-10).** Plan & settings (`components/PlanDefaults.tsx`)
-  edits portions per slot, default add-ons, delivery days (`set_my_plan_defaults`) and a dish of
-  their own per slot / weekday (`set_my_meal_rule`, `customer_meal_rules.set_by = 'customer'`;
+- **Customers set their own defaults (080, 2026-11-10; trimmed in 087).** Plan & settings
+  (`components/PlanDefaults.tsx`) edits portions for the lunch / dinner chosen at sign-up (at least 1;
+  a slot they didn't choose can't be turned on — `set_my_plan_defaults` refuses it), delivery days,
+  and a dish of their own per slot / weekday. Add-ons are shown, not changed (the server refuses
+  adding or removing one; `p_addons` is only for older apps). Dishes: `set_my_meal_rule` (`customer_meal_rules.set_by = 'customer'`;
   refused while an admin rule exists for that slot, and the admin's `setFixedDish` clears the
   customer's picks). Both call `resync_plan_orders(sub)`, which re-prices / re-dishes open,
   unlocked meals and cancels ones on days or slots now off (`skip_reason 'off_day'`); the app then
@@ -246,19 +248,22 @@ reflect the latest commits, that's expected, not a bug to fix.
   `apply_payment_referral()` after activation — first paid plan of 15+ meals only, one per friend
   (`referrals.referee_id` unique), references `referral_<id>_in/_out`, templates
   `referral_joined` / `referral_reward`. Account's share card shows the code (`my_referrals()`).
-- **Pickup and dine-in (082, 2026-11-10).** Plans with `plans.allow_pickup` (plan30, plan60) can
-  collect at `pickup_locations` (C-Scheme QSR: takeaway + dine-in, `cooks_own`; Jawahar Nagar:
-  takeaway). `orders.fulfilment` ('delivery' | 'pickup' | 'dine_in') + `pickup_location_id`; a
-  trigger gives non-deliveries a 6-digit `pickup_code` and **no batch** (the batch trigger, the
-  address-moved trigger and `sync_order_batches` only touch deliveries), so they're off rider
-  routes and the partner app. Booking: `set_order_fulfilment` (before cutoff, resets to the default
-  meal via `reset_to_default_meal`) and `set_my_collection` (slot default →
-  `subscriptions.fulfilment_*` / `pickup_location_*`, used by instantiate-orders). Walk-ins:
-  `walk_in_quote` / `start_walk_in` (lunch until the place's `lunch_until`, dinner after; an extra
-  meal when one is already coming). Counter: admin `/counter` → `redeem_pickup` (bills via
-  `advance_order_delivered`, stamps `collected_at`). `settle_pickups()` every 15 min bills booked
-  no-shows (`pickup_missed`, template `pickup_missed`) and cancels unused walk-ins
-  (`walk_in_expired`). Day-cart edits are refused on collected meals.
+- **Walk-in (087, replaces 082's booked pickup / dine-in).** Every planned meal is delivered:
+  `set_order_fulfilment` / `set_my_collection` only raise "update the app", the subscription
+  collection columns are forced to delivery, and a non-delivery order must be a walk-in
+  (`orders_collect_walk_in_only`). My Plan has two tabs, Delivery and Walk-in
+  (`components/WalkIn.tsx`). Walk-in: plans with `plans.allow_pickup` (plan30, plan60) pick a
+  `pickup_locations` place, eat here / takeaway, any day 11 AM–11 PM, **one a day**, independent of
+  that day's delivery (both charged). Structure is the plan's: its add-ons (flavours free), portions =
+  default capped at 2 or one more (`walk_in_portions`); the dish is the customer's pick, default first,
+  any `menu_visible` dish not marked unavailable today
+  (`walk_in_dish_ok`) — a delivery-only dish can't be a walk-in. `my_walk_in_today` /
+  `walk_in_quote(place)` / `start_walk_in(place, mode, meal, portions, options)`. The `meal_slot`
+  is only a label (lunch before the place's `lunch_until`). Walk-ins are excluded from the
+  (sub, date, slot, seq) unique key (partial index), `resync_plan_orders`, skip and pause, and are
+  hidden from My Plan's Delivery tab. Counter: admin `/counter` → `redeem_pickup` bills via
+  `advance_order_delivered`; `settle_pickups()` cancels unused codes at closing time, uncharged
+  (`walk_in_expired`). Day-cart edits are refused on walk-ins.
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for

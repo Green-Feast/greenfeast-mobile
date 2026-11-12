@@ -64,8 +64,8 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'Cannot switch a delivered, cancelled, or skipped order' }, 400)
     }
-    // Pickup / dine-in is always the default meal (082).
-    if (order.fulfilment && order.fulfilment !== 'delivery') return json({ error: 'Pickup and dine-in meals are your default meal — switch the day back to delivery in My Plan to change it.' }, 400)
+    // A walk-in (087) is made at the counter, not edited from My Plan.
+    if (order.fulfilment && order.fulfilment !== 'delivery') return json({ error: "Walk-in meals can't be changed here." }, 400)
     if (order.meal_template_id === meal_template_id) {
       return json({ ok: true, charged: false, fee_paise: 0 }) // nothing to do
     }

@@ -31,7 +31,6 @@ import { withTimeout } from '@/lib/withTimeout'
 import { logColdStart } from '@/lib/coldStartLog'
 import { istToday, istHour, addDaysISO, isSlotLocked, isDayOff, SLOT_CUTOFF_HOUR } from '@/lib/ist'
 import { useAuthStore } from '@/store/auth'
-import WalkInCard from '@/components/WalkInCard'
 import { useNotificationStore, mergedNotifications } from '@/store/notifications'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { useAvailabilityStore, isMealAvailable, specialsFor } from '@/store/availability'
@@ -679,8 +678,6 @@ export default function Home() {
           </Animated.View>
         )}
 
-        {/* Eat at our café — walk-ins while a place is open (082) */}
-        {hasSubscription && user && <WalkInCard userId={user.id} />}
 
         {/* Category deeplinks into Menu */}
         <Animated.View entering={FadeInDown.delay(160).duration(400)} style={styles.section}>

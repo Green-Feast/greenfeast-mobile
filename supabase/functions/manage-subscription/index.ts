@@ -120,6 +120,7 @@ Deno.serve(async (req) => {
         .gte('delivery_date', pause_from)
         .lte('delivery_date', pause_until)
         .in('status', ['scheduled', 'confirmed'])
+        .eq('walk_in', false) // a walk-in (087) is its own thing
       const toCancel = await withoutLockedToday(supabase, (inRange ?? []) as OrderRef[])
       if (toCancel.length > 0) {
         // skip_reason 'pause' marks these as the pause's own cancellations, so
@@ -215,6 +216,7 @@ Deno.serve(async (req) => {
         .eq('delivery_date', delivery_date)
         .in('status', ['scheduled', 'confirmed'])
         .in('meal_slot', openSlots)
+        .eq('walk_in', false) // a walk-in (087) is its own thing
 
       if (skipErr) throw skipErr
 

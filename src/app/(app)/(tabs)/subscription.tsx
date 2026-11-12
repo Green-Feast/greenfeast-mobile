@@ -29,7 +29,7 @@ import { istToday, istHour, addDaysISO, dowMon0, endOfMonthISO, isSlotLocked, is
 import DayOffCard from '@/components/DayOffCard'
 import SubscribeGate from '@/components/SubscribeGate'
 import { maybeAskStoreReview } from '@/lib/storeReview'
-import PickupSheet, { usePlaces, collectionLabel, slotHours, type Fulfilment } from '@/components/PickupSheet'
+import WalkIn from '@/components/WalkIn'
 import RenewPlanSheet, { type RenewConfig, type RenewPaymentState, type RenewPlanOption } from '@/components/RenewPlanSheet'
 import { useOnboardingStore } from '@/store/onboarding'
 import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
@@ -208,9 +208,9 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showWallet, setShowWallet] = useState(false)
-  // Pickup / dine-in for the selected day (082).
-  const places = usePlaces()
-  const [pickupOpen, setPickupOpen] = useState(false)
+  // Delivery (the planned meals) or Walk-in (eat at our café, 087).
+  const [tab, setTab] = useState<'delivery' | 'walk_in'>('delivery')
+  const [walkInKey, setWalkInKey] = useState(0)
   // One default meal's price on the live plan (079), for the wallet sheet.
   const [mealCost, setMealCost] = useState<number | null>(null)
   useEffect(() => {
@@ -314,7 +314,8 @@ export default function SubscriptionScreen() {
       guessed && knownId === s.id ? guessed : await detailQueries(s.id)
 
     if (ordersRes.error || walletRes.error) return
-    setWeekOrders((ordersRes.data as unknown as OrderItem[]) ?? [])
+    // Walk-ins (087) live on the Walk-in tab, apart from the delivery plan.
+    setWeekOrders(((ordersRes.data as unknown as OrderItem[]) ?? []).filter((o) => !o.walk_in))
     setWalletBalance(walletRes.data?.balance ?? null)
     setAddresses((addrRes.data as AddressData[]) ?? [])
     setSubAddons((addonRes.data as unknown as SubAddon[]) ?? [])
@@ -383,6 +384,7 @@ export default function SubscriptionScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
+    setWalkInKey((k) => k + 1)
     await fetchAll()
     setRefreshing(false)
   }, [fetchAll])
@@ -827,11 +829,7 @@ export default function SubscriptionScreen() {
   const dayOrder = daySlotOrders.find(o => !o.extra_dish) ?? null
   const dayExtras = daySlotOrders.filter(o => o.extra_dish)
   const dayLocked = heroLocked
-  // Pickup / dine-in (082) is always the default meal: no editing that day.
-  const dayPickup = !!dayOrder && !!dayOrder.fulfilment && dayOrder.fulfilment !== 'delivery'
-  const dayEditLocked = dayLocked || dayPickup
-  const canCollect = !!sub.plans?.allow_pickup
-  const dayPlace = dayPickup ? places.find((p) => p.id === dayOrder?.pickup_location_id) ?? null : null
+  const dayEditLocked = dayLocked
 
   // Any non-extra order on this day, in ANY slot — used (a) to decide whether
   // the "Add {slot}" button should appear at all (the day is within the
@@ -958,6 +956,25 @@ export default function SubscriptionScreen() {
           </View>
         </View>
 
+        <View style={s.tabSwitch}>
+          {([['delivery', 'Delivery'], ['walk_in', 'Walk-in']] as const).map(([key, label]) => (
+            <Pressable
+              key={key}
+              style={[s.tabSwitchBtn, tab === key && s.tabSwitchBtnOn]}
+              onPress={() => {
+                if (tab === key) return
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                setTab(key)
+              }}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === key }}
+            >
+              <Text style={[s.tabSwitchText, tab === key && s.tabSwitchTextOn]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {tab === 'walk_in' ? <WalkIn refreshKey={walkInKey} /> : (<>
         {codDue > 0 && (
           <View style={s.codPayCard}>
             <Banknote size={22} color={Colors.accent} />
@@ -1352,6 +1369,7 @@ export default function SubscriptionScreen() {
             </View>
           </View>
         )}
+        </>)}
 
       </ScrollView>
 
@@ -1468,31 +1486,6 @@ export default function SubscriptionScreen() {
                       <Text style={s.dayModalStatus}>{statusLabel(dayOrder.status)}</Text>
                     </View>
                   </View>
-
-                  {/* Delivery or collect it (082) */}
-                  {(canCollect || dayPickup) && (
-                    <View style={s.collectBox}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.qtyLabel}>{collectionLabel(dayOrder.fulfilment as Fulfilment, dayOrder.pickup_location_id, places)}</Text>
-                        <Text style={s.qtySub}>
-                          {dayPickup
-                            ? `${dayPlace ? `${dayPlace.address} · ${slotHours(dayPlace, selectedSlot as 'lunch' | 'dinner')} · ` : ''}Your default meal — show this code at the counter.`
-                            : 'Or collect it at our café — your default meal.'}
-                        </Text>
-                        {dayPickup && !!dayOrder.pickup_code && (
-                          <Text style={s.collectCode}>{dayOrder.pickup_code.slice(0, 3)} {dayOrder.pickup_code.slice(3)}</Text>
-                        )}
-                      </View>
-                      {!dayLocked && canCollect && (
-                        <Pressable
-                          style={({ pressed }) => [s.collectBtn, pressed && { opacity: 0.8 }]}
-                          onPress={() => { setShowDayModal(false); setPickupOpen(true) }}
-                        >
-                          <Text style={s.collectBtnText}>{dayPickup ? 'Change' : 'Collect'}</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  )}
 
                   {renderAddressPicker(dayOrder)}
 
@@ -1676,15 +1669,11 @@ export default function SubscriptionScreen() {
                   add-dish path instead of the normal reference-order one. */}
               {(dayOrder || addRefOrder || effectiveAddMode) && (
                 <View style={s.dayModalSwapSection}>
-                  {dayLocked || dayPickup ? (
+                  {dayLocked ? (
                     <View style={s.dayModalLockBanner}>
-                      <Text style={s.dayModalLockText}>
-                        {dayLocked ? '🔒 Changes for this day are locked' : 'Collected meals are your default meal'}
-                      </Text>
+                      <Text style={s.dayModalLockText}>🔒 Changes for this day are locked</Text>
                       <Text style={s.dayModalLockSub}>
-                        {dayLocked
-                          ? `${selectedSlot === 'lunch' ? 'Lunch closes at 9 AM' : 'Dinner closes at 2 PM'} on delivery day`
-                          : 'Switch this day back to delivery to swap the dish or add something.'}
+                        {`${selectedSlot === 'lunch' ? 'Lunch closes at 9 AM' : 'Dinner closes at 2 PM'} on delivery day`}
                       </Text>
                     </View>
                   ) : (
@@ -1852,24 +1841,6 @@ export default function SubscriptionScreen() {
         </Pressable>
       </Modal>
 
-      {/* Delivery / takeaway / dine-in for the selected meal (082) */}
-      {dayOrder && (
-        <PickupSheet
-          visible={pickupOpen}
-          title={`${selectedSlot === 'lunch' ? 'Lunch' : 'Dinner'} · ${fmtDateLong(selectedDay)}`}
-          note="Takeaway and dine-in are always your default meal. You can change this until 9 AM for lunch and 2 PM for dinner. A booked meal that isn't collected is still charged."
-          slot={selectedSlot as 'lunch' | 'dinner'}
-          current={{ mode: (dayOrder.fulfilment ?? 'delivery') as Fulfilment, place: dayOrder.pickup_location_id ?? null }}
-          onPick={async (mode, place) => {
-            const { error } = await supabase.rpc('set_order_fulfilment', { p_order: dayOrder.id, p_mode: mode, p_location: place })
-            if (error) return error.message || 'Could not change it. Please try again.'
-            await fetchAll()
-            return null
-          }}
-          onClose={() => setPickupOpen(false)}
-        />
-      )}
-
       {/* Wallet sheet — balance, meals it pays for, renew (no top-ups since 079) */}
       <Modal
         visible={showWallet}
@@ -1944,6 +1915,11 @@ const s = StyleSheet.create({
   scroll: { paddingHorizontal: 16, paddingBottom: 40 },
   title: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, marginBottom: 16 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  tabSwitch: { flexDirection: 'row', backgroundColor: Colors.primaryLight, borderRadius: 999, padding: 4, marginBottom: 20 },
+  tabSwitchBtn: { flex: 1, paddingVertical: 10, borderRadius: 999, alignItems: 'center' },
+  tabSwitchBtnOn: { backgroundColor: Colors.primary },
+  tabSwitchText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.primary },
+  tabSwitchTextOn: { color: '#fff' },
   historyBtn: {
     width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border,
@@ -2116,15 +2092,6 @@ const s = StyleSheet.create({
     borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: 'transparent',
   },
   viewTransactionsBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
-
-  // Pickup / dine-in (082)
-  collectBox: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, padding: 14, borderRadius: 14,
-    backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primaryMid,
-  },
-  collectBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: Colors.primary },
-  collectBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: '#fff' },
-  collectCode: { fontFamily: Fonts.heading, fontSize: 28, letterSpacing: 4, color: Colors.primary, marginTop: 6 },
 
   // Wallet sheet
   walletMealsLine: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.primary, marginTop: -12, marginBottom: 6 },

@@ -1,73 +1,61 @@
-// Plan & settings → "My default meal" and "My dishes" (migration 080).
+// Plan & settings → "My default meal" and "My dishes" (migrations 080, 087).
 //
-// The customer sets, for every meal to come: portions per slot (0 = that slot
-// off), default add-ons, delivery days, and a dish of their own per slot —
-// for every day or for a weekday — instead of the chef's weekly menu. Saved
-// through set_my_plan_defaults / set_my_meal_rule, which re-sync the plan's
-// open meals (days changed by hand stay as they are); then instantiate-orders
-// fills any new days. The wallet is the plan (079), so the price per meal and
-// "about N meals left" update live as the default meal changes.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// The customer changes three things for every meal to come: portions for the
+// lunch / dinner they chose at sign-up (at least 1 — a slot they didn't choose
+// stays off), delivery days, and a dish of their own per slot — for every day
+// or for a weekday — instead of the chef's weekly menu. Add-ons are shown, not
+// changed (087). Saved through set_my_plan_defaults / set_my_meal_rule, which
+// re-sync the plan's open meals (days changed by hand stay as they are); then
+// instantiate-orders fills any new days. The wallet is the plan (079), so the
+// price per meal and "about N meals left" update live as portions change.
+import { useCallback, useEffect, useState } from 'react'
 import { View, Text, Pressable, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { Minus, Plus, Check, Lock, ChevronRight, X, Sun, Moon } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
-import PickupSheet, { usePlaces, collectionLabel, type Fulfilment } from '@/components/PickupSheet'
 import { Colors, Fonts } from '@/constants/colors'
 
 type Slot = 'lunch' | 'dinner'
-type Addon = { id: string; name: string; price_per_meal: number; description: string | null }
+type PlanAddon = { id: string; name: string; sub_option: string | null }
 type Rule = { id: string; slot: Slot; day: number | null; meal_id: string; meal_name: string; set_by: 'admin' | 'customer'; available: boolean }
 type Dish = { id: string; name: string; category: string | null }
 type MenuRow = { day_of_week: number; meal_slot: Slot; meal_templates: { id: string; name: string } | null }
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-const VARIANTS: Record<string, string[]> = {
-  smoothie: ['Berry Banana Protein', 'Watermelon Mint Chia', 'Creamy Avocado'],
-  cheese: ['Feta', 'Parmesan', 'Cheddar'],
-}
-const MAX_PER_SLOT = 3
+// Onboarding has no upper limit; the server stops at 10.
+const MAX_PER_SLOT = 10
 
 function fmt(paise: number) {
   return (paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })
 }
 
-type Defaults = { lunch: number; dinner: number; days: string[]; addons: Record<string, string | null> }
+type Defaults = { lunch: number; dinner: number; days: string[] }
 
 export default function PlanDefaults({ subId, onChanged }: { subId: string; onChanged: () => void }) {
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState<Defaults | null>(null)
   const [draft, setDraft] = useState<Defaults | null>(null)
-  const [catalogue, setCatalogue] = useState<Addon[]>([])
-  const [rate, setRate] = useState(0)          // the plan's meal price, without add-ons
+  const [planAddons, setPlanAddons] = useState<PlanAddon[]>([])
+  const [mealCost, setMealCost] = useState(0)  // one portion: plan price + its add-ons
   const [money, setMoney] = useState(0)        // wallet + cash still owed
   const [rules, setRules] = useState<Rule[]>([])
   const [menu, setMenu] = useState<MenuRow[]>([])
   const [dishes, setDishes] = useState<Dish[]>([])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
-  const [variantFor, setVariantFor] = useState<string | null>(null)
   const [picker, setPicker] = useState<{ slot: Slot; day: number | null } | null>(null)
-  // Delivery or pickup by default, per slot (082) — 30- and 60-meal plans.
-  const places = usePlaces()
-  const [allowPickup, setAllowPickup] = useState(false)
   // Sunday deliveries are arranged by the office only (083): shown, not editable.
   const [sundayByOffice, setSundayByOffice] = useState(false)
-  const [collection, setCollection] = useState<Record<Slot, { mode: Fulfilment; place: string | null }>>({
-    lunch: { mode: 'delivery', place: null }, dinner: { mode: 'delivery', place: null },
-  })
-  const [collectFor, setCollectFor] = useState<Slot | null>(null)
 
   const load = useCallback(async () => {
-    const [subRes, addonRes, costRes, rulesRes, menuRes, dishRes] = await Promise.all([
+    const [subRes, costRes, rulesRes, menuRes, dishRes] = await Promise.all([
       supabase
         .from('subscriptions')
-        .select('meals_lunch, meals_dinner, fulfilment_lunch, fulfilment_dinner, pickup_location_lunch, pickup_location_dinner, plans ( allow_pickup ), subscription_schedule ( day_of_week ), subscription_addons ( addon_id, sub_option )')
+        .select('meals_lunch, meals_dinner, subscription_schedule ( day_of_week ), subscription_addons ( addon_id, sub_option, addons ( name ) )')
         .eq('id', subId)
         .single(),
-      supabase.from('addons').select('id, name, price_per_meal, description').eq('is_active', true).order('price_per_meal'),
       supabase.rpc('my_meal_cost'),
       supabase.rpc('my_meal_rules'),
       supabase.from('weekly_menu').select('day_of_week, meal_slot, meal_templates ( id, name )').eq('menu_type', 'M1'),
@@ -75,35 +63,29 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
     ])
     const sub = subRes.data as any
     if (sub) {
-      const plan = Array.isArray(sub.plans) ? sub.plans[0] : sub.plans
-      setAllowPickup(!!plan?.allow_pickup)
-      setCollection({
-        lunch: { mode: (sub.fulfilment_lunch ?? 'delivery') as Fulfilment, place: sub.pickup_location_lunch ?? null },
-        dinner: { mode: (sub.fulfilment_dinner ?? 'delivery') as Fulfilment, place: sub.pickup_location_dinner ?? null },
-      })
-    }
-    if (sub) {
       setSundayByOffice(((sub.subscription_schedule ?? []) as { day_of_week: string }[]).some((r) => r.day_of_week === 'Sun'))
       const d: Defaults = {
         lunch: sub.meals_lunch ?? 0,
         dinner: sub.meals_dinner ?? 0,
         days: ((sub.subscription_schedule ?? []) as { day_of_week: string }[]).map((r) => r.day_of_week).filter((x) => x !== 'Sun'),
-        addons: Object.fromEntries(((sub.subscription_addons ?? []) as { addon_id: string; sub_option: string | null }[]).map((a) => [a.addon_id, a.sub_option])),
       }
       // No days saved = every day the kitchen cooks (instantiate-orders' fallback).
       if (d.days.length === 0) d.days = [...DAYS]
       setSaved(d)
       setDraft(d)
     }
-    const addons = (addonRes.data ?? []) as Addon[]
-    setCatalogue(addons)
+    if (sub) {
+      type Row = { addon_id: string; sub_option: string | null; addons: { name: string } | { name: string }[] | null }
+      setPlanAddons(((sub.subscription_addons ?? []) as Row[]).map((a) => {
+        const ad = Array.isArray(a.addons) ? a.addons[0] : a.addons
+        return { id: a.addon_id, name: ad?.name ?? a.addon_id, sub_option: a.sub_option }
+      }))
+    }
     const cost = costRes.data as { meal_cost?: number; wallet?: number; cash_due?: number } | null
-    if (cost && sub) {
-      // meal_cost includes the plan's current add-ons; take them out to get
-      // the plan's own meal price, so the draft can add its own.
-      const current = new Set(((sub.subscription_addons ?? []) as { addon_id: string }[]).map((x) => x.addon_id))
-      const included = addons.filter((a) => current.has(a.id)).reduce((s, a) => s + a.price_per_meal, 0)
-      setRate(Math.max((cost.meal_cost ?? 0) - included, 0))
+    if (cost) {
+      // Add-ons don't change here (087), so the plan's meal cost is the cost
+      // of every portion.
+      setMealCost(cost.meal_cost ?? 0)
       setMoney((cost.wallet ?? 0) + (cost.cash_due ?? 0))
     }
     setRules(((rulesRes.data ?? []) as Rule[]))
@@ -116,37 +98,21 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
     load().finally(() => setLoading(false))
   }, [load])
 
-  const addonPerMeal = useMemo(
-    () => (draft ? catalogue.filter((a) => a.id in draft.addons).reduce((s, a) => s + a.price_per_meal, 0) : 0),
-    [draft, catalogue],
-  )
-  const mealCost = rate + addonPerMeal
   const mealsLeft = mealCost > 0 ? Math.max(Math.floor(money / mealCost), 0) : 0
 
   const dirty = !!draft && !!saved && (
     draft.lunch !== saved.lunch || draft.dinner !== saved.dinner ||
-    [...draft.days].sort().join() !== [...saved.days].sort().join() ||
-    JSON.stringify(Object.entries(draft.addons).sort()) !== JSON.stringify(Object.entries(saved.addons).sort())
+    [...draft.days].sort().join() !== [...saved.days].sort().join()
   )
-  const valid = !!draft && draft.lunch + draft.dinner >= 1 && draft.days.length >= 1
+  // Lunch / dinner as chosen at sign-up: a slot they have keeps at least 1.
+  const hasLunch = (saved?.lunch ?? 0) > 0
+  const hasDinner = (saved?.dinner ?? 0) > 0
+  const valid = !!draft && (!hasLunch || draft.lunch >= 1) && (!hasDinner || draft.dinner >= 1) && draft.days.length >= 1
 
   function update(patch: Partial<Defaults>) {
     if (!draft) return
     setMessage(null)
     setDraft({ ...draft, ...patch })
-  }
-
-  function toggleAddon(a: Addon) {
-    if (!draft) return
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    const next = { ...draft.addons }
-    if (a.id in next) {
-      delete next[a.id]
-    } else {
-      next[a.id] = null
-      if (VARIANTS[a.id]) setVariantFor(a.id)
-    }
-    update({ addons: next })
   }
 
   function toggleDay(d: string) {
@@ -174,7 +140,7 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
       p_meals_lunch: draft.lunch,
       p_meals_dinner: draft.dinner,
       p_days: draft.days,
-      p_addons: Object.entries(draft.addons).map(([id, sub_option]) => ({ id, sub_option })),
+      p_addons: null,
     })
     if (error) {
       setSaving(false)
@@ -222,29 +188,30 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
       <View style={st.card}>
         <Text style={st.cardLead}>What every delivery brings unless you change that day.</Text>
 
-        {(['lunch', 'dinner'] as Slot[]).map((sl) => {
+        {slots.map((sl) => {
           const n = sl === 'lunch' ? draft.lunch : draft.dinner
           const Icon = sl === 'lunch' ? Sun : Moon
+          const atMin = n <= 1
           return (
             <View key={sl} style={st.stepRow}>
               <Icon size={17} color={Colors.primary} strokeWidth={1.75} />
               <View style={{ flex: 1 }}>
                 <Text style={st.rowTitle}>{sl === 'lunch' ? 'Lunch' : 'Dinner'}</Text>
-                <Text style={st.rowSub}>{n === 0 ? 'Off' : `${n} portion${n === 1 ? '' : 's'}`}</Text>
+                <Text style={st.rowSub}>{`${n} portion${n === 1 ? '' : 's'}`}</Text>
               </View>
               <Pressable
-                style={[st.stepBtn, n === 0 && st.stepBtnOff]}
-                disabled={n === 0}
-                onPress={() => update(sl === 'lunch' ? { lunch: n - 1 } : { dinner: n - 1 })}
+                style={[st.stepBtn, atMin && st.stepBtnOff]}
+                disabled={atMin}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); update(sl === 'lunch' ? { lunch: n - 1 } : { dinner: n - 1 }) }}
                 hitSlop={6}
               >
-                <Minus size={16} color={n === 0 ? Colors.textLight : Colors.primary} />
+                <Minus size={16} color={atMin ? Colors.textLight : Colors.primary} />
               </Pressable>
               <Text style={st.stepVal}>{n}</Text>
               <Pressable
                 style={[st.stepBtn, n >= MAX_PER_SLOT && st.stepBtnOff]}
                 disabled={n >= MAX_PER_SLOT}
-                onPress={() => update(sl === 'lunch' ? { lunch: n + 1 } : { dinner: n + 1 })}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); update(sl === 'lunch' ? { lunch: n + 1 } : { dinner: n + 1 }) }}
                 hitSlop={6}
               >
                 <Plus size={16} color={n >= MAX_PER_SLOT ? Colors.textLight : Colors.primary} />
@@ -254,24 +221,17 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
         })}
 
         <Text style={st.subhead}>Add-ons with every meal</Text>
-        {catalogue.map((a) => {
-          const on = a.id in draft.addons
-          const variant = draft.addons[a.id]
-          return (
-            <Pressable key={a.id} style={[st.addonRow, on && st.addonRowOn]} onPress={() => toggleAddon(a)}>
-              <View style={[st.check, on && st.checkOn]}>{on && <Check size={13} color="#fff" strokeWidth={3} />}</View>
-              <View style={{ flex: 1 }}>
-                <Text style={st.rowTitle}>{a.name}{on && variant ? ` · ${variant}` : ''}</Text>
-                {on && VARIANTS[a.id] ? (
-                  <Pressable onPress={() => setVariantFor(a.id)} hitSlop={6}>
-                    <Text style={st.link}>{variant ? 'Change flavour' : 'Pick a flavour'} ›</Text>
-                  </Pressable>
-                ) : a.description ? <Text style={st.rowSub}>{a.description}</Text> : null}
-              </View>
-              <Text style={st.price}>+₹{fmt(a.price_per_meal)}</Text>
-            </Pressable>
-          )
-        })}
+        <View style={st.lockedBox}>
+          <Lock size={14} color={Colors.textMuted} />
+          <View style={{ flex: 1 }}>
+            <Text style={st.rowTitle}>
+              {planAddons.length === 0
+                ? 'None'
+                : planAddons.map((a) => `${a.name}${a.sub_option ? ` (${a.sub_option})` : ''}`).join(', ')}
+            </Text>
+            <Text style={st.rowSub}>Add-ons stay as you chose when you joined. Message us on WhatsApp to change them.</Text>
+          </View>
+        </View>
 
         <Text style={st.subhead}>Delivery days</Text>
         <View style={st.dayRow}>
@@ -309,7 +269,7 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
           )}
         </View>
 
-        {!valid && <Text style={st.error}>{draft.lunch + draft.dinner < 1 ? 'Keep at least one lunch or dinner.' : 'Pick at least one delivery day.'}</Text>}
+        {!valid && <Text style={st.error}>{draft.days.length === 0 ? 'Pick at least one delivery day.' : 'Keep at least one portion.'}</Text>}
         {message && <Text style={message.ok ? st.ok : st.error}>{message.text}</Text>}
 
         <Pressable
@@ -320,25 +280,6 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
           {saving ? <ActivityIndicator color="#fff" /> : <Text style={st.btnText}>Save changes</Text>}
         </Pressable>
       </View>
-
-      {/* ── Collection (082) ────────────────────────────────────────────── */}
-      {allowPickup && slots.length > 0 && (
-        <>
-          <Text style={st.sectionTitle}>How you get your meals</Text>
-          <View style={st.card}>
-            <Text style={st.cardLead}>Delivered, or collected at our café — takeaway or dine-in. Collected meals are always your default meal. You can still change a single day in My Plan.</Text>
-            {slots.map((sl) => (
-              <DishRow
-                key={sl}
-                label={sl === 'lunch' ? 'Lunch' : 'Dinner'}
-                value={collectionLabel(collection[sl].mode, collection[sl].place, places)}
-                own={collection[sl].mode !== 'delivery'}
-                onPress={() => setCollectFor(sl)}
-              />
-            ))}
-          </View>
-        </>
-      )}
 
       {/* ── My dishes ───────────────────────────────────────────────────── */}
       {slots.length > 0 && (
@@ -393,33 +334,6 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
         </>
       )}
 
-      {collectFor && (
-        <PickupSheet
-          visible
-          title={`${collectFor === 'lunch' ? 'Lunch' : 'Dinner'} — every day`}
-          note="Your upcoming meals follow this from their next cutoff (9 AM lunch, 2 PM dinner). Days you changed by hand stay as they are. A booked meal that isn't collected is still charged."
-          slot={collectFor}
-          current={collection[collectFor]}
-          onPick={async (mode, place) => {
-            const { error } = await supabase.rpc('set_my_collection', { p_slot: collectFor, p_mode: mode, p_location: place })
-            if (error) return error.message || 'Could not save. Please try again.'
-            await load()
-            setMessage({ ok: true, text: 'Saved — your upcoming meals follow it.' })
-            onChanged()
-            return null
-          }}
-          onClose={() => setCollectFor(null)}
-        />
-      )}
-      <VariantSheet
-        addonId={variantFor}
-        current={variantFor ? draft.addons[variantFor] ?? null : null}
-        onPick={(v) => {
-          if (variantFor) update({ addons: { ...draft.addons, [variantFor]: v } })
-          setVariantFor(null)
-        }}
-        onClose={() => setVariantFor(null)}
-      />
       <DishPicker
         target={picker}
         dishes={dishes}
@@ -445,35 +359,6 @@ function DishRow({ label, value, own, inherited, onPress }: {
       </Text>
       <ChevronRight size={15} color={Colors.textMuted} />
     </Pressable>
-  )
-}
-
-function VariantSheet({ addonId, current, onPick, onClose }: {
-  addonId: string | null; current: string | null; onPick: (v: string | null) => void; onClose: () => void
-}) {
-  const insets = useSafeAreaInsets()
-  const options = addonId ? VARIANTS[addonId] ?? [] : []
-  return (
-    <Modal visible={!!addonId} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={st.overlay} onPress={onClose}>
-        <Pressable style={[st.sheet, { paddingBottom: 24 + insets.bottom }]} onPress={(e) => e.stopPropagation()}>
-          <View style={st.sheetHeader}>
-            <Text style={st.sheetTitle}>Pick a flavour</Text>
-            <Pressable onPress={onClose} hitSlop={10}><X size={20} color={Colors.textMuted} /></Pressable>
-          </View>
-          {options.map((o) => (
-            <Pressable key={o} style={[st.addonRow, current === o && st.addonRowOn]} onPress={() => onPick(o)}>
-              <Text style={[st.rowTitle, { flex: 1 }]}>{o}</Text>
-              {current === o && <Check size={16} color={Colors.primary} />}
-            </Pressable>
-          ))}
-          <Pressable style={st.addonRow} onPress={() => onPick(null)}>
-            <Text style={[st.rowSub, { flex: 1 }]}>Chef's choice each day</Text>
-            {!current && <Check size={16} color={Colors.primary} />}
-          </Pressable>
-        </Pressable>
-      </Pressable>
-    </Modal>
   )
 }
 

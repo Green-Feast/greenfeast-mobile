@@ -82,8 +82,8 @@ Deno.serve(async (req) => {
     if (['delivered', 'cancelled', 'skipped'].includes(order.status)) {
       return json({ error: 'This delivery can no longer be changed' }, 400)
     }
-    // Pickup / dine-in is always the default meal (082).
-    if (order.fulfilment && order.fulfilment !== 'delivery') return json({ error: 'Pickup and dine-in meals are your default meal — switch the day back to delivery in My Plan to change it.' }, 400)
+    // A walk-in (087) is made at the counter, not edited from My Plan.
+    if (order.fulfilment && order.fulfilment !== 'delivery') return json({ error: "Walk-in meals can't be changed here." }, 400)
     if (isSunday(order.delivery_date)) return json({ error: 'Sunday is our day off — message us on WhatsApp if you need something special.' }, 400)
     const [{ data: locked }, { data: sub }] = await Promise.all([
       supabase.rpc('is_slot_locked', { p_date: order.delivery_date, p_slot: order.meal_slot }),
