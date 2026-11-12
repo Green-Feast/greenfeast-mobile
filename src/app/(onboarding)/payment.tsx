@@ -38,7 +38,7 @@ const PLAN_FALLBACK: Record<string, { price: number; meals: number; allowCod: bo
   trial: { price: 149900, meals: 5, allowCod: true },
   plan15: { price: 405000, meals: 15, allowCod: true },
   plan30: { price: 749900, meals: 30, allowCod: true },
-  plan60: { price: 1434000, meals: 60, allowCod: false },
+  plan60: { price: 1434000, meals: 60, allowCod: true },
 }
 
 const DAY_MAP: Record<string, number> = {
