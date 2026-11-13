@@ -30,11 +30,12 @@ export default function DaysScreen() {
   }
 
   function handleNext() {
-    if (totalSlots === 0 || days.length === 0) return
+    if (totalSlots === 0) return
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     // Days can be skipped or added later from the subscriber tab, so we start in
     // opt-out mode with the chosen days active (in canonical Mon–Sat order).
-    const ordered = DAYS.filter((d) => days.includes(d))
+    // No day picked = no preference: start with all six active (skippable later).
+    const ordered = days.length === 0 ? [...DAYS] : DAYS.filter((d) => days.includes(d))
     setDays(ordered, 'opt-out', mealsLunch, mealsDinner)
     router.push('/(onboarding)/address')
   }
@@ -72,7 +73,7 @@ export default function DaysScreen() {
 
       <Text style={styles.selectedCount}>
         {days.length === 0
-          ? 'Tap at least one day to continue.'
+          ? "No days picked — we'll start you on all six. Skip any later from your subscriber tab."
           : 'Tap a day to skip it. You can change this anytime from your subscriber tab.'}
       </Text>
 
@@ -103,7 +104,7 @@ export default function DaysScreen() {
 
       {totalSlots === 0 && <Text style={styles.warn}>Add at least one meal per day</Text>}
 
-      <Button onPress={handleNext} disabled={totalSlots === 0 || days.length === 0}>Next →</Button>
+      <Button onPress={handleNext} disabled={totalSlots === 0}>Next →</Button>
     </ScrollView>
     </View>
   )

@@ -35,13 +35,14 @@ export default function RulerPicker({
   const [liveValue, setLiveValue] = useState(value)
   useEffect(() => { setLiveValue(value) }, [value])
 
-  // Each tick's slot is TICK_SPACING wide with its line centered inside, so
-  // the scroll offset that puts tick v exactly under the fixed center
-  // indicator needs the extra half-tick — omitting it (as this used to)
-  // means the indicator always sits between two ticks, off by one after
-  // handleScrollEnd's rounding resolves the ambiguity.
-  const xForValue = (v: number) => (v - min) * TICK_SPACING + TICK_SPACING / 2
-  const valueForX = (x: number) => min + Math.round((x - TICK_SPACING / 2) / TICK_SPACING)
+  // Content padding is (half the ruler width - half a tick), so tick v's
+  // center sits under the fixed center indicator at exactly
+  // (v - min) * TICK_SPACING. That keeps every value on a multiple of
+  // TICK_SPACING, which is what snapToInterval snaps to — previously the
+  // half-tick offset lived in the scroll position instead, so snaps landed
+  // between two markers.
+  const xForValue = (v: number) => (v - min) * TICK_SPACING
+  const valueForX = (x: number) => min + Math.round(x / TICK_SPACING)
 
   function onRulerLayout(e: LayoutChangeEvent) {
     const w = e.nativeEvent.layout.width
@@ -81,6 +82,11 @@ export default function RulerPicker({
     const derived = Math.min(max, Math.max(min, valueForX(x)))
     lastScrollValue.current = derived
     setLiveValue(derived)
+    // Settle precisely on the tick in case the platform stopped off-grid.
+    const target = xForValue(derived)
+    if (Math.abs(target - x) > 0.5) {
+      scrollRef.current?.scrollTo({ x: target, animated: true })
+    }
     if (derived !== value) onChange(derived)
   }
 
@@ -92,7 +98,7 @@ export default function RulerPicker({
   }
 
   const ticks = Array.from({ length: max - min + 1 }, (_, i) => min + i)
-  const halfPad = rulerWidth > 0 ? rulerWidth / 2 : 150
+  const halfPad = (rulerWidth > 0 ? rulerWidth / 2 : 150) - TICK_SPACING / 2
 
   return (
     <View style={styles.container}>
@@ -225,7 +231,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     height: 56,
-    paddingBottom: 4,
+    paddingBottom: 18,   // room for the absolutely-positioned labels
   },
 
   tickSlot: {
@@ -249,10 +255,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.ink500,
   },
   tickLabel: {
+    position: 'absolute',
+    top: '100%',
+    width: TICK_SPACING * 3,
+    left: -TICK_SPACING,
+    marginTop: 3,
     fontFamily: Fonts.body,
     fontSize: 10,
     color: Colors.ink400,
-    marginTop: 3,
     textAlign: 'center',
   },
 })

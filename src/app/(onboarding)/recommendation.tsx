@@ -400,7 +400,7 @@ function Page({ children }: { children: React.ReactNode }) {
 // Fixed height so all 4 carousel cards read as the same size regardless of
 // content length; an inner ScrollView is a safety net if any card's content
 // (e.g. many allergens/add-ons) ever exceeds it, rather than clipping.
-const CARD_HEIGHT = 520
+const CARD_HEIGHT = 548
 
 function CardShell({ children }: { children: React.ReactNode }) {
   return (
@@ -465,7 +465,7 @@ const styles = StyleSheet.create({
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 },
 
   proteinLine: { fontFamily: Fonts.body, fontSize: 13, color: Colors.ink500, lineHeight: 18, marginBottom: 14 },
-  social: { fontFamily: Fonts.body, fontSize: 13, color: Colors.green700 },
+  social: { fontFamily: Fonts.body, fontSize: 13, lineHeight: 18, color: Colors.green700, marginTop: 4 },
 
   macroRowWrap: { marginBottom: 18 },
   macroList: { gap: 10 },
