@@ -3,12 +3,14 @@
 // A 30- or 60-meal subscriber walks into one of our places (11 AM–11 PM, any
 // day) and eats their default meal there or takes it away. The structure is
 // the plan's — the same add-ons, 1–2 portions (their default, or one more) —
-// but the dish and any flavour are theirs to pick; dishes that are delivery
+// but the dish, the drink (088: any active smoothie or coffee, or the chef's
+// choice) and any flavour are theirs to pick; dishes that are delivery
 // only (not on the café menu) can't be a walk-in. One a day, separate from
 // deliveries. start_walk_in returns a 6-digit code; the Counter hands the meal
 // over and only then is it paid from the wallet. An unused code lapses at
 // closing time, uncharged.
 import { useCallback, useEffect, useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import { View, Text, Pressable, StyleSheet, Modal, ScrollView, ActivityIndicator, Linking } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
@@ -16,6 +18,7 @@ import { Store, MapPin, Check, ChevronRight, X, UtensilsCrossed, ShoppingBag, Lo
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import { ADDON_VARIANTS } from '@/constants/addonVariants'
+import { DRINK_CATEGORIES, DRINK_NAME, isDrinkCategory } from '@/constants/drinks'
 
 type Place = {
   id: string
@@ -29,6 +32,9 @@ type Place = {
 }
 type Mode = 'dine_in' | 'pickup'
 type Dish = { id: string; name: string; category: string | null; kcal: number | null; protein: number | null }
+// A drink to choose (088): any active smoothie or coffee dish. Walk-in is
+// dine-in or takeaway, so coffee is fine here (it isn't delivered).
+type DrinkDish = { id: string; name: string; category: string | null }
 type QuoteAddon = { id: string; name: string; sub_option: string | null }
 type Today = {
   order_id: string
@@ -186,16 +192,29 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
   const [dishId, setDishId] = useState<string | null>(null)
   const [portions, setPortions] = useState(1)
   const [flavours, setFlavours] = useState<Record<string, string | null>>({})
+  // Drinks (088): which add-on is the plan's drink, the dishes to choose from,
+  // and the pick (null = chef's choice).
+  const [drinkAddonIds, setDrinkAddonIds] = useState<string[]>([])
+  const [drinks, setDrinks] = useState<DrinkDish[]>([])
+  const [drinkId, setDrinkId] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     if (!place) return
-    setQuote(null); setError(''); setPicking(false)
-    supabase.rpc('walk_in_quote', { p_location: place.id }).then(({ data, error: err }) => {
-      if (err) return setError(err.message || 'Could not load. Please try again.')
+    setQuote(null); setError(''); setPicking(false); setDrinkId(null)
+    Promise.all([
+      supabase.rpc('walk_in_quote', { p_location: place.id }),
+      supabase.from('meal_templates').select('id, name, category')
+        .in('category', [...DRINK_CATEGORIES]).eq('is_active', true).order('category').order('name'),
+      supabase.from('addons').select('id').eq('is_drink', true),
+    ]).then(([{ data, error: err }, drinkRes, addonRes]) => {
+      if (err) return setError(friendlyError(err, 'Could not load. Please try again.'))
       const q = data as Quote
+      // If the drink flag can't be read (older database), the smoothie add-on is the drink.
+      setDrinkAddonIds(addonRes.error ? ['smoothie'] : ((addonRes.data ?? []) as { id: string }[]).map((a) => a.id))
+      setDrinks((drinkRes.data ?? []) as DrinkDish[])
       setQuote(q)
       setMode(q.offers_dine_in ? 'dine_in' : q.offers_pickup ? 'pickup' : null)
       setDishId(q.default_meal_ok ? q.default_meal_id ?? null : null)
@@ -205,7 +224,10 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
     })
   }, [place])
 
-  const dishes = quote?.dishes ?? []
+  // The meal is a real dish; drinks have their own chips below.
+  const dishes = (quote?.dishes ?? []).filter((d) => !isDrinkCategory(d.category))
+  const drinkAddon = (quote?.addons ?? []).find((a) => drinkAddonIds.includes(a.id)) ?? null
+  const otherAddons = (quote?.addons ?? []).filter((a) => !drinkAddonIds.includes(a.id))
   const dish = dishes.find((d) => d.id === dishId) ?? null
   const cost = (quote?.portion_cost ?? 0) * portions
   const cantAfford = !!quote && (quote.spendable ?? 0) < cost
@@ -216,17 +238,22 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
     if (!place || !quote || blocked || !mode || !dish) return
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     setBusy(true); setError('')
+    // Variants (cheese...) per add-on, plus the drink dish when one is picked;
+    // left out for chef's choice. The drink add-on is never sent as a flavour:
+    // that is the old free-text path, kept on the server for old app builds.
+    const options: Record<string, string | null> = Object.fromEntries(otherAddons.map((a) => [a.id, flavours[a.id] ?? null]))
+    if (drinkAddon && drinkId) options.drink = drinkId
     const { data, error: err } = await supabase.rpc('start_walk_in', {
       p_location: place.id,
       p_mode: mode,
       p_meal: dish.id,
       p_portions: portions,
-      p_options: flavours,
+      p_options: options,
     })
     setBusy(false)
     if (err) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      return setError(err.message || 'Could not place it. Please try again.')
+      return setError(friendlyError(err, 'Could not place it. Please try again.'))
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     onOrdered(data as Today)
@@ -316,11 +343,38 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
               </View>
               {(quote.portions ?? []).length === 1 && <Text style={st.small}>A walk-in is up to 2 portions.</Text>}
 
+              {/* Drink: with every meal; pick a dish or leave it to the chef */}
+              {drinkAddon && (
+                <>
+                  <Text style={st.subhead}>Your drink</Text>
+                  <View style={st.addonRow}>
+                    <View style={st.addonHead}>
+                      <Lock size={13} color={Colors.textMuted} />
+                      <Text style={[st.rowTitle, { flex: 1 }]}>{DRINK_NAME}{portions > 1 ? ` ×${portions}` : ''}</Text>
+                    </View>
+                    <View style={st.chipRow}>
+                      {drinks.map((d) => {
+                        const on = drinkId === d.id
+                        return (
+                          <Pressable key={d.id} style={[st.chip, on && st.chipOn]} onPress={() => setDrinkId(d.id)}>
+                            <Text style={[st.chipText, on && st.chipTextOn]}>{d.name}</Text>
+                          </Pressable>
+                        )
+                      })}
+                      <Pressable style={[st.chip, !drinkId && st.chipOn]} onPress={() => setDrinkId(null)}>
+                        <Text style={[st.chipText, !drinkId && st.chipTextOn]}>Chef&apos;s choice</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                  <Text style={st.small}>A drink comes with your walk-in, same as with a delivery.</Text>
+                </>
+              )}
+
               {/* Add-ons: fixed, flavours free */}
-              {(quote.addons ?? []).length > 0 && (
+              {otherAddons.length > 0 && (
                 <>
                   <Text style={st.subhead}>With your meal</Text>
-                  {(quote.addons ?? []).map((a) => {
+                  {otherAddons.map((a) => {
                     const variants = ADDON_VARIANTS[a.id]
                     return (
                       <View key={a.id} style={st.addonRow}>

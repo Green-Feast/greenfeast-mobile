@@ -16,6 +16,7 @@ import { useOnboardingStore, type PlanId, type AddOnSelection } from '@/store/on
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
+import { addonLabel, DRINK_TAGLINE, DRINK_HINT } from '@/constants/drinks'
 
 type Plan = {
   id: PlanId
@@ -33,9 +34,9 @@ type Addon = {
   protein: number | null
   carbs: number | null
   fat: number | null
+  is_drink?: boolean | null
 }
 
-const SMOOTHIE_OPTIONS = ['Berry Banana Protein', 'Watermelon Mint Chia', 'Creamy Avocado']
 const CHEESE_OPTIONS = ['Feta', 'Parmesan', 'Cheddar']
 
 function fmt(paise: number) {
@@ -87,7 +88,7 @@ export default function PlanScreen() {
   function toggleAddon(id: string) {
     setSelectedAddons((prev) => {
       const next = { ...prev, [id]: !prev[id] }
-      if (next[id] && (id === 'smoothie' || id === 'cheese')) {
+      if (next[id] && id === 'cheese') {
         setSubOptionModal(id)
       }
       return next
@@ -101,7 +102,7 @@ export default function PlanScreen() {
       .filter((a) => selectedAddons[a.id])
       .map((a) => ({
         id: a.id,
-        name: a.name,
+        name: addonLabel(a),
         pricePerMeal: a.price_per_meal,
         subOption: subOptions[a.id],
       }))
@@ -119,7 +120,52 @@ export default function PlanScreen() {
     }
   }
 
-  const subOpts = subOptionModal === 'smoothie' ? SMOOTHIE_OPTIONS : CHEESE_OPTIONS
+  // The drink add-on (088) is presented apart from the other add-ons; it is
+  // priced and saved exactly like one.
+  const drinkAddons = addons.filter((a) => a.is_drink)
+  const otherAddons = addons.filter((a) => !a.is_drink)
+
+  function renderAddonRow(a: Addon) {
+    const isOn = !!selectedAddons[a.id]
+    const isDrink = !!a.is_drink
+    const subOpt = subOptions[a.id]
+    const desc = isDrink ? `${DRINK_TAGLINE}. ${DRINK_HINT}` : a.description
+    return (
+      <TouchableOpacity
+        key={a.id}
+        style={[styles.addonRow, isOn && styles.addonRowActive]}
+        onPress={() => toggleAddon(a.id)}
+      >
+        <View style={[styles.checkbox, isOn && styles.checkboxActive]}>
+          {isOn && <Text style={styles.checkmark}>✓</Text>}
+        </View>
+        <View style={styles.addonInfo}>
+          <Text style={styles.addonName}>
+            {addonLabel(a)}
+            {subOpt ? ` (${subOpt})` : ''}
+          </Text>
+          {desc ? <Text style={styles.addonDesc}>{desc}</Text> : null}
+          {isOn && a.id === 'cheese' && (
+            <TouchableOpacity onPress={() => setSubOptionModal(a.id)}>
+              <Text style={styles.changeVariant}>
+                {subOpt ? 'Change variant ›' : 'Pick variant ›'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={styles.addonRight}>
+          <TouchableOpacity
+            style={styles.infoBtn}
+            onPress={() => setMacroModal(a)}
+            hitSlop={8}
+          >
+            <Info size={16} color={Colors.textMuted} />
+          </TouchableOpacity>
+          <Text style={styles.addonPrice}>{fmt(a.price_per_meal)}/meal</Text>
+        </View>
+      </TouchableOpacity>
+    )
+  }
 
   if (loading) {
     return (
@@ -181,49 +227,21 @@ export default function PlanScreen() {
         })}
       </View>
 
+      {/* Drink (088): a smoothie with every meal, apart from the add-ons */}
+      {drinkAddons.length > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>Add a drink</Text>
+          <View style={styles.addonList}>{drinkAddons.map(renderAddonRow)}</View>
+        </>
+      )}
+
       {/* Add-ons */}
-      <Text style={styles.sectionLabel}>Enhance your plan</Text>
-      <View style={styles.addonList}>
-        {addons.map((a) => {
-          const isOn = !!selectedAddons[a.id]
-          const subOpt = subOptions[a.id]
-          return (
-            <TouchableOpacity
-              key={a.id}
-              style={[styles.addonRow, isOn && styles.addonRowActive]}
-              onPress={() => toggleAddon(a.id)}
-            >
-              <View style={[styles.checkbox, isOn && styles.checkboxActive]}>
-                {isOn && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <View style={styles.addonInfo}>
-                <Text style={styles.addonName}>
-                  {a.name}
-                  {subOpt ? ` (${subOpt})` : ''}
-                </Text>
-                {a.description && <Text style={styles.addonDesc}>{a.description}</Text>}
-                {isOn && (a.id === 'smoothie' || a.id === 'cheese') && (
-                  <TouchableOpacity onPress={() => setSubOptionModal(a.id)}>
-                    <Text style={styles.changeVariant}>
-                      {subOpt ? 'Change variant ›' : 'Pick variant ›'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              <View style={styles.addonRight}>
-                <TouchableOpacity
-                  style={styles.infoBtn}
-                  onPress={() => setMacroModal(a)}
-                  hitSlop={8}
-                >
-                  <Info size={16} color={Colors.textMuted} />
-                </TouchableOpacity>
-                <Text style={styles.addonPrice}>{fmt(a.price_per_meal)}/meal</Text>
-              </View>
-            </TouchableOpacity>
-          )
-        })}
-      </View>
+      {otherAddons.length > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>Enhance your plan</Text>
+          <View style={styles.addonList}>{otherAddons.map(renderAddonRow)}</View>
+        </>
+      )}
 
       {/* Price summary */}
       {selectedPlan && (
@@ -234,7 +252,7 @@ export default function PlanScreen() {
           </View>
           {addons.filter((a) => selectedAddons[a.id]).map((a) => (
             <View key={a.id} style={styles.priceRow}>
-              <Text style={styles.priceLabel}>{a.name}</Text>
+              <Text style={styles.priceLabel}>{addonLabel(a)}</Text>
               <Text style={styles.priceValue}>
                 +{fmt(a.price_per_meal * (plan?.meals_total ?? 0))}
               </Text>
@@ -249,7 +267,7 @@ export default function PlanScreen() {
 
       <Button onPress={handleNext} disabled={!selectedPlan}>Next →</Button>
 
-      {/* Sub-option picker modal */}
+      {/* Sub-option picker modal (cheese type) */}
       <Modal
         visible={!!subOptionModal}
         transparent
@@ -263,10 +281,8 @@ export default function PlanScreen() {
         />
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>
-            Pick {subOptionModal === 'smoothie' ? 'flavour' : 'cheese type'}
-          </Text>
-          {subOpts.map((opt) => (
+          <Text style={styles.sheetTitle}>Pick cheese type</Text>
+          {CHEESE_OPTIONS.map((opt) => (
             <TouchableOpacity
               key={opt}
               style={styles.sheetOption}
@@ -293,8 +309,10 @@ export default function PlanScreen() {
           <View style={styles.sheetHandle} />
           {macroModal && (
             <>
-              <Text style={styles.sheetTitle}>{macroModal.name} · per meal</Text>
-              {macroModal.description && <Text style={styles.macroDesc}>{macroModal.description}</Text>}
+              <Text style={styles.sheetTitle}>{addonLabel(macroModal)} · per meal</Text>
+              {macroModal.is_drink
+                ? <Text style={styles.macroDesc}>{DRINK_TAGLINE}. The kitchen picks the flavour daily, so macros vary a little.</Text>
+                : macroModal.description && <Text style={styles.macroDesc}>{macroModal.description}</Text>}
               <View style={styles.macroGrid}>
                 <MacroBox label="Kcal" value={macroModal.kcal != null ? `${macroModal.kcal}` : '—'} />
                 <MacroBox label="Protein" value={macroModal.protein != null ? `${macroModal.protein}g` : '—'} />

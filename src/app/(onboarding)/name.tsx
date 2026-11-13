@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -50,7 +51,7 @@ export default function OnboardingNameScreen() {
       .eq('id', user.id)
 
     if (updateError) {
-      setError(updateError.message)
+      setError(friendlyError(updateError, 'Could not save your name. Please try again.'))
       setLoading(false)
       return
     }

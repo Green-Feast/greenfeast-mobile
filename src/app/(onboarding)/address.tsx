@@ -17,6 +17,7 @@ import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 import LocationPicker, { type LatLng } from '@/components/LocationPicker'
 import { usePlacesAutocomplete, PredictionsDropdown } from '@/components/PlacesAutocomplete'
+import { cityForPincode } from '@/lib/geocode'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
 
 const ADDRESS_TYPES = [
@@ -37,18 +38,25 @@ export default function AddressScreen() {
   const [type, setType] = useState<'home' | 'office' | 'other'>('home')
   const [label, setLabel] = useState('Home')
   const [pin, setPin] = useState<LatLng | null>(null)
+  // addresses.city is NOT NULL and not hardcoded (we're expanding beyond
+  // Jaipur). Set by the map pin / autocomplete pick and cleared whenever the
+  // pincode or pin changes by other means; '' means "look it up from the
+  // pincode on Continue".
+  const [city, setCity] = useState('')
+  const [resolving, setResolving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [focused, setFocused] = useState<string | null>(null)
   const line1Ref = useAutoFocus()
 
   const autocomplete = usePlacesAutocomplete((sel) => {
     setLine1(sel.description)
-    setErrors((e) => ({ ...e, line1: '' }))
+    setErrors((e) => ({ ...e, line1: '', city: '' }))
     if (sel.pincode && /^\d{6}$/.test(sel.pincode)) {
       setPincode(sel.pincode)
       setErrors((e) => ({ ...e, pincode: '' }))
     }
     if (sel.lat != null && sel.lng != null) setPin({ lat: sel.lat, lng: sel.lng })
+    setCity(sel.city?.trim() ?? '')
   })
 
   function validate() {
@@ -58,17 +66,37 @@ export default function AddressScreen() {
     return e
   }
 
-  function handleNext() {
+  async function handleNext() {
+    if (resolving) return
     const e = validate()
     if (Object.keys(e).length > 0) {
       setErrors(e)
       return
     }
+    // City from the pin / autocomplete pick, else from the pincode. With none,
+    // stop here and ask for a map pin — don't carry on without a city.
+    let resolvedCity = city.trim()
+    if (!resolvedCity) {
+      setResolving(true)
+      try {
+        resolvedCity = (await cityForPincode(pincode)) ?? ''
+      } finally {
+        setResolving(false)
+      }
+    }
+    if (!resolvedCity) {
+      setErrors({
+        city: "We couldn't work out your city from this pincode. Please pin your location on the map above so we can find it.",
+      })
+      return
+    }
+    setCity(resolvedCity)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     const resolvedLabel = label || type.charAt(0).toUpperCase() + type.slice(1)
     setAddress({
       addressLine1: line1.trim(),
       addressLandmark: landmark.trim(),
+      addressCity: resolvedCity,
       addressPincode: pincode,
       addressLabel: resolvedLabel,
       addressType: type,
@@ -83,7 +111,7 @@ export default function AddressScreen() {
         label: resolvedLabel,
         type,
         line1: line1.trim(),
-        city: 'Jaipur',
+        city: resolvedCity,
         pincode,
         landmark: landmark.trim() || null,
         lat: pin?.lat ?? null,
@@ -164,7 +192,11 @@ export default function AddressScreen() {
           keyboardType="number-pad"
           maxLength={6}
           value={pincode}
-          onChangeText={(t) => { setPincode(t.replace(/\D/g, '')); setErrors((e) => ({ ...e, pincode: '' })) }}
+          onChangeText={(t) => {
+            setPincode(t.replace(/\D/g, ''))
+            setCity('') // the city belonged to the old pincode
+            setErrors((e) => ({ ...e, pincode: '', city: '' }))
+          }}
           onFocus={() => setFocused('pincode')}
           onBlur={() => setFocused(null)}
           placeholderTextColor={Colors.ink300}
@@ -176,10 +208,15 @@ export default function AddressScreen() {
         <Text style={styles.label}>PIN YOUR LOCATION <Text style={styles.optional}>(optional)</Text></Text>
         <LocationPicker
           value={pin}
-          onChange={setPin}
-          onResolveAddress={({ line1: l1, pincode: pc }) => {
+          onChange={(c) => {
+            setPin(c)
+            setCity('') // re-filled by onResolveAddress once the pin is geocoded
+            setErrors((e) => ({ ...e, city: '' }))
+          }}
+          onResolveAddress={({ line1: l1, pincode: pc, city: c }) => {
             if (l1) { setLine1(l1); setErrors((e) => ({ ...e, line1: '' })) }
             if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setErrors((e) => ({ ...e, pincode: '' })) }
+            setCity(c?.trim() ?? '')
           }}
         />
       </View>
@@ -230,7 +267,9 @@ export default function AddressScreen() {
         />
       </View>
 
-      <Button onPress={handleNext} style={{ marginTop: 8 }}>Review order →</Button>
+      {/* Shown here, beside the CTA, so it is seen even when the map has scrolled out of view. */}
+      {errors.city ? <Text style={[styles.error, { marginBottom: 8 }]}>{errors.city}</Text> : null}
+      <Button onPress={handleNext} loading={resolving} style={{ marginTop: 8 }}>Review order →</Button>
       </KeyboardAwareScreen>
     </View>
   )

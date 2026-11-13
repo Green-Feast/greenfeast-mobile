@@ -14,7 +14,38 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!
 // use a Promise.race + setTimeout approach instead (doesn't touch fetch's
 // signal at all, so it can't have this failure mode), and verify on-device
 // before shipping again.
+// Some Indian mobile networks block *.supabase.co at the DNS level, so the
+// app can be pointed at our own domain instead (EXPO_PUBLIC_SUPABASE_URL =
+// e.g. https://api.<our-domain>, a Supabase custom domain or proxy). The
+// database still stores absolute links on the original host (meal photos:
+// https://<ref>.supabase.co/storage/v1/...), which would stay blocked, so
+// when a different host is configured every response body has that origin
+// rewritten to ours. Off entirely while the URL is still *.supabase.co.
+// No AbortController / signal handling here (see the note above).
+const ORIGINAL_SUPABASE_ORIGIN = 'https://amwwjcwoumhbdxaxvexj.supabase.co'
+const configuredOrigin = supabaseUrl?.replace(/\/+$/, '')
+const rewriteOrigin = !!configuredOrigin && configuredOrigin !== ORIGINAL_SUPABASE_ORIGIN
+
+export function rewriteSupabaseUrl<T extends string | null | undefined>(url: T): T {
+  if (!rewriteOrigin || !url) return url
+  return url.split(ORIGINAL_SUPABASE_ORIGIN).join(configuredOrigin) as T
+}
+
+const proxyAwareFetch: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init)
+  if (!rewriteOrigin) return res
+  const type = res.headers.get('content-type') ?? ''
+  if (!type.includes('json')) return res
+  const text = await res.text()
+  return new Response(rewriteSupabaseUrl(text), {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  })
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: proxyAwareFetch },
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,

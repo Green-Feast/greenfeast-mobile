@@ -1,6 +1,7 @@
 // Account → Send feedback: an idea, a problem, a compliment or anything else.
 // Goes to admin → Feedback (App feedback) and alerts the team.
 import { useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import { View, Text, TextInput, Pressable, Modal, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Linking } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
@@ -46,7 +47,7 @@ export default function FeedbackSheet({ visible, onClose }: { visible: boolean; 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
       setDone(true)
     } catch (e: any) {
-      setError(e?.message ?? 'Could not send your feedback. Please try again.')
+      setError(friendlyError(e, 'Could not send your feedback. Please try again.'))
     } finally {
       setBusy(false)
     }

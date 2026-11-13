@@ -18,6 +18,13 @@ const isSunday = (iso: string) => new Date(iso + 'T00:00:00Z').getUTCDay() === 0
 //                                         entirely rather than left at 0. A default
 //                                         add-on floors at 1 (same protection as
 //                                         remove_addon) instead of being removable here.
+//   op = 'set_drink'      { drink_template_id }
+//                                       — swap the day's drink (088). The order must carry
+//                                         the plan's drink add-on, and the drink must be
+//                                         deliverable (active + valid for plans) and not
+//                                         marked unavailable for the delivery day. Sets
+//                                         orders.drink_template_id + drink_edited and the
+//                                         drink line's sub_option (its name). No price change.
 //
 // IMPORTANT: no money moves here. The wallet is the billing ledger and is
 // debited ON DELIVERY by advance_batch_delivered, which bills orders.cart_total
@@ -62,10 +69,11 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { order_id, op, addon_id } = await req.json() as {
+    const { order_id, op, addon_id, drink_template_id } = await req.json() as {
       order_id?: string
-      op?: 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty' | 'inc_addon_qty' | 'dec_addon_qty'
+      op?: 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty' | 'inc_addon_qty' | 'dec_addon_qty' | 'set_drink'
       addon_id?: string
+      drink_template_id?: string
     }
     if (!order_id || !op) return json({ error: 'order_id and op are required' }, 400)
 
@@ -191,6 +199,51 @@ Deno.serve(async (req) => {
         .eq('id', order.id)
     }
 
+    // ── set_drink (the plan's drink is already paid for: no price change) ──
+    // A drink is a meal_templates row (smoothie / coffee). The order must carry
+    // the plan's drink add-on line, and the customer may only pick a deliverable
+    // drink. drink_edited stops the kitchen's menu changes from overwriting it.
+    // Both writes are idempotent, so a retry after a failed second write fixes it.
+    let pickedDrink: { id: string; name: string } | null = null
+    if (op === 'set_drink') {
+      if (!drink_template_id) return json({ error: 'drink_template_id required' }, 400)
+      const [{ data: hasDrink }, { data: deliverable }, { data: drinkAddons }, { data: drink }, { data: unavailable }] = await Promise.all([
+        supabase.rpc('order_has_drink', { p_order: order.id }),
+        supabase.rpc('is_deliverable_drink', { p_drink: drink_template_id }),
+        supabase.from('addons').select('id').eq('is_drink', true),
+        supabase.from('meal_templates').select('id, name').eq('id', drink_template_id).maybeSingle(),
+        // Marked unavailable for the delivery day (row absent = available), like switch-meal / add-dish.
+        supabase.from('meal_availability').select('is_available')
+          .eq('for_date', order.delivery_date).eq('meal_template_id', drink_template_id)
+          .eq('is_available', false).maybeSingle(),
+      ])
+      if (!hasDrink) return json({ error: 'This meal does not come with a drink.' }, 400)
+      if (!deliverable || !drink) return json({ error: 'This drink is not available for delivery.' }, 400)
+      if (unavailable) return json({ error: "That drink isn't available that day." }, 400)
+
+      const { error: orderErr } = await supabase.from('orders')
+        .update({
+          drink_template_id: drink.id,
+          drink_edited: true,
+          cart_edited: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', order.id)
+      if (orderErr) {
+        console.error('update-day-cart set_drink (order) failed:', orderErr.message)
+        return json({ error: 'Internal server error' }, 500)
+      }
+      const { error: lineErr } = await supabase.from('order_addons')
+        .update({ sub_option: drink.name })
+        .eq('order_id', order.id).eq('kind', 'addon')
+        .in('addon_id', (drinkAddons ?? []).map((a: { id: string }) => a.id))
+      if (lineErr) {
+        console.error('update-day-cart set_drink (line) failed:', lineErr.message)
+        return json({ error: 'Internal server error' }, 500)
+      }
+      pickedDrink = { id: drink.id, name: drink.name }
+    }
+
     // Changed by hand: plan-default changes leave this day alone (080).
     await supabase.from('orders').update({ cart_edited: true }).eq('id', order.id)
 
@@ -199,7 +252,14 @@ Deno.serve(async (req) => {
       supabase.rpc('recompute_order_cart', { p_order: order.id }),
       supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle(),
     ])
-    return json({ ok: true, order_id: order.id, cart_total: cartTotal ?? null, wallet_balance: wallet?.balance ?? 0 })
+    return json({
+      ok: true,
+      order_id: order.id,
+      cart_total: cartTotal ?? null,
+      wallet_balance: wallet?.balance ?? 0,
+      // set_drink only: what the order's drink is now.
+      ...(pickedDrink ? { drink_template_id: pickedDrink.id, drink_name: pickedDrink.name } : {}),
+    })
   } catch (err) {
     console.error('update-day-cart error:', err)
     return json({ error: 'Internal server error' }, 500)

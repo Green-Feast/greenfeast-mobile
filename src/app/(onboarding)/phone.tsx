@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -111,7 +112,7 @@ export default function OnboardingPhoneScreen() {
       }
       if (r.error === 'in_use') setInUse(true)
       if (r.error === 'too_soon' && step === 'code') setResendIn(r.resend_in ?? 30)
-      setError(r.message ?? 'Could not send the code. Please try again.')
+      setError(friendlyError(r.message, 'Could not send the code. Please try again.'))
       return
     }
     setStep('code')
@@ -127,7 +128,7 @@ export default function OnboardingPhoneScreen() {
     try {
       const r = await otp({ action: 'verify', phone, code: value })
       if (!r.ok) {
-        setError(r.message ?? 'That code isn’t right.')
+        setError(friendlyError(r.message, 'That code isn’t right.'))
         if (r.error === 'in_use') setInUse(true)
         return
       }
@@ -146,7 +147,7 @@ export default function OnboardingPhoneScreen() {
       if (otpEnabled) await sendCode()
       else await saveWithoutCode()
     } catch (e: any) {
-      setError(e?.message ?? 'Something went wrong. Please try again.')
+      setError(friendlyError(e, 'Something went wrong. Please try again.'))
     } finally {
       setLoading(false)
     }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -27,6 +28,7 @@ import SectionProgress from '@/components/SectionProgress'
 import CouponField from '@/components/CouponField'
 import ReferralField, { type ReferralApplied } from '@/components/ReferralField'
 import { couponsAllowed, type CouponQuote } from '@/lib/coupons'
+import { cityForPincode } from '@/lib/geocode'
 
 type Method = 'cashfree' | 'cod'
 type Phase = 'summary' | 'creating' | 'success'
@@ -142,12 +144,19 @@ export default function PaymentScreen() {
     // 1. Upsert address — address.tsx may have already written this incrementally;
     //    if a default address exists for the user, update it in-place instead of
     //    creating a duplicate.
+    //    addresses.city is NOT NULL and never hardcoded: the address step already
+    //    resolved it (map pin / autocomplete / pincode lookup); look it up again
+    //    only as a safety net, and stop before creating anything if it's unknown.
+    const city = store.addressCity.trim() || (await cityForPincode(store.addressPincode)) || ''
+    if (!city) {
+      throw new Error("We couldn't confirm your delivery city. Please go back to the address step and pin your location on the map.")
+    }
     const addressFields = {
       user_id: user.id,
       label: store.addressLabel,
       type: store.addressType,
       line1: store.addressLine1,
-      city: 'Jaipur',
+      city,
       pincode: store.addressPincode,
       landmark: store.addressLandmark || null,
       lat: store.addressLat,
@@ -345,7 +354,7 @@ export default function PaymentScreen() {
       // Stay in 'creating' — the native checkout UI covers this screen until
       // the callback below fires.
     } catch (e: any) {
-      setError(e?.message ?? 'Something went wrong. Please try again.')
+      setError(friendlyError(e, 'Something went wrong. Please try again.'))
       setPhase('summary')
     }
   }

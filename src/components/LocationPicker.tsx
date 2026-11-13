@@ -10,13 +10,15 @@ export type LatLng = { lat: number; lng: number }
 // Jaipur — the delivery city — is the default map center.
 const JAIPUR: Region = { latitude: 26.9124, longitude: 75.7873, latitudeDelta: 0.06, longitudeDelta: 0.06 }
 
-export type ResolvedAddress = { line1?: string; pincode?: string }
+export type ResolvedAddress = { line1?: string; pincode?: string; city?: string }
 
 type Props = {
   value: LatLng | null
   onChange: (c: LatLng) => void
-  // Called after the pin moves with the reverse-geocoded street + pincode, so
-  // the caller can auto-fill the address fields.
+  // Called after the pin moves with the reverse-geocoded street + pincode +
+  // city, so the caller can auto-fill the address fields. `city` is omitted
+  // when the geocoder returns none — callers should then treat the city as
+  // unknown (not keep the previous pin's).
   onResolveAddress?: (a: ResolvedAddress) => void
   height?: number
 }
@@ -24,6 +26,9 @@ type Props = {
 export default function LocationPicker({ value, onChange, onResolveAddress, height = 200 }: Props) {
   const mapRef = useRef<MapView>(null)
   const [locating, setLocating] = useState(false)
+  // Latest pin move wins: a slow reverse-geocode of an earlier pin must not
+  // overwrite the address / city of the pin the user has since moved to.
+  const geocodeSeq = useRef(0)
 
   const marker = value
     ? { latitude: value.lat, longitude: value.lng }
@@ -32,13 +37,19 @@ export default function LocationPicker({ value, onChange, onResolveAddress, heig
   async function set(latitude: number, longitude: number) {
     onChange({ lat: latitude, lng: longitude })
     if (!onResolveAddress) return
+    const seq = ++geocodeSeq.current
     try {
       const res = await Location.reverseGeocodeAsync({ latitude, longitude })
+      if (seq !== geocodeSeq.current) return
       const r = res?.[0]
       if (!r) return
       const parts = [r.name, r.street, r.district].filter(Boolean) as string[]
       const line1 = Array.from(new Set(parts)).join(', ')
-      onResolveAddress({ line1: line1 || undefined, pincode: r.postalCode || undefined })
+      // City: the geocoder's `city` (locality), else `subregion` (the district
+      // town, e.g. "Jaipur"). `district` is deliberately NOT a fallback — on
+      // both platforms it is the neighbourhood (sub-locality), not a city.
+      const city = r.city?.trim() || r.subregion?.trim() || undefined
+      onResolveAddress({ line1: line1 || undefined, pincode: r.postalCode || undefined, city })
     } catch {
       // reverse geocoding failed — keep the coordinates, user can type manually
     }

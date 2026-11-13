@@ -3,6 +3,7 @@
 // RatingSheetHost sits in the (app) layout and opens whenever the rating store
 // asks (Home's card, Order history, or a "How was your lunch?" push).
 import { useEffect, useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -119,7 +120,7 @@ function RateMealSheet({ request, meal, existing }: { request: RatingSheetReques
       setDone(true)
       saved()
     } catch (e: any) {
-      setError(e?.message ?? 'Could not save your rating. Please try again.')
+      setError(friendlyError(e, 'Could not save your rating. Please try again.'))
     } finally {
       setSaving(false)
     }

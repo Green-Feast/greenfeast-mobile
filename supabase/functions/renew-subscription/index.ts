@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
 
     const { data: old } = await supabase
       .from('subscriptions')
-      .select('id, user_id, status, plan_id, plan_name, menu_type, delivery_mode, meals_lunch, meals_dinner, batch_id_lunch, batch_id_dinner, deliveries_remaining, cod_due_paise, pause_from')
+      .select('id, user_id, status, plan_id, plan_name, menu_type, delivery_mode, meals_lunch, meals_dinner, batch_id_lunch, batch_id_dinner, deliveries_remaining, cod_due_paise, pause_from, no_delivery_days')
       .eq('id', fromId)
       .eq('user_id', user.id)
       .maybeSingle()
@@ -115,6 +115,9 @@ Deno.serve(async (req) => {
         batch_id_lunch: old.batch_id_lunch,
         batch_id_dinner: old.batch_id_dinner,
         renewed_from: old.id,
+        // No delivery days (089) carries over with the schedule rows below — an
+        // empty schedule would otherwise mean every day for the new plan.
+        no_delivery_days: old.no_delivery_days === true,
       })
       .select('id')
       .single()
@@ -127,7 +130,8 @@ Deno.serve(async (req) => {
       if (error) throw error
     }
 
-    // Delivery days carry over unchanged (change them later in Plan Settings).
+    // Delivery days carry over unchanged (change them later in Plan Settings),
+    // including "no delivery days" (the flag above; no rows to copy).
     const { data: schedule } = await supabase
       .from('subscription_schedule')
       .select('day_of_week, meal_template_id')

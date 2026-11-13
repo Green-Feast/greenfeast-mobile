@@ -11,6 +11,27 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
 // Same cutoffs as is_slot_locked (migrations 031, 075): 9 AM lunch, 2 PM dinner, IST.
 const SLOT_CUTOFF_HOUR: Record<'lunch' | 'dinner', number> = { lunch: 9, dinner: 14 }
 
+// A weekly-menu drink that can go on a delivery (is_deliverable_drink, migration
+// 088: active + valid for plans), with its name; null means "chef's choice".
+// Cached for one request so the nightly run asks once per drink, not per plan.
+type DrinkInfo = { name: string } | null
+type DrinkCache = Map<string, DrinkInfo>
+
+async function deliverableDrink(supabase: any, id: string, cache: DrinkCache): Promise<DrinkInfo> {
+  const hit = cache.get(id)
+  if (hit !== undefined) return hit
+  const { data: ok, error } = await supabase.rpc('is_deliverable_drink', { p_drink: id })
+  if (error) throw error // fail closed: better no order tonight than one with the wrong drink
+  let info: DrinkInfo = null
+  if (ok === true) {
+    const { data: t, error: nameErr } = await supabase.from('meal_templates').select('name').eq('id', id).maybeSingle()
+    if (nameErr) throw nameErr
+    if (t?.name) info = { name: t.name }
+  }
+  cache.set(id, info)
+  return info
+}
+
 // The 14-day window starts from today's IST date. It used the UTC date, which
 // at the nightly 1 AM IST run is still yesterday — so the window started a day
 // in the past.
@@ -26,10 +47,10 @@ function next14Days(): Date[] {
   return dates
 }
 
-async function processSubscription(supabase: any, subId: string): Promise<number> {
+async function processSubscription(supabase: any, subId: string, drinkCache: DrinkCache): Promise<number> {
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining, start_date, meal_price_paise')
+    .select('id, user_id, batch_id_lunch, batch_id_dinner, status, payment_method, pause_from, pause_until, meals_lunch, meals_dinner, menu_type, plan_id, deliveries_remaining, start_date, meal_price_paise, no_delivery_days')
     .eq('id', subId)
     .single()
 
@@ -37,7 +58,7 @@ async function processSubscription(supabase: any, subId: string): Promise<number
   // (first day paid online at signup, or set up by the admin) — 052.
   if (!sub || sub.status !== 'active') return 0
 
-  const [{ data: schedule }, { data: addr }, { data: subAddons }, { data: weeklyMenus }, { data: plan }, { data: rules }] = await Promise.all([
+  const [{ data: schedule }, { data: addr }, { data: subAddons, error: addonsErr }, { data: weeklyMenus, error: menuErr }, { data: plan }, { data: rules }] = await Promise.all([
     supabase
       .from('subscription_schedule')
       .select('day_of_week, meal_template_id')
@@ -54,12 +75,12 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       .maybeSingle(),
     supabase
       .from('subscription_addons')
-      .select('addon_id, sub_option, addons(price_per_meal)')
+      .select('addon_id, sub_option, addons(price_per_meal, is_drink)')
       .eq('subscription_id', subId),
     // One weekly menu for everyone (052 removed the M2 track).
     supabase
       .from('weekly_menu')
-      .select('day_of_week, meal_slot, meal_template_id')
+      .select('day_of_week, meal_slot, meal_template_id, drink_template_id')
       .eq('menu_type', 'M1'),
     supabase
       .from('plans')
@@ -72,6 +93,13 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       .select('meal_slot, day_of_week, meal_template_id, meal_templates ( is_active, subscription_valid )')
       .eq('user_id', sub.user_id),
   ])
+
+  // Without the add-on lines (or the menu) an order would be made at the wrong
+  // price or with the wrong dish, so a failed load makes nothing; the next run retries.
+  if (addonsErr || menuErr) {
+    console.error(`add-on / weekly menu load failed for ${subId}:`, (addonsErr ?? menuErr).message)
+    return 0
+  }
 
   // "slot|dow" (a weekday) or "slot|*" (every day) → fixed dish. A dish that
   // has since been switched off falls back to the weekly menu.
@@ -95,8 +123,26 @@ async function processSubscription(supabase: any, subId: string): Promise<number
     if (row.meal_template_id) weeklyMenuMap[row.day_of_week][row.meal_slot] = row.meal_template_id
   }
 
+  // (day_of_week integer, meal_slot) → drink (meal_templates id) from weekly_menu (088)
+  const weeklyDrinkMap: Record<number, Record<string, string>> = {}
+  for (const row of (weeklyMenus ?? [])) {
+    if (!row.drink_template_id) continue
+    if (!weeklyDrinkMap[row.day_of_week]) weeklyDrinkMap[row.day_of_week] = {}
+    weeklyDrinkMap[row.day_of_week][row.meal_slot] = row.drink_template_id
+  }
+  // The plan has a drink when one of its add-ons is the drink add-on (addons.is_drink).
+  // Its price is already in addonTotal below; the drink only decides sub_option.
+  const hasDrink = (subAddons ?? []).some((a: any) => a.addons?.is_drink)
+
+  // No delivery days (089): the customer chose none, so an empty schedule does NOT
+  // mean every day. Only the schedule's own rows count (an office-set Sunday); with
+  // none there is nothing to deliver. Plans without the flag keep the old rule:
+  // no schedule rows = every day the kitchen cooks.
+  const noDeliveryDays = sub.no_delivery_days === true
+  if (noDeliveryDays && Object.keys(scheduleMap).length === 0) return 0
+
   // Bail only if no source has any meals to offer
-  const hasScheduleDays = Object.keys(scheduleMap).length > 0
+  const hasScheduleDays = noDeliveryDays || Object.keys(scheduleMap).length > 0
   if (!hasScheduleDays && Object.keys(weeklyMenuMap).length === 0 && Object.keys(fixedMap).length === 0) return 0
 
   // Compute per-meal unit_price (paise) to snapshot on each order: the plan's
@@ -180,6 +226,19 @@ async function processSubscription(supabase: any, subId: string): Promise<number
       const orderCost = unitPrice * slotQty
       if (orderCost > capacity) continue
 
+      // The day's drink: the kitchen's pick for this day and slot, if it can be
+      // delivered (is_deliverable_drink); otherwise null = chef's choice and the
+      // drink line keeps the subscription's own sub_option (the legacy flavour).
+      let drinkId: string | null = null
+      let drinkName: string | null = null
+      if (hasDrink) {
+        const wanted = weeklyDrinkMap[dowNum]?.[slot]
+        if (wanted) {
+          const drink = await deliverableDrink(supabase, wanted, drinkCache)
+          if (drink) { drinkId = wanted; drinkName = drink.name }
+        }
+      }
+
       const { data: order, error: insertErr } = await supabase
         .from('orders')
         .insert({
@@ -196,6 +255,8 @@ async function processSubscription(supabase: any, subId: string): Promise<number
           is_customized: !!fixed,
           quantity: slotQty,
           unit_price: unitPrice,
+          // Only sent when set, so nothing changes for a plan without a drink.
+          ...(drinkId ? { drink_template_id: drinkId } : {}),
         })
         .select('id')
         .single()
@@ -227,7 +288,8 @@ async function processSubscription(supabase: any, subId: string): Promise<number
           subAddons.map((a: any) => ({
             order_id: order.id,
             addon_id: a.addon_id,
-            sub_option: a.sub_option ?? null,
+            // The drink line carries the day's drink name (088); the rest keep their flavour.
+            sub_option: (a.addons?.is_drink && drinkName) ? drinkName : (a.sub_option ?? null),
           }))
         )
       }
@@ -271,6 +333,9 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
+    // Drinks looked up this run (see deliverableDrink).
+    const drinkCache: DrinkCache = new Map()
+
     let body: any = {}
     try { body = await req.json() } catch { /* no body in cron invocations */ }
 
@@ -293,7 +358,7 @@ Deno.serve(async (req) => {
       if (!ownSub) {
         return new Response(JSON.stringify({ error: 'Subscription not found' }), { status: 403 })
       }
-      const created = await processSubscription(supabase, body.subscription_id)
+      const created = await processSubscription(supabase, body.subscription_id, drinkCache)
       return new Response(
         JSON.stringify({ ok: true, orders_created: created }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -304,7 +369,7 @@ Deno.serve(async (req) => {
 
     if (body.subscription_id) {
       // Single subscription mode — called after payment or on resume
-      totalCreated = await processSubscription(supabase, body.subscription_id)
+      totalCreated = await processSubscription(supabase, body.subscription_id, drinkCache)
     } else {
       // Nightly cron mode — process every active subscription
       const { data: subs } = await supabase
@@ -314,7 +379,7 @@ Deno.serve(async (req) => {
 
       for (const sub of (subs ?? [])) {
         try {
-          const n = await processSubscription(supabase, sub.id)
+          const n = await processSubscription(supabase, sub.id, drinkCache)
           totalCreated += n
         } catch (err) {
           console.error(`processSubscription failed for ${sub.id}:`, err)

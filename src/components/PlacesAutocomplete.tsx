@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { View, Text, Pressable, StyleSheet } from 'react-native'
 import { Colors, Fonts } from '@/constants/colors'
+import { cityFromAddressComponents } from '@/lib/geocode'
 
 // Shared Google Places autocomplete for the two address forms (onboarding
 // SF11 and the Address book screen). Plain REST calls — no places SDK
@@ -16,6 +17,9 @@ export type PlaceSelection = {
   lat: number | null
   lng: number | null
   pincode: string | null
+  // The place's city (locality, falling back to admin level 3 / 2). Optional so
+  // older callers keep compiling; null when Google didn't return one.
+  city?: string | null
 }
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
@@ -58,7 +62,7 @@ export function usePlacesAutocomplete(onSelect: (sel: PlaceSelection) => void) {
   async function selectPrediction(p: Prediction) {
     setVisible(false)
     setPredictions([])
-    const sel: PlaceSelection = { description: p.description, lat: null, lng: null, pincode: null }
+    const sel: PlaceSelection = { description: p.description, lat: null, lng: null, pincode: null, city: null }
     try {
       const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${p.place_id}&fields=formatted_address,geometry,address_component&key=${KEY}`
       const res = await fetch(url)
@@ -73,6 +77,7 @@ export function usePlacesAutocomplete(onSelect: (sel: PlaceSelection) => void) {
         }
         const postal = result?.address_components?.find((c: any) => c.types.includes('postal_code'))
         if (postal) sel.pincode = postal.long_name
+        sel.city = cityFromAddressComponents(result?.address_components)
       }
     } catch (e) {
       console.error('Places Details request failed:', e)

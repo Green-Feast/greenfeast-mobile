@@ -8,16 +8,23 @@
 // re-sync the plan's open meals (days changed by hand stay as they are); then
 // instantiate-orders fills any new days. The wallet is the plan (079), so the
 // price per meal and "about N meals left" update live as portions change.
+//
+// Delivery days can be none at all (089): then nothing is delivered and the
+// customer walks in or adds a meal day by day. That is a flag on the plan
+// (subscriptions.no_delivery_days), NOT an empty schedule — a plan with no
+// schedule rows and no flag still means every day the kitchen cooks.
 import { useCallback, useEffect, useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import { View, Text, Pressable, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { Minus, Plus, Check, Lock, ChevronRight, X, Sun, Moon } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
+import { isDrinkCategory, DRINK_TAGLINE } from '@/constants/drinks'
 
 type Slot = 'lunch' | 'dinner'
-type PlanAddon = { id: string; name: string; sub_option: string | null }
+type PlanAddon = { id: string; name: string; sub_option: string | null; is_drink: boolean }
 type Rule = { id: string; slot: Slot; day: number | null; meal_id: string; meal_name: string; set_by: 'admin' | 'customer'; available: boolean }
 type Dish = { id: string; name: string; category: string | null }
 type MenuRow = { day_of_week: number; meal_slot: Slot; meal_templates: { id: string; name: string } | null }
@@ -48,12 +55,15 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
   const [picker, setPicker] = useState<{ slot: Slot; day: number | null } | null>(null)
   // Sunday deliveries are arranged by the office only (083): shown, not editable.
   const [sundayByOffice, setSundayByOffice] = useState(false)
+  // Walk-in comes with some plans only (plans.allow_pickup, 087): the "no
+  // deliveries" hint mentions it only when the plan has it.
+  const [walkInAllowed, setWalkInAllowed] = useState(false)
 
   const load = useCallback(async () => {
     const [subRes, costRes, rulesRes, menuRes, dishRes] = await Promise.all([
       supabase
         .from('subscriptions')
-        .select('meals_lunch, meals_dinner, subscription_schedule ( day_of_week ), subscription_addons ( addon_id, sub_option, addons ( name ) )')
+        .select('meals_lunch, meals_dinner, no_delivery_days, plans ( allow_pickup ), subscription_schedule ( day_of_week ), subscription_addons ( addon_id, sub_option, addons ( name, is_drink ) )')
         .eq('id', subId)
         .single(),
       supabase.rpc('my_meal_cost'),
@@ -63,22 +73,29 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
     ])
     const sub = subRes.data as any
     if (sub) {
-      setSundayByOffice(((sub.subscription_schedule ?? []) as { day_of_week: string }[]).some((r) => r.day_of_week === 'Sun'))
+      const scheduled = ((sub.subscription_schedule ?? []) as { day_of_week: string }[]).map((r) => r.day_of_week)
+      setSundayByOffice(scheduled.includes('Sun'))
+      const planRef = Array.isArray(sub.plans) ? sub.plans[0] : sub.plans
+      setWalkInAllowed(!!planRef?.allow_pickup)
       const d: Defaults = {
         lunch: sub.meals_lunch ?? 0,
         dinner: sub.meals_dinner ?? 0,
-        days: ((sub.subscription_schedule ?? []) as { day_of_week: string }[]).map((r) => r.day_of_week).filter((x) => x !== 'Sun'),
+        days: scheduled.filter((x) => x !== 'Sun'),
       }
-      // No days saved = every day the kitchen cooks (instantiate-orders' fallback).
-      if (d.days.length === 0) d.days = [...DAYS]
+      // A plan with no schedule rows at all means every day the kitchen cooks
+      // (instantiate-orders' fallback) — unless the customer chose no delivery
+      // days (089), which shows as none selected. (A Sunday-only schedule has
+      // rows, so it also shows none rather than a wrong "every day".)
+      if (scheduled.length === 0 && !sub.no_delivery_days) d.days = [...DAYS]
       setSaved(d)
       setDraft(d)
     }
     if (sub) {
-      type Row = { addon_id: string; sub_option: string | null; addons: { name: string } | { name: string }[] | null }
+      type AddonRef = { name: string; is_drink: boolean | null }
+      type Row = { addon_id: string; sub_option: string | null; addons: AddonRef | AddonRef[] | null }
       setPlanAddons(((sub.subscription_addons ?? []) as Row[]).map((a) => {
         const ad = Array.isArray(a.addons) ? a.addons[0] : a.addons
-        return { id: a.addon_id, name: ad?.name ?? a.addon_id, sub_option: a.sub_option }
+        return { id: a.addon_id, name: ad?.name ?? a.addon_id, sub_option: a.sub_option, is_drink: !!ad?.is_drink }
       }))
     }
     const cost = costRes.data as { meal_cost?: number; wallet?: number; cash_due?: number } | null
@@ -90,7 +107,8 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
     }
     setRules(((rulesRes.data ?? []) as Rule[]))
     setMenu((menuRes.data ?? []) as unknown as MenuRow[])
-    setDishes((dishRes.data ?? []) as Dish[])
+    // Drinks (smoothie, coffee) are picked per day in My Plan, never as a meal.
+    setDishes(((dishRes.data ?? []) as Dish[]).filter((d) => !isDrinkCategory(d.category)))
   }, [subId])
 
   useEffect(() => {
@@ -107,7 +125,8 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
   // Lunch / dinner as chosen at sign-up: a slot they have keeps at least 1.
   const hasLunch = (saved?.lunch ?? 0) > 0
   const hasDinner = (saved?.dinner ?? 0) > 0
-  const valid = !!draft && (!hasLunch || draft.lunch >= 1) && (!hasDinner || draft.dinner >= 1) && draft.days.length >= 1
+  // No delivery days is a valid choice (089); only portions need a minimum.
+  const valid = !!draft && (!hasLunch || draft.lunch >= 1) && (!hasDinner || draft.dinner >= 1)
 
   function update(patch: Partial<Defaults>) {
     if (!draft) return
@@ -132,6 +151,7 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
 
   async function save() {
     if (!draft || !valid) return
+    const noDays = draft.days.length === 0
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     setSaving(true)
     setMessage(null)
@@ -144,17 +164,23 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
     })
     if (error) {
       setSaving(false)
-      setMessage({ ok: false, text: error.message || 'Could not save. Please try again.' })
+      setMessage({ ok: false, text: friendlyError(error, 'Could not save. Please try again.') })
       return
     }
-    await fillNewDays()
+    // Nothing new to schedule when there are no delivery days.
+    if (!noDays) await fillNewDays()
     await load()
     setSaving(false)
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     const r = data as { updated?: number; cancelled?: number } | null
-    const parts = [`${r?.updated ?? 0} upcoming meal${r?.updated === 1 ? '' : 's'} updated`]
-    if (r?.cancelled) parts.push(`${r.cancelled} on days you turned off removed`)
-    setMessage({ ok: true, text: `Saved — ${parts.join(', ')}. Days you changed by hand stay as they are.` })
+    if (noDays) {
+      const removed = r?.cancelled ? ` ${r.cancelled} upcoming meal${r.cancelled === 1 ? '' : 's'} removed.` : ''
+      setMessage({ ok: true, text: `Saved — no deliveries.${removed} Days you changed by hand stay as they are.` })
+    } else {
+      const parts = [`${r?.updated ?? 0} upcoming meal${r?.updated === 1 ? '' : 's'} updated`]
+      if (r?.cancelled) parts.push(`${r.cancelled} on days you turned off removed`)
+      setMessage({ ok: true, text: `Saved — ${parts.join(', ')}. Days you changed by hand stay as they are.` })
+    }
     onChanged()
   }
 
@@ -165,7 +191,7 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
     const { error } = await supabase.rpc('set_my_meal_rule', { p_slot: slot, p_day: day, p_meal: mealId })
     if (error) {
       setSaving(false)
-      setMessage({ ok: false, text: error.message || 'Could not change the dish. Please try again.' })
+      setMessage({ ok: false, text: friendlyError(error, 'Could not change the dish. Please try again.') })
       return
     }
     await load()
@@ -180,6 +206,9 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
   }
 
   const slots: Slot[] = (['lunch', 'dinner'] as Slot[]).filter((sl) => (sl === 'lunch' ? saved?.lunch : saved?.dinner))
+  // The drink (088) is shown apart from the add-ons.
+  const hasDrink = planAddons.some((a) => a.is_drink)
+  const otherAddons = planAddons.filter((a) => !a.is_drink)
 
   return (
     <>
@@ -220,14 +249,27 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
           )
         })}
 
+        {hasDrink && (
+          <>
+            <Text style={st.subhead}>Drink</Text>
+            <View style={st.lockedBox}>
+              <Lock size={14} color={Colors.textMuted} />
+              <View style={{ flex: 1 }}>
+                <Text style={st.rowTitle}>{DRINK_TAGLINE}</Text>
+                <Text style={st.rowSub}>The kitchen picks a fresh one daily — swap it for any day from My Plan → Customize. To add or remove the drink, message us on WhatsApp.</Text>
+              </View>
+            </View>
+          </>
+        )}
+
         <Text style={st.subhead}>Add-ons with every meal</Text>
         <View style={st.lockedBox}>
           <Lock size={14} color={Colors.textMuted} />
           <View style={{ flex: 1 }}>
             <Text style={st.rowTitle}>
-              {planAddons.length === 0
+              {otherAddons.length === 0
                 ? 'None'
-                : planAddons.map((a) => `${a.name}${a.sub_option ? ` (${a.sub_option})` : ''}`).join(', ')}
+                : otherAddons.map((a) => `${a.name}${a.sub_option ? ` (${a.sub_option})` : ''}`).join(', ')}
             </Text>
             <Text style={st.rowSub}>Add-ons stay as you chose when you joined. Message us on WhatsApp to change them.</Text>
           </View>
@@ -249,6 +291,14 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
             </View>
           )}
         </View>
+        {draft.days.length === 0 && (
+          <Text style={st.rowSub}>
+            {sundayByOffice ? 'No regular deliveries' : 'No deliveries'}
+            {walkInAllowed
+              ? ' — you can still walk in or add a meal on any day.'
+              : ' — you can still add a meal on any day from My Plan.'}
+          </Text>
+        )}
         <Text style={st.rowSub}>
           {sundayByOffice
             ? 'Sunday delivery is arranged by GreenFeast — message us on WhatsApp to change it.'
@@ -269,7 +319,7 @@ export default function PlanDefaults({ subId, onChanged }: { subId: string; onCh
           )}
         </View>
 
-        {!valid && <Text style={st.error}>{draft.days.length === 0 ? 'Pick at least one delivery day.' : 'Keep at least one portion.'}</Text>}
+        {!valid && <Text style={st.error}>Keep at least one portion.</Text>}
         {message && <Text style={message.ok ? st.ok : st.error}>{message.text}</Text>}
 
         <Pressable

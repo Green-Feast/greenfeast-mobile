@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -422,7 +423,7 @@ export default function Home() {
       setAddedMealIds((prev) => new Set(prev).add(meal.id))
       setDetailMeal(null)
     } catch (e: any) {
-      Alert.alert('Could not add dish', e?.message ?? 'Please try again.')
+      Alert.alert('Could not add dish', friendlyError(e, 'Please try again.'))
     } finally {
       setAdding(false)
     }

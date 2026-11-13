@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -35,6 +36,7 @@ import { useOnboardingStore } from '@/store/onboarding'
 import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import MacroRow from '@/components/MacroRow'
 import { warmFunctions } from '@/lib/warmFunctions'
+import { DRINK_CATEGORIES, CHEFS_CHOICE_DRINK, DRINK_NAME, isDrinkCategory } from '@/constants/drinks'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -57,7 +59,7 @@ type SubData = {
   plans: { name: string; meals_total: number; days_per_week: number; base_price: number; allow_pickup?: boolean } | null
 }
 
-type SubAddon = { addon_id: string; addons: { name: string; price_per_meal: number } | null }
+type SubAddon = { addon_id: string; addons: { name: string; price_per_meal: number; is_drink?: boolean | null } | null }
 
 type MealTemplate = {
   id: string
@@ -66,6 +68,16 @@ type MealTemplate = {
   kcal: number | null
   protein: number | null
   image_url: string | null
+}
+
+// A drink is a meal_templates row in a drink category (088). orders has no FK
+// to it (a second one would break the meal_templates embed), so drinks are
+// fetched on their own and matched to orders by id.
+type DrinkDish = MealTemplate & {
+  carbs: number | null
+  fat: number | null
+  is_active: boolean
+  subscription_valid: boolean
 }
 
 type AddressData = { id: string; line1: string; landmark: string | null; label: string; is_default: boolean }
@@ -77,6 +89,7 @@ type CartLine = {
   label: string | null
   quantity: number
   unit_price: number | null
+  sub_option?: string | null // the drink line carries the drink's name (088)
 }
 
 type OrderItem = {
@@ -92,6 +105,7 @@ type OrderItem = {
   extra_dish: boolean | null
   slot_seq: number | null
   delivered_at: string | null
+  drink_template_id?: string | null // the day's drink dish; null = chef's choice (088)
   meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; carbs: number | null; fat: number | null; image_url: string | null } | null
   order_addons: CartLine[]
   // Pickup / dine-in (082)
@@ -109,9 +123,14 @@ function clockIST(iso: string) {
   return new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })
 }
 
-type AddonCatalog = { id: string; name: string; price_per_meal: number }
+type AddonCatalog = { id: string; name: string; price_per_meal: number; is_drink?: boolean | null }
 
 type CartOp = 'add_addon' | 'remove_addon' | 'inc_qty' | 'dec_qty' | 'inc_addon_qty' | 'dec_addon_qty'
+
+// A named update-day-cart error can be a bare code; never show one raw.
+function drinkErrorText(msg: string): string {
+  return /^[a-z0-9_]+$/.test(msg) ? 'Could not change your drink. Please try again.' : msg
+}
 
 type WalletTransaction = {
   id: string
@@ -194,6 +213,10 @@ export default function SubscriptionScreen() {
   const [allMeals, setAllMeals] = useState<MealTemplate[]>([])
   const [allAddons, setAllAddons] = useState<AddonCatalog[]>([])
   const [subAddons, setSubAddons] = useState<SubAddon[]>([])
+  // Every smoothie / coffee dish (088), deliverable or not, to name each order's drink.
+  const [drinkDishes, setDrinkDishes] = useState<DrinkDish[]>([])
+  const [pickingDrinkFor, setPickingDrinkFor] = useState<string | null>(null)
+  const [drinkError, setDrinkError] = useState('')
   const [addMode, setAddMode] = useState(false)
   const [cartBusy, setCartBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -264,7 +287,7 @@ export default function SubscriptionScreen() {
     const detailQueries = (subId: string) => Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, delivered_at, fulfilment, pickup_location_id, pickup_code, walk_in, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price )')
+        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, delivered_at, fulfilment, pickup_location_id, pickup_code, walk_in, drink_template_id, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price, sub_option )')
         .eq('subscription_id', subId)
         .gte('delivery_date', today)
         .lte('delivery_date', endStr)
@@ -287,7 +310,7 @@ export default function SubscriptionScreen() {
         .order('created_at'),
       supabase
         .from('subscription_addons')
-        .select('addon_id, addons ( name, price_per_meal )')
+        .select('addon_id, addons ( name, price_per_meal, is_drink )')
         .eq('subscription_id', subId),
       supabase
         .from('kitchen_closures')
@@ -333,10 +356,17 @@ export default function SubscriptionScreen() {
       .eq('is_active', true)
       .eq('subscription_valid', true)
       .order('category')
-      .then(({ data }) => setAllMeals((data as MealTemplate[]) ?? []))
+      // Drinks are picked as a drink, never swapped in as the meal (088).
+      .then(({ data }) => setAllMeals(((data as MealTemplate[]) ?? []).filter((m) => !isDrinkCategory(m.category))))
+    supabase
+      .from('meal_templates')
+      .select('id, name, category, kcal, protein, carbs, fat, image_url, is_active, subscription_valid')
+      .in('category', [...DRINK_CATEGORIES])
+      .order('name')
+      .then(({ data }) => setDrinkDishes((data as DrinkDish[]) ?? []))
     supabase
       .from('addons')
-      .select('id, name, price_per_meal')
+      .select('id, name, price_per_meal, is_drink')
       .eq('is_active', true)
       .then(({ data }) => setAllAddons((data as AddonCatalog[]) ?? []))
     supabase
@@ -375,7 +405,7 @@ export default function SubscriptionScreen() {
   }, [loading, sub, weekOrders.length, fetchAll])
 
   // Reset address picker + add-mode when modal closes or day changes
-  useEffect(() => { setPickingAddressForOrder(null); setAddMode(false); setSwapError(''); setAddAddressId(null) }, [selectedDay, showDayModal])
+  useEffect(() => { setPickingAddressForOrder(null); setAddMode(false); setSwapError(''); setAddAddressId(null); setPickingDrinkFor(null); setDrinkError('') }, [selectedDay, showDayModal])
   useEffect(() => { if (showDayModal) warmFunctions() }, [showDayModal])
 
   // Silent background refresh: tab focus, app foreground, every 5 min.
@@ -435,7 +465,7 @@ export default function SubscriptionScreen() {
     setSwapError('')
     const { error } = await supabase.from('orders').update({ address_id: addressId }).eq('id', orderId)
     if (error) {
-      setSwapError(error.message || 'Could not change the address. Please try again.')
+      setSwapError(friendlyError(error, 'Could not change the address. Please try again.'))
       return
     }
     setWeekOrders(prev => prev.map(o => o.id === orderId ? { ...o, address_id: addressId } : o))
@@ -463,7 +493,7 @@ export default function SubscriptionScreen() {
       if (error) throw new Error(await extractFunctionErrorMessage(error, 'Could not swap meal. Try again.'))
       if (data?.error) throw new Error(data.error)
     } catch (e: any) {
-      Alert.alert('Could not swap the meal', e?.message ?? 'Please try again.')
+      Alert.alert('Could not swap the meal', friendlyError(e, 'Please try again.'))
     }
     fetchAll()
   }
@@ -488,7 +518,7 @@ export default function SubscriptionScreen() {
       setAddMode(false)
       await fetchAll()
     } catch (e: any) {
-      setSwapError(e?.message ?? 'Could not add dish. Try again.')
+      setSwapError(friendlyError(e, 'Could not add dish. Try again.'))
     } finally {
       setSwapping(false)
     }
@@ -518,7 +548,7 @@ export default function SubscriptionScreen() {
       setAddMode(false)
       await fetchAll()
     } catch (e: any) {
-      setSwapError(e?.message ?? 'Could not add dish. Try again.')
+      setSwapError(friendlyError(e, 'Could not add dish. Try again.'))
     } finally {
       setSwapping(false)
     }
@@ -539,7 +569,7 @@ export default function SubscriptionScreen() {
       if (data?.error) throw new Error(data.error)
       await fetchAll()
     } catch (e: any) {
-      setSwapError(e?.message ?? 'Could not remove this dish. Try again.')
+      setSwapError(friendlyError(e, 'Could not remove this dish. Try again.'))
     } finally {
       setCartBusy(false)
     }
@@ -595,7 +625,37 @@ export default function SubscriptionScreen() {
         else if (code === 'addon_quantity_cap') setSwapError('Maximum 10 of this add-on per meal.')
         else if (code) setSwapError(code)
       } catch (e: any) {
-        setSwapError(e?.message ?? 'Could not update the cart. Try again.')
+        setSwapError(friendlyError(e, 'Could not update the cart. Try again.'))
+      } finally {
+        cartPending.current -= 1
+        if (cartPending.current === 0) await fetchAll()
+      }
+    })
+  }
+
+  // The day's drink (088): swap it for another deliverable one. Same queue and
+  // reload as the cart ops above - the new drink shows at once, and the plan
+  // reloads when the last save is done, which also undoes anything the server
+  // refused (its cutoff / lock checks are the same as for a meal change). The
+  // price doesn't change.
+  function handleSetDrink(orderId: string, drinkId: string) {
+    setDrinkError('')
+    setPickingDrinkFor(null)
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    setWeekOrders(prev => prev.map(o => o.id === orderId ? { ...o, drink_template_id: drinkId } : o))
+    cartPending.current += 1
+    cartQueue.current = cartQueue.current.then(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) throw new Error('Please sign in again.')
+        const { data, error } = await supabase.functions.invoke('update-day-cart', {
+          body: { order_id: orderId, op: 'set_drink', drink_template_id: drinkId },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        })
+        const code = error ? await extractFunctionErrorMessage(error, 'Could not change your drink. Try again.') : data?.error
+        if (code) setDrinkError(drinkErrorText(String(code)))
+      } catch (e: any) {
+        setDrinkError(drinkErrorText(friendlyError(e, 'Could not change your drink. Try again.')))
       } finally {
         cartPending.current -= 1
         if (cartPending.current === 0) await fetchAll()
@@ -715,7 +775,7 @@ export default function SubscriptionScreen() {
     } catch (e: any) {
       paymentPurpose.current = 'topup'
       setRenewState('failed')
-      setRenewMessage(e?.message ?? 'Something went wrong. Please try again.')
+      setRenewMessage(friendlyError(e, 'Something went wrong. Please try again.'))
     }
   }
 
@@ -797,14 +857,40 @@ export default function SubscriptionScreen() {
   const stripDates: string[] = []
   for (let d = startStr; d <= endStr; d = addDaysISO(d, 1)) stripDates.push(d)
 
+  // Drinks (088). The plan's drink is an add-on (is_drink) priced like any
+  // other; what the customer gets that day is the dish named by the order's
+  // drink_template_id, or - when that is null - the chef's choice.
+  const drinkById = new Map(drinkDishes.map((d) => [d.id, d]))
+  const drinkAddonIds = new Set<string>([
+    ...allAddons.filter((a) => a.is_drink).map((a) => a.id),
+    ...subAddons.filter((a) => a.addons?.is_drink).map((a) => a.addon_id),
+  ])
+  const drinkOf = (o: OrderItem) => {
+    const line = (o.order_addons ?? []).find((l) => l.kind === 'addon' && !!l.addon_id && drinkAddonIds.has(l.addon_id)) ?? null
+    if (!line) return null
+    const dish = o.drink_template_id ? drinkById.get(o.drink_template_id) ?? null : null
+    // A plan's drink comes once per portion; a one-off carries its own count
+    // (same rule as Order history).
+    const count = (line.quantity ?? 1) * (line.unit_price == null && !o.extra_dish ? (o.quantity ?? 1) : 1)
+    const name = dish?.name ?? (o.drink_template_id ? line.sub_option || DRINK_NAME : CHEFS_CHOICE_DRINK)
+    return { order: o, line, dish, name, count }
+  }
+
   // Hero card: all orders for the selected day + slot.
   const heroOrders = (orderMap.get(selectedDay) ?? []).filter(o => o.meal_slot === selectedSlot)
   const heroBase = heroOrders.find(o => !o.extra_dish) ?? null
+  const heroDrinks = heroOrders.map(drinkOf).filter((d): d is NonNullable<ReturnType<typeof drinkOf>> => d !== null)
+  const heroDrinkCount = heroDrinks.reduce((sum, d) => sum + d.count, 0)
   const heroTotalQty = heroOrders.reduce((sum, o) => sum + (o.quantity ?? 1), 0)
+  // Totals count the drink too: items, kcal and macros.
   const heroKcal = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.kcal ?? 0) * (o.quantity ?? 1)), 0)
+    + heroDrinks.reduce((sum, d) => sum + (d.dish?.kcal ?? 0) * d.count, 0)
   const heroProtein = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.protein ?? 0) * (o.quantity ?? 1)), 0)
+    + heroDrinks.reduce((sum, d) => sum + (d.dish?.protein ?? 0) * d.count, 0)
   const heroCarbs = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.carbs ?? 0) * (o.quantity ?? 1)), 0)
+    + heroDrinks.reduce((sum, d) => sum + (d.dish?.carbs ?? 0) * d.count, 0)
   const heroFat = heroOrders.reduce((sum, o) => sum + ((o.meal_templates?.fat ?? 0) * (o.quantity ?? 1)), 0)
+    + heroDrinks.reduce((sum, d) => sum + (d.dish?.fat ?? 0) * d.count, 0)
   // Locked once the slot's cutoff passes (9 AM lunch / 2 PM dinner, same day),
   // or once the kitchen has already started on it — unlocking "today" under
   // the new same-day cutoff would otherwise expose Skip/Swap/Remove on a meal
@@ -869,6 +955,13 @@ export default function SubscriptionScreen() {
     (dayOrder?.order_addons ?? []).filter(l => l.kind === 'addon' && l.addon_id).map(l => [l.addon_id as string, l.quantity ?? 1])
   )
   const defaultAddonIds = new Set(subAddons.map(a => a.addon_id))
+  // Drink card (088): the day's drink, the drinks it can be swapped for, and
+  // the drink add-on a day without one can add. The drink is kept out of the
+  // add-on editor below.
+  const dayDrink = dayOrder ? drinkOf(dayOrder) : null
+  const deliverableDrinks = drinkDishes.filter((d) => d.is_active && d.subscription_valid)
+  const drinkAddon = allAddons.find((a) => a.is_drink) ?? null
+  const dayEditableAddons = allAddons.filter((a) => !a.is_drink)
   const defaultAddress = addresses.find(a => a.is_default) ?? addresses[0] ?? null
   // Where a newly added dish goes: chosen, else this slot's meal's address.
   const addTarget = addAddressId ?? dayOrder?.address_id ?? defaultAddress?.id ?? null
@@ -1039,7 +1132,7 @@ export default function SubscriptionScreen() {
                   <Text style={s.heroEyebrow}>{heroEyebrow}</Text>
                   <Text style={s.heroTitle}>{selectedSlot === 'lunch' ? 'Lunch' : 'Dinner'}</Text>
                   <Text style={s.heroSubtitle}>
-                    {heroTotalQty} {heroTotalQty === 1 ? 'item' : 'items'}
+                    {heroTotalQty + heroDrinkCount} {heroTotalQty + heroDrinkCount === 1 ? 'item' : 'items'}
                     {heroKcal > 0 ? ` · ${heroKcal.toLocaleString('en-IN')} kcal total` : ''}
                   </Text>
                 </View>
@@ -1096,6 +1189,27 @@ export default function SubscriptionScreen() {
                     </View>
                   </View>
                 ))}
+                {/* The day's drink, under the meals (088) */}
+                {heroDrinks.map((d) => (
+                  <View key={`drink-${d.order.id}`} style={s.heroCartRow}>
+                    {d.dish?.image_url ? (
+                      <Image source={{ uri: d.dish.image_url }} style={s.heroFoodThumb} contentFit="cover" cachePolicy="memory-disk" />
+                    ) : (
+                      <View style={[s.heroFoodThumb, { backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center' }]}>
+                        <Text style={{ fontSize: 18 }}>🥤</Text>
+                      </View>
+                    )}
+                    <View style={s.heroCartRowInfo}>
+                      <Text style={s.heroCartName} numberOfLines={1}>{d.name}</Text>
+                      <Text style={s.heroCartKcal}>
+                        {DRINK_NAME}{(d.dish?.kcal ?? 0) > 0 ? ` · ${d.dish!.kcal} kcal${d.count > 1 ? ' each' : ''}` : ''}
+                      </Text>
+                    </View>
+                    <View style={s.heroQtyPill}>
+                      <Text style={s.heroQtyPillText}>{d.count}×</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
 
               {/* Macro chips */}
@@ -1105,11 +1219,12 @@ export default function SubscriptionScreen() {
                 </View>
               )}
 
-              {/* Add-ons — subscription-level, applies to every meal */}
-              {subAddons.length > 0 && (
+              {/* Add-ons — subscription-level, applies to every meal. The drink
+                  has its own row above, so it isn't listed here (088). */}
+              {subAddons.some((a) => !a.addons?.is_drink) && (
                 <View style={s.heroAddonsRow}>
                   <Text style={s.heroAddonsText}>
-                    + {subAddons.map((a) => a.addons?.name ?? a.addon_id).join(', ')}
+                    + {subAddons.filter((a) => !a.addons?.is_drink).map((a) => a.addons?.name ?? a.addon_id).join(', ')}
                   </Text>
                 </View>
               )}
@@ -1547,16 +1662,127 @@ export default function SubscriptionScreen() {
                     </View>
                   ))}
 
+                  {/* Your drink (088) — the day's smoothie. Change swaps it for
+                      another deliverable drink (update-day-cart set_drink, no
+                      price change); locked like the meal after the cutoff.
+                      A day without a drink can add one (a one-off, billed as
+                      the add-on), and remove it again. */}
+                  {(dayDrink || (!dayEditLocked && drinkAddon && isAddonAvailable({ unavailableAddons }, selectedDay, drinkAddon.id))) && (
+                    <View style={s.addonEditWrap}>
+                      <Text style={s.addonEditHead}>Your drink</Text>
+                      {dayDrink ? (
+                        <>
+                          <View style={s.drinkCard}>
+                            {dayDrink.dish?.image_url ? (
+                              <Image source={{ uri: dayDrink.dish.image_url }} style={s.mealRowThumb} contentFit="cover" cachePolicy="memory-disk" />
+                            ) : (
+                              <View style={s.mealRowPlaceholder}>
+                                <Text style={{ fontSize: 22 }}>🥤</Text>
+                              </View>
+                            )}
+                            <View style={s.mealRowInfo}>
+                              <Text style={s.mealRowName} numberOfLines={2}>{dayDrink.name}</Text>
+                              <Text style={s.mealRowMeta}>
+                                {dayDrink.dish
+                                  ? [dayDrink.dish.kcal ? `${dayDrink.dish.kcal} kcal` : null, dayDrink.dish.protein ? `${dayDrink.dish.protein}g protein` : null].filter(Boolean).join(' · ') || dayDrink.dish.category
+                                  : 'Our kitchen picks it for you'}
+                              </Text>
+                            </View>
+                            {!dayEditLocked && deliverableDrinks.some((d) => d.id !== dayDrink.dish?.id) && (
+                              <Pressable
+                                onPress={() => { setDrinkError(''); setPickingDrinkFor(pickingDrinkFor === dayOrder.id ? null : dayOrder.id) }}
+                                hitSlop={8}
+                              >
+                                <Text style={s.addrPickChange}>{pickingDrinkFor === dayOrder.id ? 'Close' : 'Change'}</Text>
+                              </Pressable>
+                            )}
+                          </View>
+                          {drinkError ? <Text style={[s.dayModalSwapError, { marginTop: 8, marginBottom: 0 }]}>{drinkError}</Text> : null}
+                          {!dayEditLocked && pickingDrinkFor === dayOrder.id && (
+                            <View style={{ marginTop: 6 }}>
+                              {deliverableDrinks.map((d) => {
+                                const isCurrent = d.id === dayDrink.dish?.id
+                                const available = isMealAvailable({ unavailableMeals }, selectedDay, d.id)
+                                return (
+                                  <Pressable
+                                    key={d.id}
+                                    style={({ pressed }) => [
+                                      s.mealRow,
+                                      isCurrent && s.mealRowCurrent,
+                                      !available && { opacity: 0.5 },
+                                      pressed && !isCurrent && available && { opacity: 0.7 },
+                                    ]}
+                                    onPress={() => { if (!isCurrent && available) handleSetDrink(dayOrder.id, d.id) }}
+                                    disabled={isCurrent || !available}
+                                  >
+                                    {d.image_url ? (
+                                      <Image source={{ uri: d.image_url }} style={s.mealRowThumb} contentFit="cover" cachePolicy="memory-disk" />
+                                    ) : (
+                                      <View style={s.mealRowPlaceholder}>
+                                        <Text style={{ fontSize: 22 }}>🥤</Text>
+                                      </View>
+                                    )}
+                                    <View style={s.mealRowInfo}>
+                                      <Text style={s.mealRowName} numberOfLines={2}>{d.name}</Text>
+                                      <Text style={s.mealRowMeta}>
+                                        {!available
+                                          ? 'Not available on this day'
+                                          : [d.kcal ? `${d.kcal} kcal` : null, d.protein ? `${d.protein}g protein` : null].filter(Boolean).join(' · ') || d.category}
+                                      </Text>
+                                    </View>
+                                    {isCurrent ? (
+                                      <View style={s.mealRowCurrentBadge}>
+                                        <Check size={14} color={Colors.primary} strokeWidth={2.5} />
+                                      </View>
+                                    ) : available ? (
+                                      <View style={[s.switchBadge, s.switchBadgeFree]}>
+                                        <Text style={[s.switchBadgeText, s.switchBadgeTextFree]} maxFontSizeMultiplier={1.3}>Pick</Text>
+                                      </View>
+                                    ) : null}
+                                  </Pressable>
+                                )
+                              })}
+                            </View>
+                          )}
+                          {!dayEditLocked && !defaultAddonIds.has(dayDrink.line.addon_id ?? '') && (
+                            <Pressable
+                              style={[s.addonRemoveBtn, { alignSelf: 'flex-start', marginTop: 10 }, cartBusy && { opacity: 0.4 }]}
+                              onPress={() => handleCartOp(dayOrder.id, 'remove_addon', dayDrink.line.addon_id ?? undefined)}
+                              disabled={cartBusy}
+                            >
+                              <Text style={s.addonRemoveText}>Remove drink</Text>
+                            </Pressable>
+                          )}
+                        </>
+                      ) : drinkAddon ? (
+                        <View style={s.addonEditRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.addonEditName}>{DRINK_NAME}</Text>
+                            <Text style={s.addonEditPrice}>Smoothie with this meal · ₹{fmt(drinkAddon.price_per_meal)}</Text>
+                          </View>
+                          <Pressable
+                            style={[s.addonAddBtn, cartBusy && { opacity: 0.4 }]}
+                            onPress={() => handleCartOp(dayOrder.id, 'add_addon', drinkAddon.id)}
+                            disabled={cartBusy}
+                          >
+                            <Plus size={13} color={Colors.primary} />
+                            <Text style={s.addonAddText}>Add</Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+                    </View>
+                  )}
+
                   {/* Add-ons for this day — a stepper once one's on the order
                       (quantity > 1 is billed as unit_price × quantity by
                       recompute_order_cart already), a plain Add button
                       before that. A default add-on's stepper floors at 1
                       rather than letting it reach 0 — mirrors the server's
                       cannot_remove_default_addon guard on remove_addon. */}
-                  {!dayEditLocked && allAddons.length > 0 && (
+                  {!dayEditLocked && dayEditableAddons.length > 0 && (
                     <View style={s.addonEditWrap}>
                       <Text style={s.addonEditHead}>Add-ons for this day</Text>
-                      {allAddons.map((a) => {
+                      {dayEditableAddons.map((a) => {
                         const on = dayOrderAddonIds.has(a.id)
                         const isDefault = defaultAddonIds.has(a.id)
                         const qty = dayOrderAddonQty.get(a.id) ?? 1
@@ -2012,6 +2238,11 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   addonRemoveText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
+  // The day's drink (088)
+  drinkCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.primaryLight,
+  },
 
   // Cart summary
   cartSummary: {

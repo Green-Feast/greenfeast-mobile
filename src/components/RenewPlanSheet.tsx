@@ -16,9 +16,11 @@ import { Colors, Fonts } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import CouponField from '@/components/CouponField'
 import { couponsAllowed, type CouponQuote } from '@/lib/coupons'
+import { DRINK_NAME, DRINK_TAGLINE } from '@/constants/drinks'
 
 export type RenewPlanOption = { id: string; name: string; base_price: number; meals_total: number }
-export type RenewAddonOption = { id: string; name: string; price_per_meal: number }
+// is_drink (088): the drink add-on is shown as "Drink", apart from the add-ons.
+export type RenewAddonOption = { id: string; name: string; price_per_meal: number; is_drink?: boolean | null }
 export type RenewConfig = { plan_id: string; meals_lunch: number; meals_dinner: number; addon_ids: string[] }
 export type RenewPaymentState = 'idle' | 'starting' | 'paying' | 'confirming' | 'done' | 'failed'
 
@@ -108,10 +110,17 @@ export default function RenewPlanSheet({
   const busy = paymentState === 'starting' || paymentState === 'paying' || paymentState === 'confirming'
   const draftValid = draft.meals_lunch + draft.meals_dinner >= 1 && draftPrice !== null
 
-  const currentAddonNames = useMemo(
-    () => current.addon_ids.map((id) => addons.find((a) => a.id === id)?.name).filter(Boolean).join(', '),
+  // The drink (088) is listed on its own line; the add-on names exclude it.
+  const currentHasDrink = useMemo(
+    () => current.addon_ids.some((id) => addons.find((a) => a.id === id)?.is_drink),
     [current.addon_ids, addons]
   )
+  const currentAddonNames = useMemo(
+    () => current.addon_ids.map((id) => addons.find((a) => a.id === id)).filter((a) => a && !a.is_drink).map((a) => a!.name).join(', '),
+    [current.addon_ids, addons]
+  )
+  const drinkAddons = addons.filter((a) => a.is_drink)
+  const otherAddons = addons.filter((a) => !a.is_drink)
 
   function close() {
     if (busy) return
@@ -196,7 +205,7 @@ export default function RenewPlanSheet({
                           : 'Same meals, same add-ons',
                         onPress: () => setStep('repeat'),
                       },
-                      { icon: SlidersHorizontal, title: 'Edit plan', sub: 'Change plan size, meals per day or add-ons', onPress: () => setStep('edit') },
+                      { icon: SlidersHorizontal, title: 'Edit plan', sub: 'Change plan size, meals per day, drink or add-ons', onPress: () => setStep('edit') },
                       ...(mealsLeft > 0 ? [] : [
                         { icon: ClipboardList, title: 'Build a new plan', sub: 'Answer a few questions again for a fresh recommendation', onPress: onRedoOnboarding },
                         { icon: XCircle, title: 'Cancel plan', sub: 'Stop your meals. Money in your wallet stays yours.', onPress: () => setStep('cancel'), danger: true },
@@ -221,7 +230,10 @@ export default function RenewPlanSheet({
                     <View style={st.card}>
                       <Text style={st.cardTitle}>{currentPlan?.name ?? 'Your plan'}</Text>
                       <Text style={st.cardLine}>{currentPlan ? `${currentPlan.meals_total} meals' worth` : ''}{currentPlan ? ' · ' : ''}{mealsLine(current)}</Text>
-                      <Text style={st.cardLine}>{currentAddonNames ? `Add-ons: ${currentAddonNames}` : 'No add-ons'}</Text>
+                      {currentHasDrink && <Text style={st.cardLine}>{`${DRINK_NAME}: ${DRINK_TAGLINE.toLowerCase()}`}</Text>}
+                      {(currentAddonNames || !currentHasDrink) && (
+                        <Text style={st.cardLine}>{currentAddonNames ? `Add-ons: ${currentAddonNames}` : 'No add-ons'}</Text>
+                      )}
                       <Text style={st.cardNote}>Delivery days, menu and address stay the same.</Text>
                     </View>
                     {currentPrice !== null && usedExtra(coupon ? coupon.total : currentPrice) > 0 && (
@@ -277,8 +289,22 @@ export default function RenewPlanSheet({
                       <Text style={st.errorText}>Choose at least one lunch or dinner.</Text>
                     )}
 
-                    {addons.length > 0 && <Text style={[st.sectionLabel, { marginTop: 18 }]}>Add-ons (every meal)</Text>}
-                    {addons.map((a) => {
+                    {drinkAddons.length > 0 && <Text style={[st.sectionLabel, { marginTop: 18 }]}>Drink (every meal)</Text>}
+                    {drinkAddons.map((a) => {
+                      const on = draft.addon_ids.includes(a.id)
+                      return (
+                        <Pressable key={a.id} style={[st.choice, on && st.choiceOn]} onPress={() => toggleAddon(a.id)}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={st.choiceTitle}>{DRINK_NAME}</Text>
+                            <Text style={st.choiceSub}>{DRINK_TAGLINE} · +{rupees(a.price_per_meal)} per meal</Text>
+                          </View>
+                          <View style={[st.checkbox, on && st.checkboxOn]}>{on && <Check size={14} color="#fff" />}</View>
+                        </Pressable>
+                      )
+                    })}
+
+                    {otherAddons.length > 0 && <Text style={[st.sectionLabel, { marginTop: 18 }]}>Add-ons (every meal)</Text>}
+                    {otherAddons.map((a) => {
                       const on = draft.addon_ids.includes(a.id)
                       return (
                         <Pressable key={a.id} style={[st.choice, on && st.choiceOn]} onPress={() => toggleAddon(a.id)}>

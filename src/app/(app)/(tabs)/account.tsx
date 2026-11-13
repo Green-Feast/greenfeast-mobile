@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -162,7 +163,7 @@ export default function AccountScreen() {
       await signOut()
       router.replace('/(auth)/login' as any)
     } catch (e) {
-      setDeleteError((e as any)?.message ?? 'Delete failed — please try again or contact support.')
+      setDeleteError(friendlyError(e, 'Delete failed — please try again or contact support.'))
       setDeleting(false)
     }
   }

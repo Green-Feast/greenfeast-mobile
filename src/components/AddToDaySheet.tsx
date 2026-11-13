@@ -4,6 +4,7 @@
 // (src/app/(app)/(tabs)/subscription.tsx `handleAddDish`/`handleCartOp`), so
 // anything added here shows up there too — same edge functions, same table.
 import { useEffect, useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import { View, Text, Pressable, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -146,7 +147,7 @@ export default function AddToDaySheet({ visible, onClose, meal }: Props) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       setSuccess(true)
     } catch (e: any) {
-      setError(e?.message ?? 'Could not add this dish. Try again.')
+      setError(friendlyError(e, 'Could not add this dish. Try again.'))
     } finally {
       setSubmitting(false)
     }

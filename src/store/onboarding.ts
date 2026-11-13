@@ -49,6 +49,7 @@ interface OnboardingState {
   // S13 — address
   addressLine1: string
   addressLandmark: string
+  addressCity: string           // from the map pin / autocomplete / pincode lookup — never hardcoded
   addressPincode: string
   addressLabel: string
   addressType: 'home' | 'office' | 'other'
@@ -83,6 +84,7 @@ interface OnboardingState {
   setAddress: (fields: {
     addressLine1: string
     addressLandmark: string
+    addressCity: string
     addressPincode: string
     addressLabel: string
     addressType: 'home' | 'office' | 'other'
@@ -122,6 +124,7 @@ const defaultState: Omit<OnboardingState, ActionKeys> = {
   mealsDinner: 0,
   addressLine1: '',
   addressLandmark: '',
+  addressCity: '',
   addressPincode: '',
   addressLabel: 'Home',
   addressType: 'home',

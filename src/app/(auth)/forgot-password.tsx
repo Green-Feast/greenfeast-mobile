@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, TextInput } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -30,7 +31,7 @@ export default function ForgotPasswordScreen() {
       if (error) throw error
       setSent(true)
     } catch (err: any) {
-      setError(err.message ?? 'Something went wrong. Please try again.')
+      setError(friendlyError(err, 'Something went wrong. Please try again.'))
     } finally {
       setLoading(false)
     }

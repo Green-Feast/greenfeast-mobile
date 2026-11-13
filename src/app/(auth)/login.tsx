@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -74,7 +75,7 @@ export default function LoginScreen() {
     if (!code) return
     handledUrl.current = incomingUrl
     supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (error) setError('Google sign-in failed. Please try again.')
+      if (error) setError(friendlyError(error, 'Google sign-in failed. Please try again.'))
     })
   }, [incomingUrl])
 
@@ -109,8 +110,8 @@ export default function LoginScreen() {
         const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
         if (exchangeError) throw exchangeError
       }
-    } catch {
-      setError('Google sign-in failed. Please try again.')
+    } catch (err) {
+      setError(friendlyError(err, 'Google sign-in failed. Please try again.'))
     } finally {
       setGoogleLoading(false)
     }
@@ -164,7 +165,7 @@ export default function LoginScreen() {
       }
     } catch (err: any) {
       if (err?.code !== 'ERR_REQUEST_CANCELED') {
-        setError('Apple sign-in failed. Please try again.')
+        setError(friendlyError(err, 'Apple sign-in failed. Please try again.'))
       }
     } finally {
       setAppleLoading(false)
@@ -200,7 +201,7 @@ export default function LoginScreen() {
         }
       }
     } catch (err: any) {
-      setError(err.message ?? 'Something went wrong. Please try again.')
+      setError(friendlyError(err, 'Something went wrong. Please try again.'))
     } finally {
       setEmailLoading(false)
     }

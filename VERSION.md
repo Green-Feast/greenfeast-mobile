@@ -52,6 +52,30 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.12 — 2026-11-13
+- Build 10, OTA 12. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **Add address works again**: the address book never sent `city`
+  (NOT NULL), so every new address failed. The city now comes from the map pin,
+  "Use my location", Places autocomplete, or a Google Geocoding lookup of the
+  pincode, and is never hard-coded. Onboarding no longer hard-codes "Jaipur".
+- **Meal + drink + add-ons** (migration 088): My Plan's hero card shows the
+  day's drink (set by the kitchen per slot) with its kcal and macros.
+  Customize can swap it for any deliverable drink (`update-day-cart set_drink`).
+  Walk-in drink chips come from the real menu, coffee included. The drink is
+  shown apart from add-ons in onboarding, renewal, Plan & settings and Order
+  history. The hard-coded smoothie flavours are retired.
+- **Zero delivery days** (migration 089): Plan & settings can save no delivery
+  days (`subscriptions.no_delivery_days`), which means no deliveries. Walk-in
+  and adding a meal still work.
+- **Friendlier error messages** (`lib/friendlyError.ts`) on login, password
+  reset, Account, Home, the rating and feedback sheets, and Add to day.
+- Also first shipped here, from commits after 1.10.11: the Walk-in tab replaces
+  booked pickup / dine-in (087), cash on delivery on the 60-meal plan (086),
+  and the delete-account wallet shown in rupees.
+- JS-only. Server side (088, 089 and the edge functions) went live before this
+  update.
+
 ### 1.10.11 — 2026-11-11
 - Build 10, OTA 11. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.

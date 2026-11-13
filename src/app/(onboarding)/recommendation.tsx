@@ -19,6 +19,7 @@ import { supabase } from '@/lib/supabase'
 import { useOnboardingStore, type AddOnSelection, type PlanId } from '@/store/onboarding'
 import { MENU_LABELS, CONSTRAINT_LABELS } from '@/lib/recommendation'
 import { Colors, Fonts } from '@/constants/colors'
+import { addonLabel, DRINK_TAGLINE } from '@/constants/drinks'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
 import AllergenBadge from '@/components/AllergenBadge'
@@ -31,6 +32,8 @@ type Addon = {
   name: string
   description: string | null
   price_per_meal: number
+  // The plan's drink (088), shown as "Drink" rather than by its add-on name.
+  is_drink?: boolean | null
   kcal: number | null
   protein: number | null
   carbs: number | null
@@ -148,7 +151,7 @@ export default function RecommendationScreen() {
   }
 
   function buildAddOns(): AddOnSelection[] {
-    return addonRows.map((a) => ({ id: a.id, name: a.name, pricePerMeal: a.price_per_meal }))
+    return addonRows.map((a) => ({ id: a.id, name: addonLabel(a), pricePerMeal: a.price_per_meal }))
   }
   function handleAccept() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
@@ -199,7 +202,7 @@ export default function RecommendationScreen() {
               </View>
 
               <View style={styles.checklist}>
-                {addonRows.map((a) => <ChecklistItem key={a.id} label={`${a.name} included`} />)}
+                {addonRows.map((a) => <ChecklistItem key={a.id} label={a.is_drink ? `${addonLabel(a)} included · ${DRINK_TAGLINE.toLowerCase()}` : `${a.name} included`} />)}
                 <ChecklistItem label="No repeat meals for 12+ days" />
               </View>
 
@@ -280,7 +283,7 @@ export default function RecommendationScreen() {
                   <Text style={styles.macroListHead}>Add-on contributions (per meal)</Text>
                   {addonRows.map((a) => (
                     <View key={a.id} style={styles.macroLine}>
-                      <Text style={styles.macroName}>{a.name}</Text>
+                      <Text style={styles.macroName}>{addonLabel(a)}</Text>
                       <Text style={styles.macroVals}>
                         {[
                           a.kcal != null ? `${a.kcal} kcal` : null,
@@ -328,7 +331,7 @@ export default function RecommendationScreen() {
                 </View>
                 {addonRows.map((a) => (
                   <View key={a.id} style={styles.priceLine}>
-                    <Text style={styles.priceLabel}>{a.name} × {mealsTotal}</Text>
+                    <Text style={styles.priceLabel}>{addonLabel(a)} × {mealsTotal}</Text>
                     <Text style={styles.priceValue}>+{fmt(a.price_per_meal * mealsTotal)}</Text>
                   </View>
                 ))}

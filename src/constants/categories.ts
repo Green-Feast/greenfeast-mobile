@@ -11,7 +11,9 @@ export const CATEGORY_EMOJIS: Record<string, string> = {
 // row — replaces the old fallback of borrowing a representative meal's
 // photo. Uploaded via scripts/upload-category-images.ts; CATEGORY_EMOJIS
 // above stays as the fallback for any category that doesn't have one.
-const CATEGORY_IMAGES_BASE = 'https://amwwjcwoumhbdxaxvexj.supabase.co/storage/v1/object/public/category-images'
+// Follows EXPO_PUBLIC_SUPABASE_URL so a custom domain (some networks block
+// *.supabase.co) also serves these images.
+const CATEGORY_IMAGES_BASE = `${(process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://amwwjcwoumhbdxaxvexj.supabase.co').replace(/\/+$/, '')}/storage/v1/object/public/category-images`
 export const CATEGORY_IMAGES: Record<string, string> = {
   bowl: `${CATEGORY_IMAGES_BASE}/bowl_category.webp`,
   wrap: `${CATEGORY_IMAGES_BASE}/wrap_category.webp`,

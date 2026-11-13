@@ -4,6 +4,7 @@
 //                   temporary password (user_metadata.must_change_password);
 //                   can't be dismissed until a new password is set.
 import { useState } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import { View, Text, TextInput, Pressable, Modal, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { X, Eye, EyeOff, CheckCircle2 } from 'lucide-react-native'
@@ -65,7 +66,7 @@ export default function ChangePasswordSheet({
       if (updErr) throw updErr
       setDone(true)
     } catch (e: any) {
-      setError(e?.message ?? 'Could not change the password. Please try again.')
+      setError(friendlyError(e, 'Could not change the password. Please try again.'))
     } finally {
       setBusy(false)
     }

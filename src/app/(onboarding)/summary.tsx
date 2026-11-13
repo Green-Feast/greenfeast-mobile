@@ -122,7 +122,7 @@ export default function SummaryScreen() {
         {/* Address */}
         <Section title="Delivery Address">
           <Row label="Type" value={store.addressLabel} />
-          <Row label="Address" value={`${store.addressLine1}, Jaipur ${store.addressPincode}`} />
+          <Row label="Address" value={`${store.addressLine1}, ${store.addressCity} ${store.addressPincode}`} />
           {store.addressLandmark ? <Row label="Landmark" value={store.addressLandmark} /> : null}
         </Section>
 

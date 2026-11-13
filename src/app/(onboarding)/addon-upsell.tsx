@@ -8,8 +8,9 @@ import { useOnboardingStore } from '@/store/onboarding'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
+import { addonLabel, DRINK_TAGLINE } from '@/constants/drinks'
 
-type Addon = { id: string; name: string; description: string | null; price_per_meal: number }
+type Addon = { id: string; name: string; description: string | null; price_per_meal: number; is_drink?: boolean | null }
 
 const GOAL_TEXT: Record<string, string> = {
   'build-muscle': 'build muscle',
@@ -48,7 +49,7 @@ export default function AddonUpsellScreen() {
 
   function addBack(a: Addon) {
     if (addOns.some((x) => x.id === a.id)) return
-    setPlan(planId!, planName, [...addOns, { id: a.id, name: a.name, pricePerMeal: a.price_per_meal }])
+    setPlan(planId!, planName, [...addOns, { id: a.id, name: addonLabel(a), pricePerMeal: a.price_per_meal }])
     setAddedBack((prev) => [...prev, a.id])
   }
 
@@ -75,17 +76,21 @@ export default function AddonUpsellScreen() {
       </View>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 40 + insets.bottom }]}>
       <Text style={styles.title}>Before you continue</Text>
-      <Text style={styles.subtitle}>These add-ons were picked for your goal.</Text>
+      <Text style={styles.subtitle}>
+        {addons.length === 1 && addons[0].is_drink ? 'This was picked for your goal.' : 'These add-ons were picked for your goal.'}
+      </Text>
 
       {addons.map((a) => {
         const isAdded = addedBack.includes(a.id) || addOns.some((x) => x.id === a.id)
+        // The drink is a smoothie with every meal, not an add-on (088).
+        const desc = a.is_drink ? DRINK_TAGLINE : a.description
         return (
           <View key={a.id} style={styles.card}>
             <Text style={styles.cardBody}>
               Your goal is to <Text style={styles.bold}>{goalText}</Text>. You removed{' '}
-              <Text style={styles.bold}>{a.name}</Text> from your plan.
+              <Text style={styles.bold}>{a.is_drink ? 'your drink' : a.name}</Text> from your plan.
             </Text>
-            {a.description ? <Text style={styles.cardDesc}>{a.description}</Text> : null}
+            {desc ? <Text style={styles.cardDesc}>{desc}</Text> : null}
             {isAdded ? (
               <View style={styles.addedRow}>
                 <Check size={16} color={Colors.primary} strokeWidth={3} />

@@ -1,4 +1,5 @@
 import { Platform } from 'react-native'
+import { friendlyError } from '@/lib/friendlyError'
 import { supabase } from '@/lib/supabase'
 import { istToday, addDaysISO } from '@/lib/ist'
 import { APP_VERSION_STRING } from '@/constants/version'
@@ -148,7 +149,7 @@ export async function rateMeal(input: { date: string; slot: Slot; stars: number;
     p_comment: input.comment.trim() || null,
     p_source: input.source,
   })
-  if (error) throw new Error(error.message || 'Could not save your rating. Please try again.')
+  if (error) throw new Error(friendlyError(error, 'Could not save your rating. Please try again.'))
 }
 
 export async function dismissRatingPrompt(date: string, slot: Slot) {
@@ -164,5 +165,5 @@ export async function sendFeedback(kind: FeedbackKind, message: string) {
     p_app_version: APP_VERSION_STRING,
     p_platform: Platform.OS,
   })
-  if (error) throw new Error(error.message || 'Could not send your feedback. Please try again.')
+  if (error) throw new Error(friendlyError(error, 'Could not send your feedback. Please try again.'))
 }

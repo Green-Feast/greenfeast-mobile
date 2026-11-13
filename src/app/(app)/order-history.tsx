@@ -18,9 +18,10 @@ import { useRatingStore } from '@/store/rating'
 import { fetchMyRatings, canStillRate, STAR_COLOR, type MealRating } from '@/lib/ratings'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday } from '@/lib/ist'
+import { DRINK_NAME, CHEFS_CHOICE_DRINK } from '@/constants/drinks'
 
 // Order history: every meal so far — what was delivered (dish, portions,
-// add-ons, extra dishes, where it went), what was skipped and why, and what
+// drink, add-ons, extra dishes, where it went), what was skipped and why, and what
 // each one cost from the wallet. The wallet's transaction list says where the
 // money went; this says what it bought. Delivered meals show the customer's
 // rating, and can be rated (or re-rated) for 7 days.
@@ -37,7 +38,14 @@ type HistoryOrder = {
   delivered_at: string | null
   meal_templates: { name: string; image_url: string | null; kcal: number | null } | null
   addresses: { label: string | null } | null
-  order_addons: { kind: string; label: string | null; quantity: number | null; unit_price: number | null; addons: { name: string } | null }[]
+  order_addons: {
+    kind: string
+    label: string | null
+    quantity: number | null
+    unit_price: number | null
+    sub_option: string | null
+    addons: { name: string; is_drink: boolean | null } | null
+  }[]
 }
 
 type Group = { key: string; date: string; slot: 'lunch' | 'dinner'; orders: HistoryOrder[] }
@@ -74,11 +82,24 @@ function groupOrders(rows: HistoryOrder[]): Group[] {
 }
 
 // A plan add-on is included once per portion; others carry their own count.
+function lineCount(o: HistoryOrder, l: HistoryOrder['order_addons'][number]) {
+  return (l.quantity ?? 1) * (l.unit_price == null && !o.extra_dish ? (o.quantity ?? 1) : 1)
+}
+
+// The drink (088) is the add-on line whose addon is a drink; its sub_option is
+// the drink that went out (no sub_option = the chef's choice). Not an add-on.
+function drinkText(o: HistoryOrder) {
+  const l = (o.order_addons ?? []).find((x) => x.kind === 'addon' && x.addons?.is_drink)
+  if (!l) return null
+  const n = lineCount(o, l)
+  return `${DRINK_NAME} · ${l.sub_option || CHEFS_CHOICE_DRINK}${n > 1 ? ` ×${n}` : ''}`
+}
+
 function addonsText(o: HistoryOrder) {
   return (o.order_addons ?? [])
-    .filter((l) => l.kind === 'addon' && l.addons?.name)
+    .filter((l) => l.kind === 'addon' && l.addons?.name && !l.addons.is_drink)
     .map((l) => {
-      const n = (l.quantity ?? 1) * (l.unit_price == null && !o.extra_dish ? (o.quantity ?? 1) : 1)
+      const n = lineCount(o, l)
       return n > 1 ? `${l.addons!.name} ×${n}` : l.addons!.name
     })
 }
@@ -108,7 +129,7 @@ export default function OrderHistoryScreen() {
         id, delivery_date, meal_slot, status, skip_reason, quantity, extra_dish, cart_total, delivered_at,
         meal_templates ( name, image_url, kcal ),
         addresses ( label ),
-        order_addons ( kind, label, quantity, unit_price, addons ( name ) )
+        order_addons ( kind, label, quantity, unit_price, sub_option, addons ( name, is_drink ) )
       `)
       .eq('user_id', user.id)
       .lte('delivery_date', istToday())
@@ -311,6 +332,7 @@ function GroupCard({
       </View>
 
       {group.orders.map((o) => {
+        const drink = drinkText(o)
         const addons = addonsText(o)
         const out = o.status !== 'delivered'
         return (
@@ -330,6 +352,7 @@ function GroupCard({
                 {o.extra_dish ? ' · extra dish' : ''}
                 {o.meal_templates?.kcal ? ` · ${o.meal_templates.kcal * (o.quantity ?? 1)} kcal` : ''}
               </Text>
+              {drink && <Text style={st.addons}>{drink}</Text>}
               {addons.length > 0 && <Text style={st.addons}>+ {addons.join(', ')}</Text>}
               {o.addresses?.label && (
                 <View style={st.addrRow}>

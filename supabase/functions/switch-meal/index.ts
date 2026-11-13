@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { DRINK_AS_MEAL_ERROR, isDrinkCategory } from '../_shared/drinks.ts'
 
 // Sunday is GreenFeast's day off: customers can't add, swap, resize or remove
 // anything on a Sunday. Only the office (admin, which doesn't use this
@@ -86,7 +87,7 @@ Deno.serve(async (req) => {
         .maybeSingle(),
       supabase
         .from('meal_templates')
-        .select('is_active, subscription_valid')
+        .select('is_active, subscription_valid, category')
         .eq('id', meal_template_id)
         .maybeSingle(),
     ])
@@ -98,6 +99,10 @@ Deno.serve(async (req) => {
     }
     if (!dish || !dish.is_active || !dish.subscription_valid) {
       return json({ error: 'This dish is not available for subscription orders.' }, 400)
+    }
+    // A drink is never the meal (088): it comes with the meal, picked with set_drink.
+    if (isDrinkCategory(dish.category)) {
+      return json({ error: DRINK_AS_MEAL_ERROR }, 400)
     }
 
     // Apply the swap (and drop any "Meal switch" fee line left from before

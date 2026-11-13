@@ -5,6 +5,7 @@
 // to be linked from inside the signed-in account. Needs "Allow manual
 // linking" on in Supabase (Authentication → Sign In / Providers).
 import { useEffect, useState } from 'react'
+import { isNetworkError, NETWORK_MESSAGE } from '@/lib/friendlyError'
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native'
 import * as AppleAuthentication from 'expo-apple-authentication'
 import * as WebBrowser from 'expo-web-browser'
@@ -19,6 +20,7 @@ type Provider = 'google' | 'apple'
 
 function friendly(message: string | undefined) {
   const m = message ?? ''
+  if (isNetworkError(message)) return NETWORK_MESSAGE
   if (/manual linking/i.test(m)) return 'Linking isn’t switched on yet — please try again later.'
   if (/already.*(linked|exists|registered)|identity_already_exists/i.test(m)) {
     return 'That account is already used by another GreenFeast login. Contact us and we’ll merge them.'

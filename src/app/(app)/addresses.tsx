@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
   Text,
@@ -20,11 +21,13 @@ import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import LocationPicker, { type LatLng } from '@/components/LocationPicker'
 import { usePlacesAutocomplete, PredictionsDropdown } from '@/components/PlacesAutocomplete'
+import { cityForPincode } from '@/lib/geocode'
 
 type Address = {
   id: string
   line1: string
   landmark: string | null
+  city: string
   pincode: string
   label: string
   type: 'home' | 'office' | 'other'
@@ -67,6 +70,12 @@ export default function AddressesScreen() {
   const [label, setLabel] = useState('Home')
   const [addrType, setAddrType] = useState<'home' | 'office' | 'other'>('home')
   const [pin, setPin] = useState<LatLng | null>(null)
+  // addresses.city is NOT NULL. It comes from the map pin / autocomplete pick
+  // (or the saved row when editing) and is cleared whenever the pincode or pin
+  // changes by other means, so '' means "work it out from the pincode on save".
+  const [city, setCity] = useState('')
+  const formScrollRef = useRef<ScrollView>(null)
+  const pinFieldY = useRef(0)
 
   // Address autocomplete — shared with the onboarding address screen.
   const autocomplete = usePlacesAutocomplete((sel) => {
@@ -77,6 +86,8 @@ export default function AddressesScreen() {
       setFieldErrors((e) => ({ ...e, pincode: '' }))
     }
     if (sel.lat != null && sel.lng != null) setPin({ lat: sel.lat, lng: sel.lng })
+    setCity(sel.city?.trim() ?? '')
+    setFieldErrors((e) => ({ ...e, pin: '' }))
   })
 
   function onLine1Change(t: string) {
@@ -89,7 +100,7 @@ export default function AddressesScreen() {
     if (!user) return
     const { data } = await supabase
       .from('addresses')
-      .select('id, line1, landmark, pincode, label, type, is_default, lat, lng')
+      .select('id, line1, landmark, city, pincode, label, type, is_default, lat, lng')
       .eq('user_id', user.id)
       .is('archived_at', null)
       .order('is_default', { ascending: false })
@@ -104,14 +115,14 @@ export default function AddressesScreen() {
 
   function openAdd() {
     setEditingId(null)
-    setLine1(''); setLandmark(''); setPincode(''); setLabel('Home'); setAddrType('home'); setPin(null)
+    setLine1(''); setLandmark(''); setPincode(''); setLabel('Home'); setAddrType('home'); setPin(null); setCity('')
     setError(''); setFieldErrors({})
     setFormOpen(true)
   }
 
   function openEdit(addr: Address) {
     setEditingId(addr.id)
-    setLine1(addr.line1); setLandmark(addr.landmark ?? ''); setPincode(addr.pincode)
+    setLine1(addr.line1); setLandmark(addr.landmark ?? ''); setPincode(addr.pincode); setCity(addr.city ?? '')
     setLabel(addr.label); setAddrType(addr.type)
     setPin(addr.lat != null && addr.lng != null ? { lat: addr.lat, lng: addr.lng } : null)
     setError(''); setFieldErrors({})
@@ -123,9 +134,23 @@ export default function AddressesScreen() {
     if (Object.keys(fe).length > 0) { setFieldErrors(fe); return }
     setSaving(true); setError('')
     try {
+      // addresses.city is NOT NULL and not hardcoded (we're expanding beyond
+      // Jaipur): use the city from the pin / autocomplete / saved row, else look
+      // it up from the pincode. With none, don't save — ask for a map pin.
+      const resolvedCity = city.trim() || (await cityForPincode(pincode)) || ''
+      if (!resolvedCity) {
+        setFieldErrors((e) => ({
+          ...e,
+          pin: "We couldn't work out your city from this pincode. Please pin your location on the map so we can find it.",
+        }))
+        formScrollRef.current?.scrollTo({ y: Math.max(pinFieldY.current - 8, 0), animated: true })
+        return
+      }
+      setCity(resolvedCity)
+
       if (editingId) {
         const { error: err } = await supabase.from('addresses')
-          .update({ line1: line1.trim(), landmark: landmark.trim() || null, pincode, label, type: addrType, lat: pin?.lat ?? null, lng: pin?.lng ?? null })
+          .update({ line1: line1.trim(), landmark: landmark.trim() || null, city: resolvedCity, pincode, label, type: addrType, lat: pin?.lat ?? null, lng: pin?.lng ?? null })
           .eq('id', editingId)
         if (err) throw err
         setFormOpen(false)
@@ -136,6 +161,7 @@ export default function AddressesScreen() {
           user_id: user!.id,
           line1: line1.trim(),
           landmark: landmark.trim() || null,
+          city: resolvedCity,
           pincode,
           label,
           type: addrType,
@@ -150,8 +176,10 @@ export default function AddressesScreen() {
         if (created && !isFirst) askToUse(created.id, label)
         else if (created && isFirst) await moveUpcoming(created.id, true)
       }
-    } catch { setError('Could not save address. Please try again.') }
-    finally { setSaving(false) }
+    } catch (e) {
+      console.warn('[addresses] save failed', e)
+      setError('Could not save address. Please try again.')
+    } finally { setSaving(false) }
   }
 
   // Makes it the default; with moveMeals, every upcoming meal that can still
@@ -159,7 +187,7 @@ export default function AddressesScreen() {
   async function moveUpcoming(id: string, moveMeals: boolean) {
     const { data, error: err } = await supabase.rpc('set_default_address', { p_address: id, p_move_upcoming: moveMeals })
     if (err) {
-      Alert.alert('Could not change the address', err.message)
+      Alert.alert('Could not change the address', friendlyError(err, 'Please try again.'))
       return
     }
     await fetchAddresses()
@@ -192,7 +220,7 @@ export default function AddressesScreen() {
             // Archived rather than deleted once orders have used it, so past
             // orders keep their address.
             const { error: err } = await supabase.rpc('archive_address', { p_address: id })
-            if (err) Alert.alert('Could not remove it', err.message)
+            if (err) Alert.alert('Could not remove it', friendlyError(err, 'Please try again.'))
             await fetchAddresses()
           } finally { setDeletingId(null) }
         },
@@ -292,6 +320,7 @@ export default function AddressesScreen() {
               </View>
 
               <ScrollView
+                ref={formScrollRef}
                 showsVerticalScrollIndicator={false}
                 style={f.formScroll}
                 contentContainerStyle={{ padding: 16 }}
@@ -331,22 +360,33 @@ export default function AddressesScreen() {
                     keyboardType="number-pad"
                     maxLength={6}
                     value={pincode}
-                    onChangeText={(t) => { setPincode(t.replace(/\D/g, '')); setFieldErrors(e => ({ ...e, pincode: '' })) }}
+                    onChangeText={(t) => {
+                      setPincode(t.replace(/\D/g, ''))
+                      setCity('') // the city belonged to the old pincode
+                      setFieldErrors(e => ({ ...e, pincode: '', pin: '' }))
+                    }}
                     placeholderTextColor={Colors.textLight}
                   />
                 </FormField>
 
-                <FormField label="Pin your location (optional)">
-                  <LocationPicker
-                    value={pin}
-                    onChange={setPin}
-                    height={180}
-                    onResolveAddress={({ line1: l1, pincode: pc }) => {
-                      if (l1) { setLine1(l1); setFieldErrors(e => ({ ...e, line1: '' })) }
-                      if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setFieldErrors(e => ({ ...e, pincode: '' })) }
-                    }}
-                  />
-                </FormField>
+                <View onLayout={(e) => { pinFieldY.current = e.nativeEvent.layout.y }}>
+                  <FormField label="Pin your location (optional)" error={fieldErrors.pin}>
+                    <LocationPicker
+                      value={pin}
+                      onChange={(c) => {
+                        setPin(c)
+                        setCity('') // re-filled by onResolveAddress once the pin is geocoded
+                        setFieldErrors(e => ({ ...e, pin: '' }))
+                      }}
+                      height={180}
+                      onResolveAddress={({ line1: l1, pincode: pc, city: c }) => {
+                        if (l1) { setLine1(l1); setFieldErrors(e => ({ ...e, line1: '' })) }
+                        if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setFieldErrors(e => ({ ...e, pincode: '' })) }
+                        setCity(c?.trim() ?? '')
+                      }}
+                    />
+                  </FormField>
+                </View>
 
                 <FormField label="Address type">
                   <View style={{ flexDirection: 'row', gap: 8 }}>
