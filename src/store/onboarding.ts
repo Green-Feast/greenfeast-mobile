@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { HealthGoal, MenuType, PlanId, Recommendation } from '@/lib/recommendation'
+import { supabase } from '@/lib/supabase'
 
 // Re-export the domain types so existing screen imports keep working.
 export type { HealthGoal, MenuType, PlanId, Recommendation }
@@ -132,7 +133,29 @@ const defaultState: Omit<OnboardingState, ActionKeys> = {
   addressLng: null,
 }
 
-export const useOnboardingStore = create<OnboardingState>((set) => ({
+// Plan, add-ons, days and the lunch/dinner split live only here until payment.
+// Mirror them to users.onboarding_draft (migration 090) as they change, so if
+// the user stops before paying, admin → Users can see them and pick up from
+// there. Best effort: a failed save never blocks onboarding.
+function saveDraft(s: OnboardingState) {
+  ;(async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    await supabase.from('users').update({
+      onboarding_draft: {
+        planId: s.planId,
+        planName: s.planName,
+        addonIds: s.addOns.map((a) => a.id),
+        days: s.selectedDays,
+        mealsLunch: s.mealsLunch,
+        mealsDinner: s.mealsDinner,
+        updatedAt: new Date().toISOString(),
+      },
+    }).eq('id', user.id)
+  })().catch(() => {})
+}
+
+export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   ...defaultState,
 
   setHealthProfile: (fields) => set(fields),
@@ -140,14 +163,19 @@ export const useOnboardingStore = create<OnboardingState>((set) => ({
   setQuestionnaire: ({ q1Answer, q2Answer = '', recommendation }) =>
     set({ q1Answer, q2Answer, recommendation }),
 
-  setPlan: (planId, planName, addOns) => set({ planId, planName, addOns }),
+  setPlan: (planId, planName, addOns) => {
+    set({ planId, planName, addOns })
+    saveDraft(get())
+  },
 
   setUpsellShown: () => set({ upsellShown: true }),
 
   setDietaryBasics: (fields) => set(fields),
 
-  setDays: (selectedDays, deliveryMode, mealsLunch, mealsDinner) =>
-    set({ selectedDays, deliveryMode, mealsLunch, mealsDinner }),
+  setDays: (selectedDays, deliveryMode, mealsLunch, mealsDinner) => {
+    set({ selectedDays, deliveryMode, mealsLunch, mealsDinner })
+    saveDraft(get())
+  },
 
   setAddress: (fields) => set(fields),
 

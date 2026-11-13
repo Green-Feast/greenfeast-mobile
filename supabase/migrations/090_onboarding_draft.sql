@@ -1,0 +1,17 @@
+-- ============================================================
+-- GreenFeast — Migration 090: Onboarding draft
+-- ============================================================
+-- App onboarding keeps the plan, add-ons, delivery days and lunch/dinner split
+-- on the phone until payment. Someone who stops before paying left the admin
+-- nothing to pick up from. The app now saves those choices as they're made
+-- into users.onboarding_draft, and admin → Users shows them and prefills
+-- Create subscription.
+--
+-- Shape (written by the app, read by admin; informational only — nothing
+-- bills or schedules from it):
+--   { "planId": "...", "planName": "...", "addonIds": ["..."],
+--     "days": ["Mon", ...], "mealsLunch": 1, "mealsDinner": 0,
+--     "updatedAt": "<ISO timestamp>" }
+--
+-- Writes go through the existing users_update_own RLS policy (002).
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS onboarding_draft JSONB;
