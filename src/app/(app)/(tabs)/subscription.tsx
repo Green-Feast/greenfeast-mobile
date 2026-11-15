@@ -36,7 +36,7 @@ import { useOnboardingStore } from '@/store/onboarding'
 import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import MacroRow from '@/components/MacroRow'
 import { warmFunctions } from '@/lib/warmFunctions'
-import { DRINK_CATEGORIES, CHEFS_CHOICE_DRINK, DRINK_NAME, isDrinkCategory } from '@/constants/drinks'
+import { DRINK_CATEGORIES, UNNAMED_DRINK, DRINK_NAME, isDrinkCategory } from '@/constants/drinks'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ type OrderItem = {
   extra_dish: boolean | null
   slot_seq: number | null
   delivered_at: string | null
-  drink_template_id?: string | null // the day's drink dish; null = chef's choice (088)
+  drink_template_id?: string | null // the day's drink dish (088)
   meal_templates: { id: string; name: string; kcal: number | null; protein: number | null; carbs: number | null; fat: number | null; image_url: string | null } | null
   order_addons: CartLine[]
   // Pickup / dine-in (082)
@@ -859,7 +859,7 @@ export default function SubscriptionScreen() {
 
   // Drinks (088). The plan's drink is an add-on (is_drink) priced like any
   // other; what the customer gets that day is the dish named by the order's
-  // drink_template_id, or - when that is null - the chef's choice.
+  // drink_template_id, else the name on the line, else just "Smoothie".
   const drinkById = new Map(drinkDishes.map((d) => [d.id, d]))
   const drinkAddonIds = new Set<string>([
     ...allAddons.filter((a) => a.is_drink).map((a) => a.id),
@@ -872,7 +872,7 @@ export default function SubscriptionScreen() {
     // A plan's drink comes once per portion; a one-off carries its own count
     // (same rule as Order history).
     const count = (line.quantity ?? 1) * (line.unit_price == null && !o.extra_dish ? (o.quantity ?? 1) : 1)
-    const name = dish?.name ?? (o.drink_template_id ? line.sub_option || DRINK_NAME : CHEFS_CHOICE_DRINK)
+    const name = dish?.name ?? (line.sub_option || UNNAMED_DRINK)
     return { order: o, line, dish, name, count }
   }
 

@@ -18,7 +18,7 @@ import { useRatingStore } from '@/store/rating'
 import { fetchMyRatings, canStillRate, STAR_COLOR, type MealRating } from '@/lib/ratings'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday } from '@/lib/ist'
-import { DRINK_NAME, CHEFS_CHOICE_DRINK } from '@/constants/drinks'
+import { DRINK_NAME, UNNAMED_DRINK } from '@/constants/drinks'
 
 // Order history: every meal so far — what was delivered (dish, portions,
 // drink, add-ons, extra dishes, where it went), what was skipped and why, and what
@@ -87,12 +87,12 @@ function lineCount(o: HistoryOrder, l: HistoryOrder['order_addons'][number]) {
 }
 
 // The drink (088) is the add-on line whose addon is a drink; its sub_option is
-// the drink that went out (no sub_option = the chef's choice). Not an add-on.
+// the drink that went out. Not an add-on.
 function drinkText(o: HistoryOrder) {
   const l = (o.order_addons ?? []).find((x) => x.kind === 'addon' && x.addons?.is_drink)
   if (!l) return null
   const n = lineCount(o, l)
-  return `${DRINK_NAME} · ${l.sub_option || CHEFS_CHOICE_DRINK}${n > 1 ? ` ×${n}` : ''}`
+  return `${DRINK_NAME} · ${l.sub_option || UNNAMED_DRINK}${n > 1 ? ` ×${n}` : ''}`
 }
 
 function addonsText(o: HistoryOrder) {

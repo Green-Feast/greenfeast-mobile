@@ -19,8 +19,9 @@ export const DRINK_NAME = 'Drink'
 export const DRINK_TAGLINE = 'Smoothie with every meal'
 export const DRINK_HINT = 'The kitchen picks a fresh one daily. You can swap it for any day in My Plan.'
 
-// A drink order with no drink dish picked (orders.drink_template_id is null).
-export const CHEFS_CHOICE_DRINK = "Chef's choice smoothie"
+// A drink order with no drink dish on it (orders.drink_template_id is null and
+// the line has no name): shown as the plain drink, never as a "chef's choice".
+export const UNNAMED_DRINK = 'Smoothie'
 
 // The add-on's name as shown to the customer: the drink add-on is just "Drink".
 export function addonLabel(a: { name: string; is_drink?: boolean | null }): string {

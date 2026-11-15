@@ -1,10 +1,10 @@
 // My Plan → Walk-in (migration 087).
 //
-// A 30- or 60-meal subscriber walks into one of our places (11 AM–11 PM, any
-// day) and eats their default meal there or takes it away. The structure is
-// the plan's — the same add-ons, 1–2 portions (their default, or one more) —
-// but the dish, the drink (088: any active smoothie or coffee, or the chef's
-// choice) and any flavour are theirs to pick; dishes that are delivery
+// A 30- or 60-meal subscriber walks into one of our places (during that
+// place's hours, any day) and eats their default meal there or takes it away.
+// The structure is the plan's — the same add-ons, 1–2 portions (their default,
+// or one more) — but the dish, the drink (088: any active smoothie or coffee,
+// always a named one) and any flavour are theirs to pick; dishes that are delivery
 // only (not on the café menu) can't be a walk-in. One a day, separate from
 // deliveries. start_walk_in returns a 6-digit code; the Counter hands the meal
 // over and only then is it paid from the wallet. An unused code lapses at
@@ -112,7 +112,7 @@ export default function WalkIn({ refreshKey }: { refreshKey: number }) {
         <View style={st.iconCircle}><Store size={20} color={Colors.primary} /></View>
         <Text style={st.cardTitle}>Eat at our café</Text>
         <Text style={st.lead}>{state.error || 'Walk-in comes with the 30- and 60-meal plans.'}</Text>
-        <Text style={st.small}>Walk in any day from 11 AM to 11 PM and have your meal at our café, or take it away — paid from your wallet. Pick a 30- or 60-meal plan when you renew to get it.</Text>
+        <Text style={st.small}>Walk in any day during café hours and have your meal at our café, or take it away — paid from your wallet. Pick a 30- or 60-meal plan when you renew to get it.</Text>
       </View>
     )
   }
@@ -193,7 +193,7 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
   const [portions, setPortions] = useState(1)
   const [flavours, setFlavours] = useState<Record<string, string | null>>({})
   // Drinks (088): which add-on is the plan's drink, the dishes to choose from,
-  // and the pick (null = chef's choice).
+  // and the pick. A plan with a drink must name one: there's no chef's choice.
   const [drinkAddonIds, setDrinkAddonIds] = useState<string[]>([])
   const [drinks, setDrinks] = useState<DrinkDish[]>([])
   const [drinkId, setDrinkId] = useState<string | null>(null)
@@ -231,15 +231,17 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
   const dish = dishes.find((d) => d.id === dishId) ?? null
   const cost = (quote?.portion_cost ?? 0) * portions
   const cantAfford = !!quote && (quote.spendable ?? 0) < cost
-  const blocked = !quote?.ok || !quote.open_now || !mode || !dish || cantAfford
+  // Only when there are drinks to pick from; if they couldn't load, the
+  // server's legacy path still takes the order.
+  const needsDrink = !!drinkAddon && drinks.length > 0 && !drinkId
+  const blocked = !quote?.ok || !quote.open_now || !mode || !dish || cantAfford || needsDrink
   const defaultIsDeliveryOnly = !!quote?.default_meal_id && !quote.default_meal_ok
 
   async function order() {
     if (!place || !quote || blocked || !mode || !dish) return
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     setBusy(true); setError('')
-    // Variants (cheese...) per add-on, plus the drink dish when one is picked;
-    // left out for chef's choice. The drink add-on is never sent as a flavour:
+    // Variants (cheese...) per add-on, plus the drink dish. The drink add-on is never sent as a flavour:
     // that is the old free-text path, kept on the server for old app builds.
     const options: Record<string, string | null> = Object.fromEntries(otherAddons.map((a) => [a.id, flavours[a.id] ?? null]))
     if (drinkAddon && drinkId) options.drink = drinkId
@@ -260,9 +262,13 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
   }
 
   return (
-    <Modal visible={!!place} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={st.overlay} onPress={onClose}>
-        <Pressable style={[st.sheet, { paddingBottom: 16 + insets.bottom }]} onPress={(e) => e.stopPropagation()}>
+    <Modal visible={!!place} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
+      {/* The backdrop is a sibling of the sheet, not its parent: a Pressable
+          wrapping the ScrollView fights it for the touch and makes scrolling
+          stutter. */}
+      <View style={st.overlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
+        <View style={[st.sheet, { paddingBottom: insets.bottom }]}>
           <View style={st.sheetHeader}>
             <Text style={st.sheetTitle} numberOfLines={1}>{place?.name}</Text>
             <Pressable onPress={onClose} hitSlop={10}><X size={20} color={Colors.textMuted} /></Pressable>
@@ -271,16 +277,22 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
           {!quote && !error ? (
             <ActivityIndicator color={Colors.primary} style={{ marginVertical: 32 }} />
           ) : quote && !quote.ok ? (
-            <Text style={st.error}>{quote.error}</Text>
+            <Text style={[st.error, { marginBottom: 16 }]}>{quote.error}</Text>
           ) : quote ? (
-            <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 0 }}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={st.sheetScroll}
+              contentContainerStyle={st.sheetContent}
+              keyboardShouldPersistTaps="handled"
+              overScrollMode="never"
+            >
               {place && (
                 <Pressable
                   style={st.placeLine}
                   disabled={!place.maps_url}
                   onPress={() => place.maps_url && Linking.openURL(place.maps_url)}
                 >
-                  <MapPin size={14} color={Colors.textMuted} />
+                  <MapPin size={14} color={Colors.textMuted} style={{ marginTop: 2 }} />
                   <Text style={[st.rowSub, { flex: 1, marginTop: 0 }]}>
                     {place.address} · {quote.opens}–{quote.closes}{place.maps_url ? ' · Directions' : ''}
                   </Text>
@@ -289,6 +301,7 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
 
               {!quote.open_now && (
                 <View style={st.warnBox}>
+                  <AlertTriangle size={15} color={Colors.danger} style={st.warnIcon} />
                   <Text style={st.warnText}>Closed right now — walk-ins from {quote.opens} to {quote.closes}.</Text>
                 </View>
               )}
@@ -313,9 +326,9 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
               {/* Dish */}
               <Text style={st.subhead}>Your meal</Text>
               {defaultIsDeliveryOnly && !dish && (
-                <View style={st.warnBox}>
-                  <AlertTriangle size={15} color={Colors.danger} />
-                  <Text style={[st.warnText, { flex: 1 }]}>
+                <View style={[st.warnBox, st.warnBoxTight]}>
+                  <AlertTriangle size={15} color={Colors.danger} style={st.warnIcon} />
+                  <Text style={st.warnText}>
                     {quote.default_meal_name} is for delivery only — it isn&apos;t served at our café. Pick another dish for your walk-in.
                   </Text>
                 </View>
@@ -343,7 +356,7 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
               </View>
               {(quote.portions ?? []).length === 1 && <Text style={st.small}>A walk-in is up to 2 portions.</Text>}
 
-              {/* Drink: with every meal; pick a dish or leave it to the chef */}
+              {/* Drink: with every meal; the customer picks which */}
               {drinkAddon && (
                 <>
                   <Text style={st.subhead}>Your drink</Text>
@@ -356,17 +369,16 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
                       {drinks.map((d) => {
                         const on = drinkId === d.id
                         return (
-                          <Pressable key={d.id} style={[st.chip, on && st.chipOn]} onPress={() => setDrinkId(d.id)}>
+                          <Pressable key={d.id} style={[st.chip, on && st.chipOn]} onPress={() => { Haptics.selectionAsync(); setDrinkId(d.id) }}>
                             <Text style={[st.chipText, on && st.chipTextOn]}>{d.name}</Text>
                           </Pressable>
                         )
                       })}
-                      <Pressable style={[st.chip, !drinkId && st.chipOn]} onPress={() => setDrinkId(null)}>
-                        <Text style={[st.chipText, !drinkId && st.chipTextOn]}>Chef&apos;s choice</Text>
-                      </Pressable>
                     </View>
                   </View>
-                  <Text style={st.small}>A drink comes with your walk-in, same as with a delivery.</Text>
+                  <Text style={[st.small, needsDrink && { color: Colors.danger }]}>
+                    {needsDrink ? 'Pick your drink to order.' : 'A drink comes with your walk-in, same as with a delivery.'}
+                  </Text>
                 </>
               )}
 
@@ -421,9 +433,9 @@ function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClos
               <Text style={st.small}>You get a code to show at the counter. It&apos;s paid when it&apos;s handed over, and isn&apos;t charged if you don&apos;t come.</Text>
             </ScrollView>
           ) : null}
-          {!quote && !!error && <Text style={st.error}>{error}</Text>}
-        </Pressable>
-      </Pressable>
+          {!quote && !!error && <Text style={[st.error, { marginBottom: 16 }]}>{error}</Text>}
+        </View>
+      </View>
 
       {picking && quote && (
         <DishPicker
@@ -452,7 +464,7 @@ function DishPicker({ dishes, current, defaultId, onPick, onClose }: {
           <Pressable onPress={onClose} hitSlop={10}><X size={20} color={Colors.textMuted} /></Pressable>
         </View>
         <Text style={[st.small, { textAlign: 'left', marginTop: 0, marginBottom: 10 }]}>Dishes on our café menu. Delivery-only dishes aren&apos;t served here.</Text>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} style={st.sheetScroll} contentContainerStyle={{ paddingBottom: 8 }}>
           {ordered.map((d) => (
             <Pressable key={d.id} style={[st.pickRow, current === d.id && st.pickRowOn]} onPress={() => onPick(d.id)}>
               <View style={{ flex: 1 }}>
@@ -492,12 +504,20 @@ const st = StyleSheet.create({
   link: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
   subhead: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text, marginTop: 16, marginBottom: 8 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '92%' },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 20, paddingHorizontal: 20, maxHeight: '92%' },
+  // Shrinks to the sheet's max height so the content scrolls inside it
+  // instead of running off the bottom (React Native's flexShrink defaults to 0).
+  sheetScroll: { flexGrow: 0, flexShrink: 1 },
+  sheetContent: { paddingBottom: 20 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 12 },
   sheetTitle: { fontFamily: Fonts.heading, fontSize: 19, color: Colors.text, flex: 1 },
-  placeLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  warnBox: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', backgroundColor: Colors.dangerLight, borderRadius: 10, padding: 10, marginTop: 12 },
-  warnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.danger, lineHeight: 18 },
+  placeLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  warnBox: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', backgroundColor: Colors.dangerLight, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, marginTop: 12 },
+  // The warning above the dish row sits on it, with the same gap as the rows.
+  warnBoxTight: { marginTop: 0, marginBottom: 8 },
+  warnIcon: { marginTop: 1.5 },
+  // flexShrink, not flex: 1 - flex: 1 on wrapped Text leaves blank lines under it on Android.
+  warnText: { flexShrink: 1, fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.danger, lineHeight: 18 },
   segment: { flexDirection: 'row', gap: 8 },
   segBtn: {
     flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: 12,
