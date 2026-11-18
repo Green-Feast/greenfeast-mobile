@@ -28,7 +28,7 @@ import SectionProgress from '@/components/SectionProgress'
 import CouponField from '@/components/CouponField'
 import ReferralField, { type ReferralApplied } from '@/components/ReferralField'
 import { couponsAllowed, type CouponQuote } from '@/lib/coupons'
-import { cityForPincode } from '@/lib/geocode'
+import { saveDefaultAddress } from '@/lib/address'
 
 type Method = 'cashfree' | 'cod'
 type Phase = 'summary' | 'creating' | 'success'
@@ -141,46 +141,22 @@ export default function PaymentScreen() {
     const { data: profile } = await supabase.from('users').select('name').eq('id', user.id).single()
     setUserName(profile?.name ?? (user.user_metadata?.full_name as string) ?? '')
 
-    // 1. Upsert address — address.tsx may have already written this incrementally;
-    //    if a default address exists for the user, update it in-place instead of
-    //    creating a duplicate.
-    //    addresses.city is NOT NULL and never hardcoded: the address step already
-    //    resolved it (map pin / autocomplete / pincode lookup); look it up again
-    //    only as a safety net, and stop before creating anything if it's unknown.
-    const city = store.addressCity.trim() || (await cityForPincode(store.addressPincode)) || ''
-    if (!city) {
-      throw new Error("We couldn't confirm your delivery city. Please go back to the address step and pin your location on the map.")
-    }
-    const addressFields = {
-      user_id: user.id,
-      label: store.addressLabel,
-      type: store.addressType,
+    // 1. The default address — the address step already saved it; saved again
+    //    here (updated in place, never a second default) in case that failed.
+    //    The city is set by the server from the pincode (093), so no Google
+    //    lookup can stop a payment.
+    await saveDefaultAddress(user.id, {
       line1: store.addressLine1,
-      city,
+      line2: store.addressLine2 ?? '',
+      landmark: store.addressLandmark,
       pincode: store.addressPincode,
-      landmark: store.addressLandmark || null,
       lat: store.addressLat,
       lng: store.addressLng,
-      is_default: true,
-    }
-    const { data: existingAddr } = await supabase
-      .from('addresses')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('is_default', true)
-      .maybeSingle()
-
-    let addrId: string
-    if (existingAddr) {
-      const { error: addrErr } = await supabase.from('addresses').update(addressFields).eq('id', existingAddr.id)
-      if (addrErr) throw addrErr
-      addrId = existingAddr.id
-    } else {
-      const { data: addr, error: addrErr } = await supabase.from('addresses').insert(addressFields).select('id').single()
-      if (addrErr) throw addrErr
-      addrId = addr.id
-    }
-    void addrId // used by instantiate-orders via user's default address lookup
+      placeId: store.addressPlaceId ?? null,
+      source: store.addressSource ?? null,
+      type: store.addressType,
+      label: store.addressLabel,
+    })
 
     // 2. Upsert dietary profile — only the basics collected pre-payment.
     //    Detailed customisations are written by the post-payment customise screen,

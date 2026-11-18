@@ -122,7 +122,7 @@ export default function SummaryScreen() {
         {/* Address */}
         <Section title="Delivery Address">
           <Row label="Type" value={store.addressLabel} />
-          <Row label="Address" value={`${store.addressLine1}, ${store.addressCity} ${store.addressPincode}`} />
+          <Row label="Address" value={[store.addressLine1, store.addressLine2, `${store.addressCity || 'Jaipur'} ${store.addressPincode}`].filter((x) => x && x.trim()).join(', ')} />
           {store.addressLandmark ? <Row label="Landmark" value={store.addressLandmark} /> : null}
         </Section>
 

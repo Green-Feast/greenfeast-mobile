@@ -1,140 +1,84 @@
 import { useState } from 'react'
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-} from 'react-native'
+import { View, Text, StyleSheet } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { useOnboardingStore } from '@/store/onboarding'
 import { useAuthStore } from '@/store/auth'
-import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
 import Button from '@/components/Button'
 import SectionProgress from '@/components/SectionProgress'
-import LocationPicker, { type LatLng } from '@/components/LocationPicker'
-import { usePlacesAutocomplete, PredictionsDropdown } from '@/components/PlacesAutocomplete'
-import { cityForPincode } from '@/lib/geocode'
+import AddressForm from '@/components/AddressForm'
 import { KeyboardAwareScreen, useAutoFocus } from '@/components/keyboard'
-
-const ADDRESS_TYPES = [
-  { id: 'home', label: '🏠 Home' },
-  { id: 'office', label: '🏢 Office' },
-  { id: 'other', label: '📍 Other' },
-] as const
+import { friendlyError } from '@/lib/friendlyError'
+import {
+  SERVICE_CITY, addressRow, saveDefaultAddress, useServicePincodes, validateAddress, type AddressDraft,
+} from '@/lib/address'
 
 export default function AddressScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { setAddress } = useOnboardingStore()
+  const store = useOnboardingStore()
   const { user } = useAuthStore()
-
-  const [line1, setLine1] = useState('')
-  const [pincode, setPincode] = useState('')
-  const [landmark, setLandmark] = useState('')
-  const [type, setType] = useState<'home' | 'office' | 'other'>('home')
-  const [label, setLabel] = useState('Home')
-  const [pin, setPin] = useState<LatLng | null>(null)
-  // addresses.city is NOT NULL and not hardcoded (we're expanding beyond
-  // Jaipur). Set by the map pin / autocomplete pick and cleared whenever the
-  // pincode or pin changes by other means; '' means "look it up from the
-  // pincode on Continue".
-  const [city, setCity] = useState('')
-  const [resolving, setResolving] = useState(false)
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [focused, setFocused] = useState<string | null>(null)
+  const served = useServicePincodes()
   const line1Ref = useAutoFocus()
 
-  const autocomplete = usePlacesAutocomplete((sel) => {
-    setLine1(sel.description)
-    setErrors((e) => ({ ...e, line1: '', city: '' }))
-    if (sel.pincode && /^\d{6}$/.test(sel.pincode)) {
-      setPincode(sel.pincode)
-      setErrors((e) => ({ ...e, pincode: '' }))
-    }
-    if (sel.lat != null && sel.lng != null) setPin({ lat: sel.lat, lng: sel.lng })
-    setCity(sel.city?.trim() ?? '')
+  // Coming back to this step shows what was entered before.
+  const [draft, setDraft] = useState<AddressDraft>({
+    line1: store.addressLine1,
+    line2: store.addressLine2,
+    landmark: store.addressLandmark,
+    pincode: store.addressPincode,
+    lat: store.addressLat,
+    lng: store.addressLng,
+    placeId: store.addressPlaceId,
+    source: store.addressSource,
+    type: store.addressType,
+    label: store.addressLabel || 'Home',
   })
-
-  function validate() {
-    const e: Record<string, string> = {}
-    if (!line1.trim() || line1.trim().length < 5) e.line1 = 'Enter a valid street address'
-    if (!/^\d{6}$/.test(pincode)) e.pincode = 'Pincode must be exactly 6 digits'
-    return e
-  }
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [saveError, setSaveError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   async function handleNext() {
-    if (resolving) return
-    const e = validate()
+    if (saving) return
+    const e = validateAddress(draft, served)
     if (Object.keys(e).length > 0) {
       setErrors(e)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       return
     }
-    // City from the pin / autocomplete pick, else from the pincode. With none,
-    // stop here and ask for a map pin — don't carry on without a city.
-    let resolvedCity = city.trim()
-    if (!resolvedCity) {
-      setResolving(true)
-      try {
-        resolvedCity = (await cityForPincode(pincode)) ?? ''
-      } finally {
-        setResolving(false)
-      }
-    }
-    if (!resolvedCity) {
-      setErrors({
-        city: "We couldn't work out your city from this pincode. Please pin your location on the map above so we can find it.",
-      })
-      return
-    }
-    setCity(resolvedCity)
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    const resolvedLabel = label || type.charAt(0).toUpperCase() + type.slice(1)
-    setAddress({
-      addressLine1: line1.trim(),
-      addressLandmark: landmark.trim(),
-      addressCity: resolvedCity,
-      addressPincode: pincode,
-      addressLabel: resolvedLabel,
-      addressType: type,
-      addressLat: pin?.lat ?? null,
-      addressLng: pin?.lng ?? null,
+    setSaveError('')
+    const row = addressRow(draft)
+    store.setAddress({
+      addressLine1: row.line1,
+      addressLine2: row.line2 ?? '',
+      addressLandmark: row.landmark ?? '',
+      addressCity: SERVICE_CITY,
+      addressPincode: row.pincode,
+      addressLabel: row.label,
+      addressType: row.type,
+      addressLat: row.lat,
+      addressLng: row.lng,
+      addressPlaceId: row.place_id,
+      addressSource: draft.source,
     })
-    // Incremental save: update existing default address if one exists, otherwise insert.
-    // payment.tsx will do the same check so no duplicate is created.
+    // Saved now (so the office sees it even if payment waits), and again at
+    // payment. The server checks the pincode; show its answer here.
     if (user) {
-      const fields = {
-        user_id: user.id,
-        label: resolvedLabel,
-        type,
-        line1: line1.trim(),
-        city: resolvedCity,
-        pincode,
-        landmark: landmark.trim() || null,
-        lat: pin?.lat ?? null,
-        lng: pin?.lng ?? null,
-        is_default: true,
+      setSaving(true)
+      try {
+        await saveDefaultAddress(user.id, draft)
+      } catch (err) {
+        console.warn('[onboarding address] save failed', err)
+        setSaveError(friendlyError(err, 'Could not save your address. Please try again.'))
+        setSaving(false)
+        return
       }
-      ;(async () => {
-        const { data: existing } = await supabase
-          .from('addresses').select('id').eq('user_id', user.id).eq('is_default', true).maybeSingle()
-        if (existing) {
-          await supabase.from('addresses').update(fields).eq('id', existing.id)
-        } else {
-          await supabase.from('addresses').insert(fields)
-        }
-      })().catch(() => {})
+      setSaving(false)
     }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     router.push('/(onboarding)/summary')
-  }
-
-  function changeType(t: typeof type) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setType(t)
-    setLabel(t.charAt(0).toUpperCase() + t.slice(1))
   }
 
   return (
@@ -146,130 +90,24 @@ export default function AddressScreen() {
       <KeyboardAwareScreen
         contentContainerStyle={[styles.scroll, { paddingTop: 0, paddingBottom: 40 + insets.bottom }]}
       >
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>DELIVERY</Text>
-        <Text style={styles.title}>Where do we deliver?</Text>
-        <Text style={styles.subtitle}>We currently deliver across Jaipur.</Text>
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>STREET ADDRESS</Text>
-        <TextInput
-          ref={line1Ref}
-          style={[
-            styles.input,
-            focused === 'line1' && styles.inputFocused,
-            !!errors.line1 && styles.inputError,
-          ]}
-          placeholder="Enter your street address"
-          value={line1}
-          onChangeText={(t) => {
-            setLine1(t)
-            setErrors((e) => ({ ...e, line1: '' }))
-            autocomplete.onChangeText(t)
-          }}
-          onFocus={() => { setFocused('line1'); autocomplete.onFocus() }}
-          onBlur={() => { setFocused(null); autocomplete.onBlur() }}
-          placeholderTextColor={Colors.ink300}
-        />
-        <PredictionsDropdown
-          predictions={autocomplete.predictions}
-          visible={autocomplete.visible}
-          onPick={autocomplete.selectPrediction}
-        />
-        {errors.line1 ? <Text style={styles.error}>{errors.line1}</Text> : null}
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>PINCODE</Text>
-        <TextInput
-          style={[
-            styles.input,
-            focused === 'pincode' && styles.inputFocused,
-            !!errors.pincode && styles.inputError,
-          ]}
-          placeholder="6-digit pincode"
-          keyboardType="number-pad"
-          maxLength={6}
-          value={pincode}
-          onChangeText={(t) => {
-            setPincode(t.replace(/\D/g, ''))
-            setCity('') // the city belonged to the old pincode
-            setErrors((e) => ({ ...e, pincode: '', city: '' }))
-          }}
-          onFocus={() => setFocused('pincode')}
-          onBlur={() => setFocused(null)}
-          placeholderTextColor={Colors.ink300}
-        />
-        {errors.pincode ? <Text style={styles.error}>{errors.pincode}</Text> : null}
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>PIN YOUR LOCATION <Text style={styles.optional}>(optional)</Text></Text>
-        <LocationPicker
-          value={pin}
-          onChange={(c) => {
-            setPin(c)
-            setCity('') // re-filled by onResolveAddress once the pin is geocoded
-            setErrors((e) => ({ ...e, city: '' }))
-          }}
-          onResolveAddress={({ line1: l1, pincode: pc, city: c }) => {
-            if (l1) { setLine1(l1); setErrors((e) => ({ ...e, line1: '' })) }
-            if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setErrors((e) => ({ ...e, pincode: '' })) }
-            setCity(c?.trim() ?? '')
-          }}
-        />
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>LANDMARK <Text style={styles.optional}>(optional)</Text></Text>
-        <TextInput
-          style={[styles.input, focused === 'landmark' && styles.inputFocused]}
-          placeholder="e.g. Near the blue gate"
-          value={landmark}
-          onChangeText={setLandmark}
-          onFocus={() => setFocused('landmark')}
-          onBlur={() => setFocused(null)}
-          placeholderTextColor={Colors.ink300}
-          maxLength={100}
-        />
-      </View>
-
-      {/* Address type */}
-      <View style={styles.field}>
-        <Text style={styles.label}>ADDRESS TYPE</Text>
-        <View style={styles.typeRow}>
-          {ADDRESS_TYPES.map((t) => (
-            <TouchableOpacity
-              key={t.id}
-              style={[styles.typeBtn, type === t.id && styles.typeBtnActive]}
-              onPress={() => changeType(t.id)}
-            >
-              <Text style={[styles.typeBtnText, type === t.id && styles.typeBtnTextActive]}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.header}>
+          <Text style={styles.eyebrow}>DELIVERY</Text>
+          <Text style={styles.title}>Where do we deliver?</Text>
+          <Text style={styles.subtitle}>We currently deliver across Jaipur.</Text>
         </View>
-      </View>
 
-      <View style={styles.field}>
-        <Text style={styles.label}>LABEL <Text style={styles.optional}>(optional)</Text></Text>
-        <TextInput
-          style={[styles.input, focused === 'label' && styles.inputFocused]}
-          placeholder="e.g. Home, Mom's Place"
-          value={label}
-          onChangeText={setLabel}
-          onFocus={() => setFocused('label')}
-          onBlur={() => setFocused(null)}
-          placeholderTextColor={Colors.ink300}
-          maxLength={40}
+        <AddressForm
+          value={draft}
+          onChange={setDraft}
+          errors={errors}
+          onClearError={(f) => setErrors((e) => (e[f] ? { ...e, [f]: '' } : e))}
+          servedPincodes={served}
+          variant="underline"
+          line1Ref={line1Ref}
         />
-      </View>
 
-      {/* Shown here, beside the CTA, so it is seen even when the map has scrolled out of view. */}
-      {errors.city ? <Text style={[styles.error, { marginBottom: 8 }]}>{errors.city}</Text> : null}
-      <Button onPress={handleNext} loading={resolving} style={{ marginTop: 8 }}>Review order →</Button>
+        {saveError ? <Text style={styles.error}>{saveError}</Text> : null}
+        <Button onPress={handleNext} loading={saving} style={{ marginTop: 8 }}>Review order →</Button>
       </KeyboardAwareScreen>
     </View>
   )
@@ -289,39 +127,5 @@ const styles = StyleSheet.create({
   },
   title: { fontFamily: Fonts.heading, fontSize: 28, color: Colors.ink900, marginBottom: 6 },
   subtitle: { fontFamily: Fonts.body, fontSize: 14, color: Colors.ink500 },
-  field: { marginBottom: 20 },
-  label: {
-    fontFamily: Fonts.bodyMed,
-    fontSize: 11,
-    color: Colors.ink400,
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
-    marginBottom: 8,
-  },
-  optional: { fontFamily: Fonts.body, fontSize: 11, color: Colors.ink400, textTransform: 'none', letterSpacing: 0 },
-  input: {
-    fontFamily: Fonts.body,
-    fontSize: 16,
-    color: Colors.ink900,
-    borderBottomWidth: 1.5,
-    borderBottomColor: Colors.border,
-    paddingVertical: 10,
-    paddingHorizontal: 0,
-  },
-  inputFocused: { borderBottomColor: Colors.green700 },
-  inputError: { borderBottomColor: Colors.danger },
-  error: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 6 },
-  typeRow: { flexDirection: 'row', gap: 8 },
-  typeBtn: {
-    flex: 1,
-    paddingVertical: 11,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    backgroundColor: Colors.cream50,
-    alignItems: 'center',
-  },
-  typeBtnActive: { backgroundColor: Colors.green50, borderColor: Colors.green700 },
-  typeBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.ink500 },
-  typeBtnTextActive: { color: Colors.green700 },
+  error: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger, marginBottom: 8 },
 })

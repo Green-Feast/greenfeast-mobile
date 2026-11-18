@@ -49,13 +49,16 @@ interface OnboardingState {
 
   // S13 — address
   addressLine1: string
+  addressLine2: string
   addressLandmark: string
-  addressCity: string           // from the map pin / autocomplete / pincode lookup — never hardcoded
+  addressCity: string           // always Jaipur for now; the server sets it from the pincode (093)
   addressPincode: string
   addressLabel: string
   addressType: 'home' | 'office' | 'other'
   addressLat: number | null
   addressLng: number | null
+  addressPlaceId: string | null
+  addressSource: 'places' | 'map' | 'gps' | 'manual' | null
 
   // Actions
   setHealthProfile: (fields: {
@@ -84,6 +87,7 @@ interface OnboardingState {
   setDays: (selectedDays: string[], deliveryMode: DeliveryMode, mealsLunch: number, mealsDinner: number) => void
   setAddress: (fields: {
     addressLine1: string
+    addressLine2: string
     addressLandmark: string
     addressCity: string
     addressPincode: string
@@ -91,6 +95,8 @@ interface OnboardingState {
     addressType: 'home' | 'office' | 'other'
     addressLat: number | null
     addressLng: number | null
+    addressPlaceId: string | null
+    addressSource: 'places' | 'map' | 'gps' | 'manual' | null
   }) => void
   reset: () => void
 }
@@ -124,6 +130,7 @@ const defaultState: Omit<OnboardingState, ActionKeys> = {
   mealsLunch: 1,
   mealsDinner: 0,
   addressLine1: '',
+  addressLine2: '',
   addressLandmark: '',
   addressCity: '',
   addressPincode: '',
@@ -131,6 +138,8 @@ const defaultState: Omit<OnboardingState, ActionKeys> = {
   addressType: 'home',
   addressLat: null,
   addressLng: null,
+  addressPlaceId: null,
+  addressSource: null,
 }
 
 // Plan, add-ons, days and the lunch/dinner split live only here until payment.

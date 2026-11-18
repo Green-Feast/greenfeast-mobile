@@ -1,54 +1,76 @@
 import { useRef, useState } from 'react'
 import { View, Text, Pressable, StyleSheet } from 'react-native'
+import { MapPin } from 'lucide-react-native'
 import { Colors, Fonts } from '@/constants/colors'
-import { cityFromAddressComponents } from '@/lib/geocode'
+import { JAIPUR_CENTER, parseComponents, type AddressComponent } from '@/lib/address'
 
-// Shared Google Places autocomplete for the two address forms (onboarding
-// SF11 and the Address book screen). Plain REST calls — no places SDK
-// dependency; the key comes from EXPO_PUBLIC_GOOGLE_MAPS_API_KEY, which for
-// OTA bundles is sourced from the EAS environment (see AGENTS.md gotchas).
+// Google Places autocomplete for the shared address form (components/AddressForm).
+// Plain REST calls to the Places API (legacy endpoints, the ones enabled on
+// our key) — no Places SDK dependency. The key is EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+// which OTA bundles take from the EAS environment (see AGENTS.md gotchas).
 //
-// Biased to Jaipur (the delivery city), matching LocationPicker's default
-// map region.
+// One session token covers the keystrokes and the Details call that ends them,
+// so Google bills a pick as one session. Results are limited to India and
+// biased to Jaipur.
 
-export type Prediction = { place_id: string; description: string }
+export type Prediction = { place_id: string; main: string; secondary: string; description: string }
 export type PlaceSelection = {
+  placeId: string
   description: string
   lat: number | null
   lng: number | null
+  line1: string
+  line2: string
   pincode: string | null
-  // The place's city (locality, falling back to admin level 3 / 2). Optional so
-  // older callers keep compiling; null when Google didn't return one.
-  city?: string | null
+  // Google had a house / flat / street number for this place.
+  houseNumber: boolean
 }
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+
+function newSessionToken() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
 
 export function usePlacesAutocomplete(onSelect: (sel: PlaceSelection) => void) {
   const [predictions, setPredictions] = useState<Prediction[]>([])
   const [visible, setVisible] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sessionRef = useRef<string | null>(null)
+  const seqRef = useRef(0)
 
   async function fetchPredictions(text: string) {
-    if (text.trim().length < 3) { setPredictions([]); return }
+    const seq = ++seqRef.current
+    if (!KEY || text.trim().length < 3) { setPredictions([]); return }
+    sessionRef.current ??= newSessionToken()
     try {
-      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${KEY}&components=country:in&location=26.9124,75.7873&radius=50000`
-      const res = await fetch(url)
-      const data = await res.json()
+      const url = 'https://maps.googleapis.com/maps/api/place/autocomplete/json'
+        + `?input=${encodeURIComponent(text)}&key=${KEY}&components=country:in&language=en`
+        + `&location=${JAIPUR_CENTER.lat},${JAIPUR_CENTER.lng}&radius=30000`
+        + `&sessiontoken=${sessionRef.current}`
+      const data = await fetch(url).then((r) => r.json())
+      if (seq !== seqRef.current) return // a newer keystroke's request owns the list
       if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-        // Most common cause: key missing "Places API" or app-restricted.
-        console.error('Places Autocomplete error:', data.status, data.error_message)
+        console.warn('Places Autocomplete error:', data.status, data.error_message)
         setPredictions([])
         return
       }
-      setPredictions((data.predictions ?? []).map((p: any) => ({ place_id: p.place_id, description: p.description })))
+      setPredictions((data.predictions ?? []).slice(0, 5).map((p: any) => ({
+        place_id: p.place_id,
+        description: p.description,
+        main: p.structured_formatting?.main_text ?? p.description,
+        secondary: p.structured_formatting?.secondary_text ?? '',
+      })))
     } catch (e) {
-      console.error('Places Autocomplete request failed:', e)
-      setPredictions([])
+      console.warn('Places Autocomplete request failed:', e)
+      if (seq === seqRef.current) setPredictions([])
     }
   }
 
-  // Call from the street-address input's onChangeText (after updating state).
+  // Call from line 1's onChangeText (after updating state).
   function onChangeText(text: string) {
     setVisible(true)
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -57,41 +79,52 @@ export function usePlacesAutocomplete(onSelect: (sel: PlaceSelection) => void) {
 
   function onFocus() { setVisible(true) }
   // Delay lets a prediction row's onPress land before the list unmounts.
-  function onBlur() { setTimeout(() => setVisible(false), 150) }
+  function onBlur() { setTimeout(() => setVisible(false), 200) }
+  function dismiss() { setVisible(false); setPredictions([]) }
 
   async function selectPrediction(p: Prediction) {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    seqRef.current++
     setVisible(false)
     setPredictions([])
-    const sel: PlaceSelection = { description: p.description, lat: null, lng: null, pincode: null, city: null }
+    const token = sessionRef.current
+    sessionRef.current = null // the Details call ends this session
+    // Without details: the place name as line 1, the rest of its description as line 2.
+    const sel: PlaceSelection = {
+      placeId: p.place_id, description: p.description, lat: null, lng: null,
+      line1: p.main, line2: '', pincode: null, houseNumber: /\d/.test(p.main),
+    }
     try {
-      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${p.place_id}&fields=formatted_address,geometry,address_component&key=${KEY}`
-      const res = await fetch(url)
-      const data = await res.json()
+      const url = 'https://maps.googleapis.com/maps/api/place/details/json'
+        + `?place_id=${p.place_id}&fields=address_component,geometry,name,types&language=en&key=${KEY}`
+        + (token ? `&sessiontoken=${token}` : '')
+      const data = await fetch(url).then((r) => r.json())
       if (data.status !== 'OK') {
-        console.error('Places Details error:', data.status, data.error_message)
+        console.warn('Places Details error:', data.status, data.error_message)
       } else {
         const result = data.result
         if (result?.geometry?.location) {
           sel.lat = result.geometry.location.lat
           sel.lng = result.geometry.location.lng
         }
-        const postal = result?.address_components?.find((c: any) => c.types.includes('postal_code'))
-        if (postal) sel.pincode = postal.long_name
-        sel.city = cityFromAddressComponents(result?.address_components)
+        const parsed = parseComponents(result?.address_components as AddressComponent[], result?.name ?? p.main)
+        sel.line1 = parsed.line1 || p.main
+        sel.line2 = parsed.line2
+        sel.pincode = parsed.pincode
+        sel.houseNumber = parsed.houseNumber
       }
     } catch (e) {
-      console.error('Places Details request failed:', e)
+      console.warn('Places Details request failed:', e)
     }
-    // Even if details failed, still hand back the description text.
     onSelect(sel)
   }
 
-  return { predictions, visible, onChangeText, onFocus, onBlur, selectPrediction }
+  return { predictions, visible, onChangeText, onFocus, onBlur, dismiss, selectPrediction }
 }
 
-// Rendered in normal flow (not position:absolute) directly under the street
-// input — an absolutely-positioned dropdown inside a ScrollView is unreliable
-// on Android; in-flow just pushes the fields below down while showing.
+// Rendered in normal flow (not position:absolute) directly under line 1 — an
+// absolutely-positioned dropdown inside a ScrollView is unreliable on Android;
+// in-flow just pushes the fields below down while showing.
 export function PredictionsDropdown({
   predictions, visible, onPick,
 }: {
@@ -104,9 +137,14 @@ export function PredictionsDropdown({
     <View style={styles.dropdown}>
       {predictions.map((p) => (
         <Pressable key={p.place_id} style={styles.row} onPress={() => onPick(p)}>
-          <Text style={styles.text} numberOfLines={2}>{p.description}</Text>
+          <MapPin size={15} color={Colors.textMuted} style={{ marginTop: 2 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.main} numberOfLines={1}>{p.main}</Text>
+            {p.secondary ? <Text style={styles.secondary} numberOfLines={1}>{p.secondary}</Text> : null}
+          </View>
         </Pressable>
       ))}
+      <Text style={styles.powered}>Suggestions by Google</Text>
     </View>
   )
 }
@@ -119,12 +157,12 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.border,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
   },
-  row: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
-  text: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text },
+  row: {
+    flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingVertical: 11,
+    borderBottomWidth: 1, borderBottomColor: Colors.borderFaint,
+  },
+  main: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+  secondary: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  powered: { fontFamily: Fonts.body, fontSize: 10, color: Colors.textLight, textAlign: 'right', paddingHorizontal: 12, paddingVertical: 6 },
 })

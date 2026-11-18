@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { friendlyError } from '@/lib/friendlyError'
+import { addressText } from '@/lib/address'
 import {
   View,
   Text,
@@ -80,7 +81,7 @@ type DrinkDish = MealTemplate & {
   subscription_valid: boolean
 }
 
-type AddressData = { id: string; line1: string; landmark: string | null; label: string; is_default: boolean }
+type AddressData = { id: string; line1: string; line2: string | null; landmark: string | null; label: string; is_default: boolean }
 
 type CartLine = {
   id: string
@@ -303,7 +304,7 @@ export default function SubscriptionScreen() {
         .maybeSingle(),
       supabase
         .from('addresses')
-        .select('id, line1, landmark, label, is_default')
+        .select('id, line1, line2, landmark, label, is_default')
         .eq('user_id', user.id)
         .is('archived_at', null)
         .order('is_default', { ascending: false })
@@ -983,7 +984,7 @@ export default function SubscriptionScreen() {
               >
                 <View style={{ flex: 1 }}>
                   <Text style={[s.addrPickLabel, isSelected && { color: Colors.primary }]}>{addr.label}</Text>
-                  <Text style={s.addrPickLine1} numberOfLines={1}>{addr.line1}</Text>
+                  <Text style={s.addrPickLine1} numberOfLines={1}>{addressText(addr)}</Text>
                 </View>
                 {isSelected && <Check size={16} color={Colors.primary} strokeWidth={2.5} />}
               </Pressable>
@@ -1000,7 +1001,7 @@ export default function SubscriptionScreen() {
         <MapPin size={15} color={Colors.primary} />
         <View style={{ flex: 1 }}>
           <Text style={s.addrPickLabel}>Deliver to {sel?.label ?? 'your address'}</Text>
-          {sel && <Text style={s.addrPickLine1} numberOfLines={1}>{sel.line1}</Text>}
+          {sel && <Text style={s.addrPickLine1} numberOfLines={1}>{addressText(sel)}</Text>}
         </View>
         <Text style={s.addrPickChange}>Change</Text>
       </Pressable>
@@ -1410,7 +1411,7 @@ export default function SubscriptionScreen() {
           <View style={{ flex: 1 }}>
             <Text style={s.infoTileLabel}>Delivery addresses</Text>
             <Text style={s.addrLinkSub} numberOfLines={1}>
-              {defaultAddress ? `${defaultAddress.label} · ${defaultAddress.line1}` : 'Add where your meals should go'}
+              {defaultAddress ? `${defaultAddress.label} · ${addressText(defaultAddress)}` : 'Add where your meals should go'}
             </Text>
           </View>
           <ChevronRight size={15} color={Colors.textMuted} strokeWidth={2} />

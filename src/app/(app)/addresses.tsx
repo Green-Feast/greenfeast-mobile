@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useState, useCallback } from 'react'
 import { friendlyError } from '@/lib/friendlyError'
 import {
   View,
@@ -6,49 +6,21 @@ import {
   Pressable,
   StyleSheet,
   ScrollView,
-  Modal,
-  TextInput,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Alert,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useFocusEffect, useRouter } from 'expo-router'
 import { ChevronLeft, Plus, Trash2, Edit3, Check } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
-import LocationPicker, { type LatLng } from '@/components/LocationPicker'
-import { usePlacesAutocomplete, PredictionsDropdown } from '@/components/PlacesAutocomplete'
-import { cityForPincode } from '@/lib/geocode'
+import { ADDRESS_SELECT, addressText, type AddressRecord } from '@/lib/address'
 
-type Address = {
-  id: string
-  line1: string
-  landmark: string | null
-  city: string
-  pincode: string
-  label: string
-  type: 'home' | 'office' | 'other'
-  is_default: boolean
-  lat: number | null
-  lng: number | null
-}
+type Address = AddressRecord
 
-const ADDR_TYPES = [
-  { id: 'home' as const, label: '🏠 Home' },
-  { id: 'office' as const, label: '🏢 Office' },
-  { id: 'other' as const, label: '📍 Other' },
-]
-
-function validate(line1: string, pincode: string) {
-  const e: Record<string, string> = {}
-  if (!line1.trim() || line1.trim().length < 5) e.line1 = 'Enter a valid street address'
-  if (!/^\d{6}$/.test(pincode)) e.pincode = 'Pincode must be 6 digits'
-  return e
-}
-
+// Plan settings → Delivery addresses. Adding / editing is its own screen
+// (address-edit), shared form in components/AddressForm.
 export default function AddressesScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
@@ -56,51 +28,13 @@ export default function AddressesScreen() {
 
   const [addresses, setAddresses] = useState<Address[]>([])
   const [loading, setLoading] = useState(true)
-  const [formOpen, setFormOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-
-  // Form state
-  const [line1, setLine1] = useState('')
-  const [landmark, setLandmark] = useState('')
-  const [pincode, setPincode] = useState('')
-  const [label, setLabel] = useState('Home')
-  const [addrType, setAddrType] = useState<'home' | 'office' | 'other'>('home')
-  const [pin, setPin] = useState<LatLng | null>(null)
-  // addresses.city is NOT NULL. It comes from the map pin / autocomplete pick
-  // (or the saved row when editing) and is cleared whenever the pincode or pin
-  // changes by other means, so '' means "work it out from the pincode on save".
-  const [city, setCity] = useState('')
-  const formScrollRef = useRef<ScrollView>(null)
-  const pinFieldY = useRef(0)
-
-  // Address autocomplete — shared with the onboarding address screen.
-  const autocomplete = usePlacesAutocomplete((sel) => {
-    setLine1(sel.description)
-    setFieldErrors((e) => ({ ...e, line1: '' }))
-    if (sel.pincode && /^\d{6}$/.test(sel.pincode)) {
-      setPincode(sel.pincode)
-      setFieldErrors((e) => ({ ...e, pincode: '' }))
-    }
-    if (sel.lat != null && sel.lng != null) setPin({ lat: sel.lat, lng: sel.lng })
-    setCity(sel.city?.trim() ?? '')
-    setFieldErrors((e) => ({ ...e, pin: '' }))
-  })
-
-  function onLine1Change(t: string) {
-    setLine1(t)
-    setFieldErrors((e) => ({ ...e, line1: '' }))
-    autocomplete.onChangeText(t)
-  }
 
   const fetchAddresses = useCallback(async () => {
     if (!user) return
     const { data } = await supabase
       .from('addresses')
-      .select('id, line1, landmark, city, pincode, label, type, is_default, lat, lng')
+      .select(ADDRESS_SELECT)
       .eq('user_id', user.id)
       .is('archived_at', null)
       .order('is_default', { ascending: false })
@@ -108,79 +42,13 @@ export default function AddressesScreen() {
     setAddresses((data as Address[]) ?? [])
   }, [user])
 
-  useEffect(() => {
-    setLoading(true)
+  // Refreshes when coming back from the add / edit screen.
+  useFocusEffect(useCallback(() => {
     fetchAddresses().finally(() => setLoading(false))
-  }, [fetchAddresses])
+  }, [fetchAddresses]))
 
-  function openAdd() {
-    setEditingId(null)
-    setLine1(''); setLandmark(''); setPincode(''); setLabel('Home'); setAddrType('home'); setPin(null); setCity('')
-    setError(''); setFieldErrors({})
-    setFormOpen(true)
-  }
-
-  function openEdit(addr: Address) {
-    setEditingId(addr.id)
-    setLine1(addr.line1); setLandmark(addr.landmark ?? ''); setPincode(addr.pincode); setCity(addr.city ?? '')
-    setLabel(addr.label); setAddrType(addr.type)
-    setPin(addr.lat != null && addr.lng != null ? { lat: addr.lat, lng: addr.lng } : null)
-    setError(''); setFieldErrors({})
-    setFormOpen(true)
-  }
-
-  async function handleSave() {
-    const fe = validate(line1, pincode)
-    if (Object.keys(fe).length > 0) { setFieldErrors(fe); return }
-    setSaving(true); setError('')
-    try {
-      // addresses.city is NOT NULL and not hardcoded (we're expanding beyond
-      // Jaipur): use the city from the pin / autocomplete / saved row, else look
-      // it up from the pincode. With none, don't save — ask for a map pin.
-      const resolvedCity = city.trim() || (await cityForPincode(pincode)) || ''
-      if (!resolvedCity) {
-        setFieldErrors((e) => ({
-          ...e,
-          pin: "We couldn't work out your city from this pincode. Please pin your location on the map so we can find it.",
-        }))
-        formScrollRef.current?.scrollTo({ y: Math.max(pinFieldY.current - 8, 0), animated: true })
-        return
-      }
-      setCity(resolvedCity)
-
-      if (editingId) {
-        const { error: err } = await supabase.from('addresses')
-          .update({ line1: line1.trim(), landmark: landmark.trim() || null, city: resolvedCity, pincode, label, type: addrType, lat: pin?.lat ?? null, lng: pin?.lng ?? null })
-          .eq('id', editingId)
-        if (err) throw err
-        setFormOpen(false)
-        await fetchAddresses()
-      } else {
-        const isFirst = addresses.length === 0
-        const { data: created, error: err } = await supabase.from('addresses').insert({
-          user_id: user!.id,
-          line1: line1.trim(),
-          landmark: landmark.trim() || null,
-          city: resolvedCity,
-          pincode,
-          label,
-          type: addrType,
-          lat: pin?.lat ?? null,
-          lng: pin?.lng ?? null,
-          is_default: isFirst,
-        }).select('id').single()
-        if (err) throw err
-        setFormOpen(false)
-        await fetchAddresses()
-        // A new place to eat: offer to send the upcoming meals there.
-        if (created && !isFirst) askToUse(created.id, label)
-        else if (created && isFirst) await moveUpcoming(created.id, true)
-      }
-    } catch (e) {
-      console.warn('[addresses] save failed', e)
-      setError('Could not save address. Please try again.')
-    } finally { setSaving(false) }
-  }
+  const openAdd = () => router.push('/(app)/address-edit')
+  const openEdit = (addr: Address) => router.push({ pathname: '/(app)/address-edit', params: { id: addr.id } })
 
   // Makes it the default; with moveMeals, every upcoming meal that can still
   // be changed goes there too (its delivery route follows the address).
@@ -283,9 +151,10 @@ export default function AddressesScreen() {
                     </Pressable>
                   </View>
                 </View>
-                <Text style={s.addrLine1}>{addr.line1}</Text>
+                <Text style={s.addrLine1}>{addressText(addr)}</Text>
                 {addr.landmark ? <Text style={s.addrLandmark}>{addr.landmark}</Text> : null}
-                <Text style={s.addrPincode}>Pincode: {addr.pincode}</Text>
+                <Text style={s.addrPincode}>{addr.city || 'Jaipur'} {addr.pincode}</Text>
+                {addr.lat == null ? <Text style={s.addrNoPin}>No map pin yet — tap edit to add one for the rider</Text> : null}
                 {!addr.is_default && (
                   <Pressable style={s.setDefaultBtn} onPress={() => handleSetDefault(addr.id)}>
                     <Text style={s.setDefaultText}>Deliver here</Text>
@@ -305,141 +174,6 @@ export default function AddressesScreen() {
         </Pressable>
       </View>
 
-      {/* Add / Edit sheet */}
-      <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
-        <View style={f.overlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setFormOpen(false)} />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <View style={[f.sheet, { paddingBottom: 24 + insets.bottom }]}>
-              <View style={f.handle} />
-              <View style={f.header}>
-                <Text style={f.title}>{editingId ? 'Edit address' : 'Add address'}</Text>
-                <Pressable onPress={() => setFormOpen(false)} hitSlop={12}>
-                  <Text style={f.closeText}>Cancel</Text>
-                </Pressable>
-              </View>
-
-              <ScrollView
-                ref={formScrollRef}
-                showsVerticalScrollIndicator={false}
-                style={f.formScroll}
-                contentContainerStyle={{ padding: 16 }}
-                keyboardShouldPersistTaps="handled"
-              >
-                <FormField label="Street address" error={fieldErrors.line1}>
-                  <TextInput
-                    style={[f.input, fieldErrors.line1 && f.inputError]}
-                    placeholder="House/flat no., street name"
-                    value={line1}
-                    onChangeText={onLine1Change}
-                    onFocus={autocomplete.onFocus}
-                    onBlur={autocomplete.onBlur}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                  <PredictionsDropdown
-                    predictions={autocomplete.predictions}
-                    visible={autocomplete.visible}
-                    onPick={autocomplete.selectPrediction}
-                  />
-                </FormField>
-
-                <FormField label="Landmark (optional)">
-                  <TextInput
-                    style={f.input}
-                    placeholder="e.g. Near the blue gate"
-                    value={landmark}
-                    onChangeText={setLandmark}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </FormField>
-
-                <FormField label="Pincode" error={fieldErrors.pincode}>
-                  <TextInput
-                    style={[f.input, fieldErrors.pincode && f.inputError]}
-                    placeholder="6-digit pincode"
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    value={pincode}
-                    onChangeText={(t) => {
-                      setPincode(t.replace(/\D/g, ''))
-                      setCity('') // the city belonged to the old pincode
-                      setFieldErrors(e => ({ ...e, pincode: '', pin: '' }))
-                    }}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </FormField>
-
-                <View onLayout={(e) => { pinFieldY.current = e.nativeEvent.layout.y }}>
-                  <FormField label="Pin your location (optional)" error={fieldErrors.pin}>
-                    <LocationPicker
-                      value={pin}
-                      onChange={(c) => {
-                        setPin(c)
-                        setCity('') // re-filled by onResolveAddress once the pin is geocoded
-                        setFieldErrors(e => ({ ...e, pin: '' }))
-                      }}
-                      height={180}
-                      onResolveAddress={({ line1: l1, pincode: pc, city: c }) => {
-                        if (l1) { setLine1(l1); setFieldErrors(e => ({ ...e, line1: '' })) }
-                        if (pc && /^\d{6}$/.test(pc)) { setPincode(pc); setFieldErrors(e => ({ ...e, pincode: '' })) }
-                        setCity(c?.trim() ?? '')
-                      }}
-                    />
-                  </FormField>
-                </View>
-
-                <FormField label="Address type">
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {ADDR_TYPES.map((t) => (
-                      <Pressable
-                        key={t.id}
-                        style={[f.typeBtn, addrType === t.id && f.typeBtnActive]}
-                        onPress={() => { setAddrType(t.id); setLabel(t.id.charAt(0).toUpperCase() + t.id.slice(1)) }}
-                      >
-                        <Text style={[f.typeBtnText, addrType === t.id && f.typeBtnTextActive]}>{t.label}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </FormField>
-
-                <FormField label="Label (optional)">
-                  <TextInput
-                    style={f.input}
-                    placeholder="e.g. Home, Mom's place"
-                    value={label}
-                    onChangeText={setLabel}
-                    maxLength={40}
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </FormField>
-
-                {error ? <Text style={f.errorText}>{error}</Text> : null}
-                <View style={{ height: 16 }} />
-              </ScrollView>
-
-              <Pressable
-                style={[f.saveBtn, saving && f.saveBtnDisabled]}
-                disabled={saving}
-                onPress={handleSave}
-              >
-                {saving
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={f.saveBtnText}>{editingId ? 'Save changes' : 'Add address'}</Text>}
-              </Pressable>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-    </View>
-  )
-}
-
-function FormField({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
-  return (
-    <View style={{ marginBottom: 16 }}>
-      <Text style={{ fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text, marginBottom: 8 }}>{label}</Text>
-      {children}
-      {error ? <Text style={f.fieldError}>{error}</Text> : null}
     </View>
   )
 }
@@ -473,6 +207,7 @@ const s = StyleSheet.create({
   addrLine1: { fontFamily: Fonts.body, fontSize: 14, color: Colors.text, marginBottom: 2 },
   addrLandmark: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted, marginBottom: 2 },
   addrPincode: { fontFamily: Fonts.body, fontSize: 13, color: Colors.textMuted },
+  addrNoPin: { fontFamily: Fonts.body, fontSize: 12, color: Colors.accentText, marginTop: 4 },
   setDefaultBtn: { marginTop: 12, alignSelf: 'flex-start' },
   setDefaultText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary },
   addBtnWrap: {
@@ -485,34 +220,4 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
   addBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
-})
-
-const f = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 12, paddingBottom: 24, maxHeight: '90%' },
-  formScroll: { flexShrink: 1 },
-  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 999, alignSelf: 'center', marginBottom: 12 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 16 },
-  title: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
-  closeText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.textMuted },
-  input: {
-    backgroundColor: '#fff', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 13, fontFamily: Fonts.body, fontSize: 15, color: Colors.text,
-  },
-  inputError: { borderColor: Colors.danger },
-  fieldError: { fontFamily: Fonts.body, fontSize: 12, color: Colors.danger, marginTop: 4 },
-  typeBtn: {
-    flex: 1, paddingVertical: 11, borderRadius: 999, borderWidth: 1.5,
-    borderColor: Colors.border, backgroundColor: '#fff', alignItems: 'center',
-  },
-  typeBtnActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  typeBtnText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.textMuted },
-  typeBtnTextActive: { color: Colors.primary },
-  errorText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.danger, marginBottom: 8 },
-  saveBtn: {
-    backgroundColor: Colors.primary, borderRadius: 999, paddingVertical: 15,
-    alignItems: 'center', justifyContent: 'center', marginHorizontal: 16, marginTop: 8,
-  },
-  saveBtnDisabled: { opacity: 0.4 },
-  saveBtnText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
 })

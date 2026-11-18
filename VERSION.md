@@ -52,6 +52,26 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.14 — 2026-11-19
+- Build 10, OTA 14. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`. Needs
+  migration 093 (applied 2026-11-19) — the app writes its new columns.
+- **Addresses save again** for everyone: since 1.10.12 the app refused to save
+  unless Google returned a city, and Google has none for many Jaipur pincodes
+  (302023–025, 302030, …); on Android a map pin never filled anything (the
+  phone's geocoder needs a location permission the map didn't ask for). The
+  city is now always Jaipur, set by the database from the pincode.
+- **New address form** everywhere an address is entered (onboarding, Plan
+  settings → Delivery addresses, day cart → Add or change addresses): line 1
+  (grows as you type), line 2, landmark, pincode, City "Jaipur" (locked).
+  Pincodes are checked against the Jaipur list (`service_pincodes`).
+- Places pick, map pin and "Use my current location" fill line 1 / line 2 /
+  pincode and save the coordinates (Google reverse geocoding, no permission
+  needed for the map); every field stays editable, a pin never overwrites what
+  the customer typed, and a missing house number is pointed out.
+- Adding / editing an address is its own screen, so Save is never under the
+  keyboard on Android.
+
 ### 1.10.13 — 2026-11-18
 - Build 10, OTA 13. Production channel, published per platform (`--platform
   ios`, then `--platform android`).
