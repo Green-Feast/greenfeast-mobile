@@ -264,6 +264,23 @@ reflect the latest commits, that's expected, not a bug to fix.
   hidden from My Plan's Delivery tab. Counter: admin `/counter` → `redeem_pickup` bills via
   `advance_order_delivered`; `settle_pickups()` cancels unused codes at closing time, uncharged
   (`walk_in_expired`). Day-cart edits are refused on walk-ins.
+- **Auditable money (092, 2026-11-18).** Every `wallet_transactions` row has a `category` set by
+  trigger from its `reference_id` (`wallet_tx_category()`); an unknown reference is refused, and the
+  old `addmeals_` / `adj_` kinds are gone (there is no manual wallet adjustment or "add meals" any more
+  — gifts and referrals are the only free credit). Money records are permanent: payments,
+  wallet_transactions, refunds, meal_gifts, referrals, coupon_redemptions, cash_reports,
+  balance_decisions, admin_audit_log can't be deleted (and paid amounts can't change) even with the
+  service key, and `wallets.balance` only moves inside `wallet_credit` / `wallet_debit`. A payment
+  outside Cashfree must carry `method` / `source` / `proof_reference` / `paid_on` / `recorded_by`
+  (pre-092 ones are `method = 'unrecorded'`, proof can be added once). Admin money moves are the
+  `admin_*` SQL functions (COD: cash + UPI must equal `cod_due_paise` exactly); the admin asks for the
+  admin's action password (`admin_action_passwords`, `lib/audit.ts` → `sensitive()`) and logs every
+  action to `admin_audit_log`. Deleting / resetting a customer archives their money first
+  (`archive_customer_money` → `money_archives` + `deleted_money_records`; a trigger on `users` does it
+  for any deletion). A meal is the plan price ÷ meals **rounded down to the whole rupee** (₹7,499 / 30
+  → ₹249; `_shared/pricing.ts`, the app's plan screens and the admin's `lib/pricing.ts` match); the
+  rest is `rounding_income`, booked once the plan is fully paid (`book_rounding_income`). Reports:
+  `money_ledger_rows`, `money_month_summary`, `money_checks` (admin → Money).
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for

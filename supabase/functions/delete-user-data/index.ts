@@ -75,14 +75,19 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Dev-reset path, unchanged: wipe app data but keep the auth account so
-    // the same login can be reused for repeated testing.
+    // Dev-reset path: wipe app data but keep the auth account so the same
+    // login can be reused for repeated testing. Money records are permanent
+    // (092): they move to the archive first, then the rest goes.
+    const { error: archiveErr } = await supabase.rpc('archive_customer_money', {
+      p_user: userId, p_reason: 'admin_reset', p_admin: null, p_action: null,
+    })
+    if (archiveErr) throw archiveErr
+    await supabase.from('orders').delete().eq('user_id', userId)
     await Promise.all([
       supabase.from('subscriptions').delete().eq('user_id', userId),
       supabase.from('addresses').delete().eq('user_id', userId),
       supabase.from('dietary_profiles').delete().eq('user_id', userId),
       supabase.from('questionnaire_responses').delete().eq('user_id', userId),
-      supabase.from('wallets').delete().eq('user_id', userId),
     ])
     await supabase.from('users').update({
       name: null,

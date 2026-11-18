@@ -97,14 +97,14 @@ export default function RecommendationScreen() {
   const addonPerMeal = addonRows.reduce((s, a) => s + a.price_per_meal, 0)
 
   const mealsTotal = plan?.meals_total ?? 0
-  const baseMealRate = plan ? Math.round(plan.base_price / Math.max(plan.meals_total, 1)) : 0
+  const baseMealRate = plan ? Math.floor(plan.base_price / Math.max(plan.meals_total, 1) / 100) * 100 : 0
   const perMealAllIn = baseMealRate + addonPerMeal
   const total = plan ? plan.base_price + addonPerMeal * mealsTotal : 0
   const trialTotal = trialPlan ? trialPlan.base_price + addonPerMeal * trialPlan.meals_total : 0
 
   // "Go bigger and save": the cheapest-per-meal plan bigger than the
   // recommended one (the 60-meal plan, migration 067), if any.
-  const rateOf = (p: Plan) => Math.round(p.base_price / Math.max(p.meals_total, 1))
+  const rateOf = (p: Plan) => Math.floor(p.base_price / Math.max(p.meals_total, 1) / 100) * 100
   const upgrade = plan
     ? plans
         .filter((p) => p.id !== 'trial' && p.meals_total > plan.meals_total && rateOf(p) < baseMealRate)

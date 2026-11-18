@@ -117,7 +117,8 @@ Deno.serve(async (req) => {
       (sum: number, row: any) => sum + (row.addons?.price_per_meal ?? 0), 0
     )
     let planTotal = plan.base_price + addonPerMeal * plan.meals_total
-    let mealPrice = Math.round(plan.base_price / Math.max(plan.meals_total, 1))
+    // Whole rupees, rounded down (092) — same as plan_meal_rate() in SQL.
+    let mealPrice = Math.floor(plan.base_price / Math.max(plan.meals_total, 1) / 100) * 100
 
     // A coupon: only when buying a plan (pending) — never a top-up, never a
     // plan that's already running. The meal price it sets is what this

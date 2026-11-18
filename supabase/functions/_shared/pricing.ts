@@ -1,7 +1,8 @@
 // The price of one meal on a subscription (paise). A plan bought with a
 // coupon keeps its coupon price (subscriptions.meal_price_paise, migration
-// 066); otherwise it's the plan's regular price, round(plan price ÷ meals) —
-// the formula the app has always billed. Mirrors subscription_meal_rate() in
+// 066); otherwise it's the plan's regular price: plan price ÷ meals, rounded
+// DOWN to the whole rupee (092 — ₹7,499 / 30 → ₹249, the ₹29 left is booked as
+// rounding income). Mirrors subscription_meal_rate() in
 // SQL and lib/pricing.ts in the admin.
 export function mealRate(
   sub: { meal_price_paise?: number | null } | null | undefined,
@@ -9,5 +10,5 @@ export function mealRate(
 ): number | null {
   if (sub?.meal_price_paise) return sub.meal_price_paise
   if (!plan) return null
-  return Math.round(plan.base_price / Math.max(plan.meals_total, 1))
+  return Math.floor(plan.base_price / Math.max(plan.meals_total, 1) / 100) * 100
 }

@@ -195,7 +195,7 @@ export default function PlanScreen() {
       <Text style={styles.sectionLabel}>How many meals?</Text>
       <View style={styles.planCards}>
         {plans.map((p) => {
-          const perMeal = Math.round(p.base_price / p.meals_total)
+          const perMeal = Math.floor(p.base_price / Math.max(p.meals_total, 1) / 100) * 100
           const isSelected = selectedPlan === p.id
           return (
             <TouchableOpacity

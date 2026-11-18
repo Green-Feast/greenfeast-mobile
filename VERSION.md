@@ -52,6 +52,18 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.13 — 2026-11-18
+- Build 10, OTA 13. Production channel, published per platform (`--platform
+  ios`, then `--platform android`).
+- **Meal price in whole rupees** (migration 092): a meal is the plan price ÷
+  meals rounded down to the rupee — the 30-meal plan shows ₹249 a meal (was
+  ₹249.97); the ₹29 left over is GreenFeast's rounding. Plan, recommendation and
+  My Plan screens match what the server now bills.
+- Also in this update (since 1.10.12): the walk-in sheet scrolls smoothly and a
+  drink must be picked; Jawahar Nagar walk-ins until 9 PM; onboarding choices
+  are saved as a draft the admin can pick up; ruler snap / plan card spacing
+  fixes, and day selection is optional.
+
 ### 1.10.12 — 2026-11-13
 - Build 10, OTA 12. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.

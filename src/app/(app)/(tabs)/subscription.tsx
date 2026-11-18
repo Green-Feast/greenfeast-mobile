@@ -929,7 +929,7 @@ export default function SubscriptionScreen() {
   const effectiveAddMode = !dayOrder || addMode
 
   // The plan's meal price: its coupon price if bought with one (066).
-  const baseRate = sub.meal_price_paise ?? (sub.plans ? Math.round(sub.plans.base_price / Math.max(sub.plans.meals_total, 1)) : 0)
+  const baseRate = sub.meal_price_paise ?? (sub.plans ? Math.floor(sub.plans.base_price / Math.max(sub.plans.meals_total, 1) / 100) * 100 : 0)
   const dayAllOrders = daySlotOrders
   const orderBase = (o: OrderItem) => (o.unit_price ?? baseRate) * (o.quantity ?? 1)
   const addonLinesCost = (o: OrderItem) =>
