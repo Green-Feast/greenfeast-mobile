@@ -182,6 +182,19 @@ async function processSubscription(supabase: any, subId: string, drinkCache: Dri
     .gte('closed_on', toISO(new Date(Date.now() + IST_OFFSET_MS)))
   const closed = new Set((closures ?? []).map((c: any) => `${c.closed_on}|${c.meal_slot}`))
 
+  // A slot that already has a live meal — e.g. a dish the customer added
+  // before tonight's run made the day's default one — gets no second meal.
+  // (Karan Dutt, 19 Nov: added a Soba bowl at 10:27 PM to an empty lunch, then
+  // the 1 AM run added the weekly dish too, and both were delivered.)
+  const { data: liveRows } = await supabase
+    .from('orders')
+    .select('delivery_date, meal_slot')
+    .eq('subscription_id', subId)
+    .eq('walk_in', false)
+    .gte('delivery_date', toISO(new Date(Date.now() + IST_OFFSET_MS)))
+    .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery', 'delivered'])
+  const hasMeal = new Set((liveRows ?? []).map((o: any) => `${o.delivery_date}|${o.meal_slot}`))
+
   let created = 0
   const istNow = new Date(Date.now() + IST_OFFSET_MS)
   const todayIST = toISO(istNow)
@@ -212,6 +225,7 @@ async function processSubscription(supabase: any, subId: string, drinkCache: Dri
       // it now (e.g. a 3 PM signup getting today's lunch) is a meal nobody cooks.
       if (dateStr === todayIST && istHour >= SLOT_CUTOFF_HOUR[slot]) continue
       if (closed.has(`${dateStr}|${slot}`)) continue
+      if (hasMeal.has(`${dateStr}|${slot}`)) continue
 
       // A fixed dish for this weekday, then one for every day, then the
       // weekly menu, then the subscription_schedule fallback (by day name).
