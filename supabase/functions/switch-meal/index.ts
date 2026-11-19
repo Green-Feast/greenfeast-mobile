@@ -105,6 +105,9 @@ Deno.serve(async (req) => {
       return json({ error: DRINK_AS_MEAL_ERROR }, 400)
     }
 
+    // A meal item swaps to a meal at its own price (097: plan meal price + premium).
+    const { data: newPrice } = await supabase.rpc('item_unit_price', { p_sub: order.subscription_id, p_t: meal_template_id })
+
     // Apply the swap (and drop any "Meal switch" fee line left from before
     // swaps were free), then re-snapshot the ingredients and cart total.
     await Promise.all([
@@ -113,6 +116,8 @@ Deno.serve(async (req) => {
         .update({
           meal_template_id,
           is_customized: true,
+          // Items (097): a premium dish costs its premium on top.
+          ...(newPrice != null ? { unit_price: newPrice } : {}),
           // Changed by hand: plan-default changes leave this day alone (080).
           cart_edited: true,
           switch_fee_paise: 0,

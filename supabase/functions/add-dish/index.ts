@@ -224,6 +224,13 @@ Deno.serve(async (req) => {
       { base_price: number; meals_total: number } | null
     if (!plan) return json({ error: 'Plan not found' }, 404)
     const rate = mealRate(sub as any, plan) as number
+    void rate
+    // Items (097): a meal costs the plan meal price + the dish's premium, a
+    // drink (smoothie / coffee) the drink price — and a drink is a drink item.
+    const [{ data: itemPrice }, { data: isDrink }] = await Promise.all([
+      supabase.rpc('item_unit_price', { p_sub: subscriptionId, p_t: meal_template_id }),
+      supabase.rpc('is_drink_dish', { p_t: meal_template_id }),
+    ])
 
     // Zero existing rows (the off-day case) resolves to slot_seq 1, leaving 0
     // unused for that (date, slot) — harmless, advance_batch_delivered just
@@ -245,7 +252,9 @@ Deno.serve(async (req) => {
         is_customized: true,
         extra_dish: true,
         quantity: qty,
-        unit_price: rate,
+        unit_price: itemPrice ?? rate,
+        item_kind: isDrink ? 'drink' : 'meal',
+        cart_edited: true,
         slot_seq: nextSeq,
       })
       .select('id')

@@ -36,6 +36,32 @@ async function userFrom(req: Request): Promise<{ id: string } | null> {
   return { id: sub as string }
 }
 
+
+// The cart minimum (097): on a slot the plan delivers, a cart keeps the plan's
+// meals, drinks and plan add-ons. Returns the customer-facing reason a change
+// would break it, or null. delta: what the change takes away.
+async function minimumProblem(
+  order: { subscription_id: string; delivery_date: string; meal_slot: string },
+  delta: { meals?: number; drinks?: number; addonId?: string },
+): Promise<string | null> {
+  const { data: st } = await supabase.rpc('slot_cart_state', {
+    p_sub: order.subscription_id, p_date: order.delivery_date, p_slot: order.meal_slot,
+  })
+  if (!st?.applies) return null
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+  if (delta.meals && st.meals - delta.meals < st.need_meals) {
+    return `Your plan has ${plural(st.need_meals, 'meal')} here — swap a dish instead, or skip this meal.`
+  }
+  if (delta.drinks && st.drinks - delta.drinks < st.need_drinks) {
+    return `Your plan has ${plural(st.need_drinks, 'drink')} here — pick another drink instead, or skip this meal.`
+  }
+  if (delta.addonId) {
+    const pa = (st.plan_addons ?? []).find((x: { id: string; have: number }) => x.id === delta.addonId)
+    if (pa && pa.have - 1 < st.need_meals) return 'That add-on comes with your plan\'s meals and can\'t be removed.'
+  }
+  return null
+}
+
 function json(body: object, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -58,7 +84,7 @@ Deno.serve(async (req) => {
 
     const { data: order } = await supabase
       .from('orders')
-      .select('id, user_id, extra_dish, status, delivery_date, meal_slot')
+      .select('id, user_id, subscription_id, extra_dish, status, delivery_date, meal_slot, quantity, item_kind')
       .eq('id', order_id)
       .single()
 
@@ -75,6 +101,11 @@ Deno.serve(async (req) => {
     if (locked) {
       return json({ error: 'Cannot remove — this slot has already locked for the day.' }, 400)
     }
+
+    // Never below the plan's meals / drinks (097).
+    const q = order.quantity ?? 1
+    const problem = await minimumProblem(order, order.item_kind === 'drink' ? { drinks: q } : { meals: q })
+    if (problem) return json({ error: problem }, 400)
 
     const { error: updateErr } = await supabase
       .from('orders')

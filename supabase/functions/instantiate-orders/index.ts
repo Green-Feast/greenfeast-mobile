@@ -243,82 +243,26 @@ async function processSubscription(supabase: any, subId: string, drinkCache: Dri
       if (!mealTemplateId) mealTemplateId = scheduleMap[dow]
       if (!mealTemplateId) continue
 
-      const slotQty = slot === 'lunch' ? (sub.meals_lunch ?? 1) : (sub.meals_dinner ?? 1)
-      // No price (plan row missing) → nothing can be billed, so nothing is made.
-      if (unitPrice == null) continue
-      const orderCost = unitPrice * slotQty
-      if (orderCost > capacity) continue
-
-      // The day's drink: the kitchen's pick for this day and slot, if it can be
-      // delivered (is_deliverable_drink); otherwise null = chef's choice and the
-      // drink line keeps the subscription's own sub_option (the legacy flavour).
-      let drinkId: string | null = null
-      let drinkName: string | null = null
-      if (hasDrink) {
-        const wanted = weeklyDrinkMap[dowNum]?.[slot]
-        if (wanted) {
-          const drink = await deliverableDrink(supabase, wanted, drinkCache)
-          if (drink) { drinkId = wanted; drinkName = drink.name }
-        }
-      }
-
-      const { data: order, error: insertErr } = await supabase
-        .from('orders')
-        .insert({
-          user_id: sub.user_id,
-          subscription_id: subId,
-          meal_template_id: mealTemplateId,
-          batch_id: (slot === 'lunch' ? sub.batch_id_lunch : sub.batch_id_dinner) ?? null,
-          address_id: addr?.id ?? null,
-          delivery_date: dateStr,
-          meal_slot: slot,
-          status: 'scheduled',
-          // A fixed dish must survive weekly-menu edits (propagateMenuChanges
-          // only touches non-customised orders).
-          is_customized: !!fixed,
-          quantity: slotQty,
-          unit_price: unitPrice,
-          // Only sent when set, so nothing changes for a plan without a drink.
-          ...(drinkId ? { drink_template_id: drinkId } : {}),
-        })
-        .select('id')
-        .single()
-
-      if (insertErr) {
-        // 23505 = unique violation → order already exists; skip ingredients
-        if (insertErr.code === '23505') continue
-        console.error(`Order insert failed (${dateStr} ${slot}):`, insertErr.message)
+      // The default cart (097): M × the day's dish with the plan's add-ons, and
+      // D × the day's drink — made by make_default_cart, priced by
+      // default_slot_cost, and only while the wallet still covers it.
+      const { data: cost, error: costErr } = await supabase.rpc('default_slot_cost', { p_sub: subId, p_date: dateStr, p_slot: slot })
+      if (costErr || cost == null) {
+        console.error(`default_slot_cost failed (${dateStr} ${slot}):`, costErr?.message)
         continue
       }
-
-      // Snapshot ingredients from template
-      const ingredients = await getIngredients(mealTemplateId)
-      if (ingredients.length > 0) {
-        await supabase.from('order_ingredients').insert(
-          ingredients.map((ti: any) => ({
-            order_id: order.id,
-            ingredient_id: ti.ingredients.id,
-            ingredient_name: ti.ingredients.name,
-            quantity: ti.quantity,
-            unit: ti.ingredients.unit,
-          }))
-        )
+      if (cost > capacity) continue
+      const { data: made, error: makeErr } = await supabase.rpc('make_default_cart', {
+        p_sub: subId, p_date: dateStr, p_slot: slot, p_address: addr?.id ?? null,
+      })
+      if (makeErr) {
+        console.error(`make_default_cart failed (${dateStr} ${slot}):`, makeErr.message)
+        continue
       }
-
-      // Copy subscription addons to this order
-      if (subAddons && subAddons.length > 0) {
-        await supabase.from('order_addons').insert(
-          subAddons.map((a: any) => ({
-            order_id: order.id,
-            addon_id: a.addon_id,
-            // The drink line carries the day's drink name (088); the rest keep their flavour.
-            sub_option: (a.addons?.is_drink && drinkName) ? drinkName : (a.sub_option ?? null),
-          }))
-        )
+      if ((made ?? 0) > 0) {
+        created += made
+        capacity -= cost
       }
-
-      created++
-      capacity -= orderCost
     }
   }
 

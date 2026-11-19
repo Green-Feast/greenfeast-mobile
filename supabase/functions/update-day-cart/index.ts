@@ -58,6 +58,32 @@ async function userFrom(req: Request): Promise<{ id: string } | null> {
   return { id: sub as string }
 }
 
+
+// The cart minimum (097): on a slot the plan delivers, a cart keeps the plan's
+// meals, drinks and plan add-ons. Returns the customer-facing reason a change
+// would break it, or null. delta: what the change takes away.
+async function minimumProblem(
+  order: { subscription_id: string; delivery_date: string; meal_slot: string },
+  delta: { meals?: number; drinks?: number; addonId?: string },
+): Promise<string | null> {
+  const { data: st } = await supabase.rpc('slot_cart_state', {
+    p_sub: order.subscription_id, p_date: order.delivery_date, p_slot: order.meal_slot,
+  })
+  if (!st?.applies) return null
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+  if (delta.meals && st.meals - delta.meals < st.need_meals) {
+    return `Your plan has ${plural(st.need_meals, 'meal')} here — swap a dish instead, or skip this meal.`
+  }
+  if (delta.drinks && st.drinks - delta.drinks < st.need_drinks) {
+    return `Your plan has ${plural(st.need_drinks, 'drink')} here — pick another drink instead, or skip this meal.`
+  }
+  if (delta.addonId) {
+    const pa = (st.plan_addons ?? []).find((x: { id: string; have: number }) => x.id === delta.addonId)
+    if (pa && pa.have - 1 < st.need_meals) return 'That add-on comes with your plan\'s meals and can\'t be removed.'
+  }
+  return null
+}
+
 function json(body: object, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -83,7 +109,7 @@ Deno.serve(async (req) => {
     // ── Load + guard the base order ───────────────────────────────────────
     const { data: order } = await supabase
       .from('orders')
-      .select('id, user_id, subscription_id, delivery_date, meal_slot, status, quantity, unit_price, fulfilment')
+      .select('id, user_id, subscription_id, delivery_date, meal_slot, status, quantity, unit_price, fulfilment, item_kind')
       .eq('id', order_id)
       .single()
     if (!order || order.user_id !== user.id) return json({ error: 'Order not found' }, 404)
@@ -171,6 +197,9 @@ Deno.serve(async (req) => {
         .select('id, quantity').eq('order_id', order.id).eq('addon_id', addon_id).eq('kind', 'addon').maybeSingle()
       if (!existing) return json({ error: 'Add-on not on this order' }, 400)
 
+      // A plan add-on can't drop below the plan's meals (097).
+      const addonProblem = await minimumProblem(order, { addonId: addon_id })
+      if (addonProblem) return json({ error: addonProblem }, 400)
       const qty = existing.quantity ?? 1
       if (qty <= 1) {
         const { data: isDefault } = await supabase
@@ -194,6 +223,9 @@ Deno.serve(async (req) => {
       // away): the meal counter and wallet are charged per delivered portion.
       // The last portion goes through skip instead, which the app confirms.
       if ((order.quantity ?? 1) <= 1) return json({ error: 'use_skip' }, 400)
+      // Never below the plan's meals / drinks (097): swap instead, or skip.
+      const qtyProblem = await minimumProblem(order, order.item_kind === 'drink' ? { drinks: 1 } : { meals: 1 })
+      if (qtyProblem) return json({ error: qtyProblem }, 400)
       await supabase.from('orders')
         .update({ quantity: (order.quantity ?? 1) - 1, updated_at: new Date().toISOString() })
         .eq('id', order.id)
@@ -217,30 +249,22 @@ Deno.serve(async (req) => {
           .eq('for_date', order.delivery_date).eq('meal_template_id', drink_template_id)
           .eq('is_available', false).maybeSingle(),
       ])
-      if (!hasDrink) return json({ error: 'This meal does not come with a drink.' }, 400)
+      void hasDrink; void drinkAddons
       if (!deliverable || !drink) return json({ error: 'This drink is not available for delivery.' }, 400)
       if (unavailable) return json({ error: "That drink isn't available that day." }, 400)
-
-      const { error: orderErr } = await supabase.from('orders')
-        .update({
-          drink_template_id: drink.id,
-          drink_edited: true,
-          cart_edited: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', order.id)
-      if (orderErr) {
-        console.error('update-day-cart set_drink (order) failed:', orderErr.message)
-        return json({ error: 'Internal server error' }, 500)
-      }
-      const { error: lineErr } = await supabase.from('order_addons')
-        .update({ sub_option: drink.name })
-        .eq('order_id', order.id).eq('kind', 'addon')
-        .in('addon_id', (drinkAddons ?? []).map((a: { id: string }) => a.id))
-      if (lineErr) {
-        console.error('update-day-cart set_drink (line) failed:', lineErr.message)
-        return json({ error: 'Internal server error' }, 500)
-      }
+      // Drinks are items (097): change the slot's drink item.
+      const { data: drinkRow } = await supabase.from('orders')
+        .select('id')
+        .eq('subscription_id', order.subscription_id).eq('delivery_date', order.delivery_date)
+        .eq('meal_slot', order.meal_slot).eq('item_kind', 'drink').eq('walk_in', false)
+        .in('status', ['scheduled', 'confirmed'])
+        .order('slot_seq').limit(1).maybeSingle()
+      if (!drinkRow) return json({ error: 'This meal does not come with a drink.' }, 400)
+      await supabase.from('orders')
+        .update({ meal_template_id: drink.id, is_customized: true, cart_edited: true, updated_at: new Date().toISOString() })
+        .eq('id', drinkRow.id)
+      await supabase.rpc('snapshot_order_ingredients', { p_order: drinkRow.id })
+      await supabase.rpc('recompute_order_cart', { p_order: drinkRow.id })
       pickedDrink = { id: drink.id, name: drink.name }
     }
 
