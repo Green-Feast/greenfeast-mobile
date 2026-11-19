@@ -195,6 +195,14 @@ async function processSubscription(supabase: any, subId: string, drinkCache: Dri
     .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery', 'delivered'])
   const hasMeal = new Set((liveRows ?? []).map((o: any) => `${o.delivery_date}|${o.meal_slot}`))
 
+  // Meals are made a week at a time (094): never past the published Sunday.
+  // Next week appears after the kitchen's Sunday menu run at 7 PM.
+  const { data: publishedUntil, error: pubErr } = await supabase.rpc('menu_published_until')
+  if (pubErr || !publishedUntil) {
+    console.error(`menu_published_until failed for ${subId}:`, pubErr?.message)
+    return 0
+  }
+
   let created = 0
   const istNow = new Date(Date.now() + IST_OFFSET_MS)
   const todayIST = toISO(istNow)
@@ -205,6 +213,7 @@ async function processSubscription(supabase: any, subId: string, drinkCache: Dri
     // weekly_menu uses Mon=0..Sun=6 to match the Kitchen admin UI convention
     const dowNum = (date.getUTCDay() + 6) % 7
     const dateStr = toISO(date)
+    if (dateStr > publishedUntil) break
 
     // Nothing before the plan's first delivery date (set when an existing
     // customer is moved over, so the app takes over from a chosen day).

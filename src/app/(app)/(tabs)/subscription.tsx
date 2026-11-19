@@ -232,6 +232,16 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showWallet, setShowWallet] = useState(false)
+  // Meals are made a week at a time (094): days after this Sunday-ish date
+  // have no meal yet because next week's menu isn't out — not because none is
+  // scheduled. Refreshed whenever My Plan loads.
+  const [publishedUntil, setPublishedUntil] = useState<string | null>(null)
+  useEffect(() => {
+    supabase.rpc('menu_published_until').then(({ data }) => {
+      if (typeof data === 'string') setPublishedUntil(data)
+    })
+  }, [])
+  const menuNotOut = (day: string) => !!publishedUntil && day > publishedUntil
   // Delivery (the planned meals) or Walk-in (eat at our café, 087).
   const [tab, setTab] = useState<'delivery' | 'walk_in'>('delivery')
   const [walkInKey, setWalkInKey] = useState(0)
@@ -1337,7 +1347,9 @@ export default function SubscriptionScreen() {
             <Text style={s.heroEmptyText}>
               {closures.has(`${selectedDay}|${selectedSlot}`)
                 ? `Kitchen closed for ${selectedSlot} on ${dowShort(selectedDay)} ${dayNum(selectedDay)}${closures.get(`${selectedDay}|${selectedSlot}`) ? ` — ${closures.get(`${selectedDay}|${selectedSlot}`)}` : ''}. The meal stays on your plan.`
-                : `No ${selectedSlot} on ${dowShort(selectedDay)} ${dayNum(selectedDay)}`}
+                : menuNotOut(selectedDay)
+                  ? `The menu for ${dowShort(selectedDay)} ${dayNum(selectedDay)} isn't out yet — your ${selectedSlot} appears on Sunday evening, when next week's menu is set.`
+                  : `No ${selectedSlot} on ${dowShort(selectedDay)} ${dayNum(selectedDay)}`}
             </Text>
             ) : null}
             {/* dayAnyBase used to gate this — meant a day with zero orders in
@@ -1860,7 +1872,9 @@ export default function SubscriptionScreen() {
                 <View style={s.dayModalCurrentSection}>
                   <View style={s.dayModalNoOrder}>
                     <Text style={s.dayModalNoOrderText}>
-                      {dayHasNothing ? 'Nothing scheduled — pick a dish below to add one' : `No ${selectedSlot} scheduled — add a dish below`}
+                      {menuNotOut(selectedDay)
+                        ? `This day's menu isn't out yet — your ${selectedSlot} appears on Sunday evening. You can still add a dish yourself below.`
+                        : dayHasNothing ? 'Nothing scheduled — pick a dish below to add one' : `No ${selectedSlot} scheduled — add a dish below`}
                     </Text>
                   </View>
 
