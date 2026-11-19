@@ -39,7 +39,9 @@ Deno.serve(async (req) => {
     const event = JSON.parse(rawBody)
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      // Plan change log (095): who made the change.
+      { global: { headers: { 'x-gf-actor': 'system: payment' } } },
     )
 
     // Refund outcomes for bank refunds started from the admin (admin-refund).

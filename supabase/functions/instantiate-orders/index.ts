@@ -353,7 +353,9 @@ Deno.serve(async (req) => {
   try {
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      // Plan change log (095): who made the change.
+      { global: { headers: { 'x-gf-actor': 'system: order run' } } },
     )
 
     // Drinks looked up this run (see deliverableDrink).

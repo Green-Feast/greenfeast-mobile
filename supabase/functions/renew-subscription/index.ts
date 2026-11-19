@@ -25,7 +25,8 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+    // Plan change log (095): a renewal is the customer's.
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { global: { headers: { 'x-gf-actor': 'customer' } } })
 
     const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token)

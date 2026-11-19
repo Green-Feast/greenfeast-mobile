@@ -18,7 +18,8 @@ function today(): string {
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  { auth: { persistSession: false, autoRefreshToken: false } },
+  // Plan change log (095): pause / resume / skip / cancel here are the customer's.
+  { auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { 'x-gf-actor': 'customer' } } },
 )
 
 async function userFrom(req: Request): Promise<{ id: string } | null> {
