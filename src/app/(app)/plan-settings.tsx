@@ -152,10 +152,10 @@ export default function PlanSettingsScreen() {
   const pauseSetForLater = sub.status !== 'paused' && !!sub.pause_from
 
   const actions = sub.status === 'paused'
-    ? [{ label: 'Resume subscription', Icon: Play, onPress: handleResume }, ...sharedActions]
+    ? [{ label: 'Resume deliveries', Icon: Play, onPress: handleResume }, ...sharedActions]
     : pauseSetForLater
       ? [{ label: 'Cancel pause', Icon: Play, onPress: handleResume }, ...sharedActions]
-      : [{ label: 'Pause subscription',  Icon: Pause, onPress: () => setPauseOpen(true) }, ...sharedActions]
+      : [{ label: 'Pause deliveries',  Icon: Pause, onPress: () => setPauseOpen(true) }, ...sharedActions]
 
   return (
     <View style={s.container}>
@@ -178,7 +178,7 @@ export default function PlanSettingsScreen() {
             <View style={s.planCardTop}>
               <Text style={s.planCardNameLight}>{planName}</Text>
               <View style={s.activeBadge}>
-                <Text style={s.activeBadgeText}>{remaining <= 0 ? 'Finished' : sub.status === 'paused' ? 'Paused' : 'Active'}</Text>
+                <Text style={s.activeBadgeText}>{remaining <= 0 ? 'Finished' : sub.status === 'paused' ? 'Deliveries paused' : 'Active'}</Text>
               </View>
             </View>
             {sub.plans && (
@@ -191,19 +191,19 @@ export default function PlanSettingsScreen() {
             {sub.status === 'paused' && sub.pause_until && (
               <>
                 <View style={s.metaRow}>
-                  <Text style={s.metaLabel}>Paused</Text>
+                  <Text style={s.metaLabel}>Deliveries paused</Text>
                   <Text style={s.metaValue}>{fmtDate(sub.pause_from)} – {fmtDate(sub.pause_until)}</Text>
                 </View>
-                <Text style={s.pauseNote}>You can resume anytime before then — see below.</Text>
+                <Text style={s.pauseNote}>Walk-ins are still open. You can resume deliveries anytime before then — see below.</Text>
               </>
             )}
             {pauseSetForLater && (
               <>
                 <View style={s.metaRow}>
-                  <Text style={s.metaLabel}>Pausing</Text>
+                  <Text style={s.metaLabel}>Pausing deliveries</Text>
                   <Text style={s.metaValue}>{fmtDate(sub.pause_from)} – {fmtDate(sub.pause_until)}</Text>
                 </View>
-                <Text style={s.pauseNote}>Your meals carry on until then. You can cancel it below.</Text>
+                <Text style={s.pauseNote}>Your deliveries carry on until then, and walk-ins stay open throughout. You can cancel it below.</Text>
               </>
             )}
             <View>
@@ -288,8 +288,8 @@ function PauseModal({ visible, subId, onClose, onDone }: {
       <View style={m.overlay}>
         <View style={[m.sheet, { paddingBottom: 32 + insets.bottom }]}>
           <View style={m.handle} />
-          <SheetHeader title="Pause subscription" onClose={reset} />
-          <Text style={m.stepLabel}>Select your pause start and end dates</Text>
+          <SheetHeader title="Pause deliveries" onClose={reset} />
+          <Text style={m.stepLabel}>Pick the days you don't want deliveries</Text>
 
           {visible && (
             <BookingCalendar
@@ -306,9 +306,9 @@ function PauseModal({ visible, subId, onClose, onDone }: {
               Pause {fmtDate(start)} → {fmtDate(end)} · {dayCount} {dayCount === 1 ? 'day' : 'days'}
             </Text>
           ) : (
-            <Text style={m.calendarNote}>Tap a start date, then an end date. No limit — pause as long as you need.</Text>
+            <Text style={m.calendarNote}>Tap a start date, then an end date. No limit — pause as long as you need. You can still walk in and eat or take away anytime.</Text>
           )}
-          <Text style={m.calendarNote}>You can resume early anytime from Plan Settings.</Text>
+          <Text style={m.calendarNote}>You can resume deliveries early anytime from Plan Settings.</Text>
 
           {error ? <Text style={m.errorText}>{error}</Text> : null}
           <Pressable style={[m.btn, { marginTop: 8 }, (!start || !end || saving) && m.btnDisabled]} disabled={!start || !end || saving} onPress={handlePause}>

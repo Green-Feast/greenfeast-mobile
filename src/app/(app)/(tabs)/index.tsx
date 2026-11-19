@@ -644,11 +644,11 @@ export default function Home() {
                 <Text style={styles.noDeliveryEmoji}>🌿</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.noDeliveryTitle}>
-                    {subscription?.status === 'paused' ? 'Subscription paused' : 'No delivery today'}
+                    {subscription?.status === 'paused' ? 'Deliveries paused' : 'No delivery today'}
                   </Text>
                   <Text style={styles.noDeliveryDesc}>
                     {subscription?.status === 'paused'
-                      ? 'Your plan is on pause. Resume from My Plan when ready.'
+                      ? 'Your deliveries are on pause — you can still walk in anytime. Resume from Plan Settings when ready.'
                       : 'Today isn\'t a delivery day. Check My Plan to see your upcoming schedule.'}
                   </Text>
                 </View>

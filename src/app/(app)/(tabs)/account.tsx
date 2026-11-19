@@ -72,7 +72,7 @@ const FAQS = [
   { q: 'Can I change my meals after subscribing?', a: "Yes! You can swap meals until 9 AM (lunch) or 2 PM (dinner) on the delivery day itself." },
   { q: 'What if I need to skip a day?', a: "Use \"Skip a day\" in My Plan anytime before 9 AM (lunch) or 2 PM (dinner) on the delivery day." },
   { q: 'Are your meals really preservative-free?', a: "Absolutely. Every meal is freshly prepared the same morning it's delivered." },
-  { q: 'Can I pause my subscription?', a: 'Yes, you can pause for up to 2 weeks per cycle from the My Plan tab.' },
+  { q: 'Can I pause my deliveries?', a: 'Yes — pause deliveries for as long as you need from Plan Settings. Walk-ins stay open while deliveries are paused.' },
   { q: 'Can I change my delivery time slot?', a: "Yes! Just message us on WhatsApp and we'll update your slot right away." },
 ]
 

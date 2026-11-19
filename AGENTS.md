@@ -294,6 +294,11 @@ reflect the latest commits, that's expected, not a bug to fix.
   drink add-on line written by an old writer becomes a drink item (trigger
   `order_addons_drink_to_item`). Walk-ins keep the old shape. The cart sheet in My Plan is read-only
   (tap → "Tap Customize"); Skip there and in Customize needs a double tap.
+- **One meal's address; pause = deliveries (098, 2026-11-19).** My Plan's address row is where the
+  selected lunch / dinner goes: it moves every delivery item in that slot (direct `orders.address_id`
+  update, guarded by `guard_customer_order_update` — before cutoff only). The address book itself is
+  `addresses.tsx` (from Plan settings). A pause stops deliveries only — walk-ins stay open;
+  `sync_pauses` skips walk-ins. Order history shows walk-ins as their own card ("Walk-ins" filter).
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for

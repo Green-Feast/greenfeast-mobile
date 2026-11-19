@@ -16,7 +16,7 @@ import {
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, useFocusEffect } from 'expo-router'
 import { SkipForward, Wallet, X, Check, AlertCircle, Plus, TrendingDown, TrendingUp, SlidersHorizontal, Utensils, Moon, Settings2, CheckCircle2, ChevronRight, History, MapPin, RotateCcw, Banknote, CalendarDays, Phone, Bike, Clock } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { CFPaymentGatewayService, CFErrorResponse, type CFCallback } from 'react-native-cashfree-pg-sdk'
@@ -233,6 +233,10 @@ export default function SubscriptionScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [showTransactions, setShowTransactions] = useState(false)
   const [showWallet, setShowWallet] = useState(false)
+  // "Deliver this meal to" sheet: one lunch / dinner's address.
+  const [showSlotAddr, setShowSlotAddr] = useState(false)
+  const [slotAddrSaving, setSlotAddrSaving] = useState(false)
+  const [slotAddrError, setSlotAddrError] = useState('')
   // Meals are made a week at a time (094): days after this Sunday-ish date
   // have no meal yet because next week's menu isn't out — not because none is
   // scheduled. Refreshed whenever My Plan loads.
@@ -395,6 +399,14 @@ export default function SubscriptionScreen() {
     fetchAll().finally(() => setLoading(false))
   }, [fetchAll, authLoading])
 
+  // Back from Customize / Plan settings: reload quietly so the saved cart shows
+  // (the first focus is the load above).
+  const focusedOnce = useRef(false)
+  useFocusEffect(useCallback(() => {
+    if (!focusedOnce.current) { focusedOnce.current = true; return }
+    if (!authLoading) fetchAll()
+  }, [fetchAll, authLoading]))
+
   useEffect(() => {
     ensureFreshAvailability()
   }, [ensureFreshAvailability])
@@ -523,6 +535,34 @@ export default function SubscriptionScreen() {
     }
     setWeekOrders(prev => prev.map(o => o.id === orderId ? { ...o, address_id: addressId } : o))
     setPickingAddressForOrder(null)
+  }
+
+  // Where one lunch / dinner goes: every delivery item in that slot (meal and
+  // drink rows) moves together. Only before the slot's cutoff — the orders
+  // guard (044) refuses it after that. The default address isn't touched.
+  async function changeSlotAddress(date: string, slot: 'lunch' | 'dinner', addressId: string) {
+    setSlotAddrError('')
+    setSlotAddrSaving(true)
+    const { error } = await supabase
+      .from('orders')
+      .update({ address_id: addressId })
+      .eq('user_id', user!.id)
+      .eq('delivery_date', date)
+      .eq('meal_slot', slot)
+      .eq('walk_in', false)
+      .eq('fulfilment', 'delivery')
+      .in('status', ['scheduled', 'confirmed'])
+    setSlotAddrSaving(false)
+    if (error) {
+      setSlotAddrError(friendlyError(error, 'Could not change the address. Please try again.'))
+      return
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    setWeekOrders(prev => prev.map(o =>
+      o.delivery_date === date && o.meal_slot === slot && !o.walk_in && (o.fulfilment ?? 'delivery') === 'delivery'
+        && (o.status === 'scheduled' || o.status === 'confirmed')
+        ? { ...o, address_id: addressId } : o))
+    setShowSlotAddr(false)
   }
 
   // The new dish shows straight away; the swap saves in the background.
@@ -1064,6 +1104,23 @@ export default function SubscriptionScreen() {
   const heroEyebrow = heroIsToday
     ? `Today's ${selectedSlot}`
     : `${dowShort(selectedDay)} ${dayNum(selectedDay)}'s ${selectedSlot}`
+  // Customize goes straight to the full screen; the read-only sheet is only
+  // for a meal past its cutoff ("View details").
+  const openCartOrCustomize = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    if (heroLocked) { setAddMode(false); setShowDayModal(true); return }
+    router.push({ pathname: "/(app)/customize", params: { date: selectedDay, slot: selectedSlot } } as any)
+  }
+  const heroEyebrowTitle = heroEyebrow.charAt(0).toUpperCase() + heroEyebrow.slice(1)
+
+  // The selected lunch / dinner's delivery items and where they go. Open to
+  // change until the slot's cutoff (and not once the kitchen has started).
+  const slotAddrOrders = heroOrders.filter(o =>
+    !o.walk_in && (o.fulfilment ?? 'delivery') === 'delivery' && (o.status === 'scheduled' || o.status === 'confirmed'))
+  const slotAddrId = slotAddrOrders.find(o => !o.extra_dish && o.item_kind !== 'drink')?.address_id
+    ?? slotAddrOrders.find(o => o.address_id)?.address_id ?? null
+  const slotAddrShown = addresses.find(a => a.id === slotAddrId) ?? defaultAddress
+  const slotAddrOpen = slotAddrOrders.length > 0 && !heroLocked && addresses.length > 0
   // When this meal can still be changed: the slot's same-day cutoff.
   const cutoffClock = selectedSlot === 'lunch' ? '9 AM' : '2 PM'
   const cutoffDay = heroIsToday ? 'today' : selectedDay === addDaysISO(todayStr, 1) ? 'tomorrow' : `on ${dowShort(selectedDay)} ${dayNum(selectedDay)}`
@@ -1296,7 +1353,7 @@ export default function SubscriptionScreen() {
               )}
               <Pressable
                 style={({ pressed }) => [s.heroCustomizeBtn, { flex: heroLocked ? 1 : 1.4 }, pressed && { opacity: 0.85 }]}
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setAddMode(false); setShowDayModal(true) }}
+                onPress={openCartOrCustomize}
               >
                 <SlidersHorizontal size={15} color="#fff" strokeWidth={2} />
                 <Text style={s.heroCustomizeText}>{heroLocked ? 'View details →' : 'Customize →'}</Text>
@@ -1351,7 +1408,7 @@ export default function SubscriptionScreen() {
             <View style={s.heroCardBtns}>
               <Pressable
                 style={({ pressed }) => [s.heroCustomizeBtn, { flex: 1 }, pressed && { opacity: 0.85 }]}
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setAddMode(false); setShowDayModal(true) }}
+                onPress={openCartOrCustomize}
               >
                 <SlidersHorizontal size={15} color="#fff" strokeWidth={2} />
                 <Text style={s.heroCustomizeText}>{heroLocked ? 'View details →' : 'Customize →'}</Text>
@@ -1402,7 +1459,7 @@ export default function SubscriptionScreen() {
             {!heroLocked && slotSkipped.length === 0 && (
               <Pressable
                 style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }]}
-                onPress={() => { setAddMode(true); setShowDayModal(true) }}
+                onPress={openCartOrCustomize}
               >
                 <Plus size={14} color={Colors.primary} />
                 <Text style={s.heroAddBtnText}>Add {selectedSlot}</Text>
@@ -1457,18 +1514,38 @@ export default function SubscriptionScreen() {
           </Pressable>
         </View>
 
+        {/* Where the selected lunch / dinner goes — changeable until its cutoff.
+            The address book itself lives in Plan settings. */}
         <Pressable
-          style={({ pressed }) => [s.addrLinkRow, pressed && { opacity: 0.75 }]}
-          onPress={() => router.push('/(app)/addresses')}
+          style={({ pressed }) => [s.addrLinkRow, pressed && slotAddrOpen && { opacity: 0.75 }]}
+          onPress={() => {
+            if (addresses.length === 0) { router.push('/(app)/addresses'); return }
+            if (slotAddrOpen) { setSlotAddrError(''); setShowSlotAddr(true); return }
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+          }}
         >
           <MapPin size={17} color={Colors.primary} strokeWidth={1.75} />
           <View style={{ flex: 1 }}>
-            <Text style={s.infoTileLabel}>Delivery addresses</Text>
-            <Text style={s.addrLinkSub} numberOfLines={1}>
-              {defaultAddress ? `${defaultAddress.label} · ${addressText(defaultAddress)}` : 'Add where your meals should go'}
+            <Text style={s.infoTileLabel}>
+              {slotAddrOrders.length > 0 ? `${heroEyebrowTitle} goes to` : 'Delivery address'}
             </Text>
+            <Text style={s.addrLinkSub} numberOfLines={1}>
+              {addresses.length === 0
+                ? 'Add where your meals should go'
+                : slotAddrShown
+                  ? `${slotAddrShown.label} · ${addressText(slotAddrShown)}`
+                  : 'Add where your meals should go'}
+            </Text>
+            {slotAddrOrders.length > 0 && !slotAddrOpen && (
+              <Text style={s.addrLinkNote}>
+                Can't be changed now — {selectedSlot === 'lunch' ? 'lunch closes at 9 AM' : 'dinner closes at 2 PM'}
+              </Text>
+            )}
+            {slotAddrOrders.length === 0 && addresses.length > 0 && (
+              <Text style={s.addrLinkNote}>No delivery this {selectedSlot}</Text>
+            )}
           </View>
-          <ChevronRight size={15} color={Colors.textMuted} strokeWidth={2} />
+          {slotAddrOpen && <Text style={s.addrPickChange}>Change</Text>}
         </Pressable>
 
         {/* MEALS LEFT — an estimate from the wallet (079) */}
@@ -1762,6 +1839,62 @@ export default function SubscriptionScreen() {
         </Pressable>
       </Modal>
 
+      {/* Deliver this meal to — one lunch / dinner's address, before its cutoff */}
+      <Modal
+        visible={showSlotAddr}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSlotAddr(false)}
+      >
+        <Pressable style={s.dayModalOverlay} onPress={() => setShowSlotAddr(false)}>
+          <Pressable style={s.dayModalSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={s.dayModalHandle} />
+            <View style={s.dayModalHeader}>
+              <Text style={s.dayModalDate}>Deliver {heroIsToday ? `today's ${selectedSlot}` : heroEyebrow} to</Text>
+              <Pressable onPress={() => setShowSlotAddr(false)} hitSlop={10}>
+                <X size={20} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 20 + insets.bottom, gap: 8 }} showsVerticalScrollIndicator={false}>
+              <Text style={s.addrLinkNote}>
+                Only this {selectedSlot} changes. Change until {selectedSlot === 'lunch' ? '9 AM' : '2 PM'} {cutoffDay}.
+              </Text>
+              {addresses.map((addr) => {
+                const isSelected = slotAddrShown?.id === addr.id
+                return (
+                  <Pressable
+                    key={addr.id}
+                    disabled={slotAddrSaving}
+                    style={[s.addrPickRow, isSelected && s.addrPickRowActive]}
+                    onPress={() => {
+                      if (isSelected) { setShowSlotAddr(false); return }
+                      void changeSlotAddress(selectedDay, selectedSlot as 'lunch' | 'dinner', addr.id)
+                    }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.addrPickLabel, isSelected && { color: Colors.primary }]}>
+                        {addr.label}{addr.is_default ? ' · default' : ''}
+                      </Text>
+                      <Text style={s.addrPickLine1} numberOfLines={2}>{addressText(addr)}</Text>
+                    </View>
+                    {isSelected && <Check size={16} color={Colors.primary} strokeWidth={2.5} />}
+                  </Pressable>
+                )
+              })}
+              {slotAddrSaving && <ActivityIndicator color={Colors.primary} style={{ marginTop: 6 }} />}
+              {slotAddrError ? <Text style={s.addrLinkError}>{slotAddrError}</Text> : null}
+              <Pressable
+                onPress={() => { setShowSlotAddr(false); router.push('/(app)/addresses') }}
+                hitSlop={6}
+                style={{ marginTop: 6 }}
+              >
+                <Text style={s.addrPickChange}>Add or edit addresses →</Text>
+              </Pressable>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Wallet sheet — balance, meals it pays for, renew (no top-ups since 079) */}
       <Modal
         visible={showWallet}
@@ -1850,6 +1983,8 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 16, paddingVertical: 14, marginBottom: 12,
   },
   addrLinkSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  addrLinkNote: { fontFamily: Fonts.body, fontSize: 11, color: Colors.textMuted, marginTop: 3 },
+  addrLinkError: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.danger, marginTop: 4 },
   addToRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 },
   addToLabel: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted },
   addToChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: '#fff' },

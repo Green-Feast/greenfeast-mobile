@@ -11,7 +11,7 @@ import {
 import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ChevronLeft, CheckCircle2, SkipForward, XCircle, MapPin, Plus, Star } from 'lucide-react-native'
+import { ChevronLeft, CheckCircle2, SkipForward, XCircle, MapPin, Plus, Star, Store } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { useRatingStore } from '@/store/rating'
@@ -36,8 +36,12 @@ type HistoryOrder = {
   extra_dish: boolean | null
   cart_total: number | null
   delivered_at: string | null
+  walk_in: boolean | null
+  fulfilment: 'delivery' | 'pickup' | 'dine_in' | null
+  item_kind: 'meal' | 'drink' | null
   meal_templates: { name: string; image_url: string | null; kcal: number | null } | null
   addresses: { label: string | null } | null
+  pickup_locations: { name: string | null } | null
   order_addons: {
     kind: string
     label: string | null
@@ -48,8 +52,9 @@ type HistoryOrder = {
   }[]
 }
 
-type Group = { key: string; date: string; slot: 'lunch' | 'dinner'; orders: HistoryOrder[] }
-type Filter = 'all' | 'delivered' | 'skipped'
+// A walk-in (087) is its own card, apart from that slot's delivery.
+type Group = { key: string; rateKey: string; date: string; slot: 'lunch' | 'dinner'; walkIn: boolean; orders: HistoryOrder[] }
+type Filter = 'all' | 'delivered' | 'skipped' | 'walk_in'
 
 const PAGE = 20
 
@@ -59,8 +64,17 @@ const SKIP_TEXT: Record<string, string> = {
   insufficient_balance: 'Skipped — wallet was short',
   plan_finished: 'Skipped — plan had finished',
   kitchen_closed: 'Kitchen closed',
-  pause: 'Plan paused',
+  pause: 'Deliveries paused',
   not_delivered: "Couldn't be delivered",
+  walk_in_expired: 'Not collected',
+  off_day: 'Not a delivery day',
+}
+
+// "Dine-in at C-Scheme" / "Takeaway at Jawahar Nagar"
+function walkInText(o: HistoryOrder) {
+  const how = o.fulfilment === 'dine_in' ? 'Dine-in' : 'Takeaway'
+  const place = o.pickup_locations?.name
+  return place ? `${how} at ${place}` : how
 }
 
 function fmt(paise: number) {
@@ -74,8 +88,10 @@ function fmtDay(iso: string) {
 function groupOrders(rows: HistoryOrder[]): Group[] {
   const map = new Map<string, Group>()
   for (const o of rows) {
-    const key = `${o.delivery_date}|${o.meal_slot}`
-    if (!map.has(key)) map.set(key, { key, date: o.delivery_date, slot: o.meal_slot, orders: [] })
+    const walkIn = !!o.walk_in
+    const rateKey = `${o.delivery_date}|${o.meal_slot}`
+    const key = `${rateKey}|${walkIn ? 'walk_in' : 'delivery'}`
+    if (!map.has(key)) map.set(key, { key, rateKey, date: o.delivery_date, slot: o.meal_slot, walkIn, orders: [] })
     map.get(key)!.orders.push(o)
   }
   return Array.from(map.values())
@@ -123,17 +139,21 @@ export default function OrderHistoryScreen() {
   const loadPage = useCallback(async (offset: number, which: Filter): Promise<HistoryOrder[]> => {
     if (!user) return []
     const statuses = which === 'delivered' ? ['delivered'] : which === 'skipped' ? ['skipped', 'cancelled'] : ['delivered', 'skipped', 'cancelled']
-    const { data } = await supabase
+    let q = supabase
       .from('orders')
       .select(`
         id, delivery_date, meal_slot, status, skip_reason, quantity, extra_dish, cart_total, delivered_at,
+        walk_in, fulfilment, item_kind,
         meal_templates ( name, image_url, kcal ),
         addresses ( label ),
+        pickup_locations ( name ),
         order_addons ( kind, label, quantity, unit_price, sub_option, addons ( name, is_drink ) )
       `)
       .eq('user_id', user.id)
       .lte('delivery_date', istToday())
       .in('status', statuses)
+    if (which === 'walk_in') q = q.eq('walk_in', true)
+    const { data } = await q
       .order('delivery_date', { ascending: false })
       // 'dinner' < 'lunch': the day's dinner shows above its lunch.
       .order('meal_slot', { ascending: true })
@@ -222,7 +242,7 @@ export default function OrderHistoryScreen() {
         image: delivered.find((o) => o.meal_templates?.image_url)?.meal_templates?.image_url ?? null,
       },
       initialStars: stars,
-      existing: ratings.get(group.key) ?? null,
+      existing: ratings.get(group.rateKey) ?? null,
     })
   }
 
@@ -259,10 +279,10 @@ export default function OrderHistoryScreen() {
               </View>
             )}
             <View style={st.filterRow}>
-              {(['all', 'delivered', 'skipped'] as const).map((f) => (
+              {(['all', 'delivered', 'skipped', 'walk_in'] as const).map((f) => (
                 <Pressable key={f} onPress={() => setFilter(f)} style={[st.filterChip, filter === f && st.filterChipActive]}>
                   <Text style={[st.filterText, filter === f && st.filterTextActive]}>
-                    {f === 'all' ? 'All' : f === 'delivered' ? 'Delivered' : 'Skipped'}
+                    {f === 'all' ? 'All' : f === 'delivered' ? 'Delivered' : f === 'skipped' ? 'Skipped' : 'Walk-ins'}
                   </Text>
                 </Pressable>
               ))}
@@ -273,13 +293,24 @@ export default function OrderHistoryScreen() {
           loading ? (
             <ActivityIndicator color={Colors.primary} style={{ marginTop: 48 }} />
           ) : (
-            <Text style={st.empty}>No meals here yet — your delivered and skipped meals will show up here.</Text>
+            <Text style={st.empty}>
+              {filter === 'walk_in'
+                ? 'No walk-ins yet — meals you pick up or eat at our kitchen will show up here.'
+                : 'No meals here yet — your delivered, walk-in and skipped meals will show up here.'}
+            </Text>
           )
         }
         ListFooterComponent={loadingMore ? <ActivityIndicator color={Colors.primary} style={{ marginVertical: 16 }} /> : null}
         extraData={ratings}
         renderItem={({ item }) => (
-          <GroupCard group={item} charges={charges} rating={ratings.get(item.key) ?? null} onRate={(stars) => openRating(item, stars)} />
+          <GroupCard
+            group={item}
+            charges={charges}
+            rating={ratings.get(item.rateKey) ?? null}
+            // One rating per lunch / dinner: on the delivery card when there's one.
+            canRate={!item.walkIn || !groups.some((g) => g.rateKey === item.rateKey && !g.walkIn)}
+            onRate={(stars) => openRating(item, stars)}
+          />
         )}
       />
     </View>
@@ -290,11 +321,13 @@ function GroupCard({
   group,
   charges,
   rating,
+  canRate,
   onRate,
 }: {
   group: Group
   charges: Map<string, number>
   rating: MealRating | null
+  canRate: boolean
   onRate: (stars?: number) => void
 }) {
   const delivered = group.orders.filter((o) => o.status === 'delivered')
@@ -310,13 +343,19 @@ function GroupCard({
       <View style={st.cardHeader}>
         <View>
           <Text style={st.cardDate}>{fmtDay(group.date)}</Text>
-          <Text style={st.cardSlot}>{group.slot === 'lunch' ? 'Lunch' : 'Dinner'}</Text>
+          <Text style={st.cardSlot}>{group.walkIn ? 'Walk-in' : group.slot === 'lunch' ? 'Lunch' : 'Dinner'}</Text>
+          {group.walkIn && (
+            <View style={st.addrRow}>
+              <Store size={11} color={Colors.textMuted} />
+              <Text style={st.addrText}>{walkInText(first)}</Text>
+            </View>
+          )}
         </View>
         {allDelivered ? (
           <View style={[st.chip, st.chipDone]}>
             <CheckCircle2 size={13} color={Colors.primary} />
             <Text style={[st.chipText, { color: Colors.primary }]}>
-              Delivered{deliveredAt ? ` ${new Date(deliveredAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })}` : ''}
+              {group.walkIn ? 'Collected' : 'Delivered'}{deliveredAt ? ` ${new Date(deliveredAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })}` : ''}
             </Text>
           </View>
         ) : noneDelivered ? (
@@ -348,8 +387,10 @@ function GroupCard({
                 {o.meal_templates?.name ?? 'Meal'}
               </Text>
               <Text style={st.meta}>
-                {(o.quantity ?? 1)} portion{(o.quantity ?? 1) === 1 ? '' : 's'}
-                {o.extra_dish ? ' · extra dish' : ''}
+                {o.item_kind === 'drink'
+                  ? `Drink${(o.quantity ?? 1) > 1 ? ` ×${o.quantity}` : ''}`
+                  : `${o.quantity ?? 1} portion${(o.quantity ?? 1) === 1 ? '' : 's'}`}
+                {o.extra_dish && o.item_kind !== 'drink' ? ' · extra dish' : ''}
                 {o.meal_templates?.kcal ? ` · ${o.meal_templates.kcal * (o.quantity ?? 1)} kcal` : ''}
               </Text>
               {drink && <Text style={st.addons}>{drink}</Text>}
@@ -368,13 +409,17 @@ function GroupCard({
         )
       })}
 
-      {!noneDelivered && (rating || canStillRate(group.date)) && (
+      {canRate && !noneDelivered && (rating || canStillRate(group.date)) && (
         <RateRow rating={rating} editable={canStillRate(group.date)} onRate={onRate} />
       )}
 
       <View style={st.cardFooter}>
         <Text style={st.footerText}>
-          {noneDelivered ? 'Nothing charged — the meal stayed on your plan' : `${portions} meal${portions === 1 ? '' : 's'} from your plan`}
+          {noneDelivered
+            ? 'Nothing charged — the meal stayed on your plan'
+            : group.walkIn
+              ? `${portions} item${portions === 1 ? '' : 's'} from your wallet`
+              : `${portions} meal${portions === 1 ? '' : 's'} from your plan`}
         </Text>
         {!noneDelivered && <Text style={st.footerTotal}>{fmt(charged)}</Text>}
       </View>

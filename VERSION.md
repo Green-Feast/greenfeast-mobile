@@ -52,6 +52,20 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.17 — 2026-11-19
+- Build 10, OTA 17. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **Customize** on My Plan's meal card (and "Add lunch / dinner") opens the
+  Customize screen directly; the read-only sheet is only for a meal past its
+  cutoff. My Plan reloads when you come back to it.
+- **One meal's address**: My Plan's address row shows where the selected lunch
+  / dinner goes and changes just that slot until its cutoff.
+- **Order history** shows walk-ins as their own card (dine-in / takeaway and
+  place) with a Walk-ins filter; drinks show as drinks.
+- **Pause deliveries** (was "Pause subscription"): walk-ins stay open while
+  deliveries are paused (migration 098 keeps the pause job off walk-ins).
+- JS-only.
+
 ### 1.10.16 — 2026-11-19
 - Build 10, OTA 16. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.
