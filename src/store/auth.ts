@@ -73,8 +73,20 @@ export const useAuthStore = create<AuthState>()(
       profileLookupFailed: false,
       cachedUserId: null,
       hasHydrated: false,
+      // A token refresh (about hourly, and on coming back to the app) hands
+      // over a new user object for the same person. Screens fetch with
+      // `[user]` as a dependency, so a new object made My Plan, Home and the
+      // rest throw away what they showed and reload behind a spinner. Keep
+      // the same object unless something about the user actually changed.
       setSession: (session) =>
-        set({ session, user: session?.user ?? null, loading: false }),
+        set((state) => {
+          const next = session?.user ?? null
+          const prev = state.user
+          const same = !!prev && !!next && prev.id === next.id &&
+            prev.updated_at === next.updated_at && prev.email === next.email && prev.phone === next.phone &&
+            JSON.stringify(prev.user_metadata ?? {}) === JSON.stringify(next.user_metadata ?? {})
+          return { session, user: same ? prev : next, loading: false }
+        }),
       beginProfileLookup: () => set({ profileLoading: true, profileLookupFailed: false }),
       setProfileLoaded: (phone, name, onboarded, hasSubscription) =>
         set({

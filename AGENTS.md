@@ -299,6 +299,15 @@ reflect the latest commits, that's expected, not a bug to fix.
   update, guarded by `guard_customer_order_update` — before cutoff only). The address book itself is
   `addresses.tsx` (from Plan settings). A pause stops deliveries only — walk-ins stay open;
   `sync_pauses` skips walk-ins. Order history shows walk-ins as their own card ("Walk-ins" filter).
+- **Speed (101, 2026-11-20).** The database is quick (ms-level queries, 100 % cache hit); the waits were
+  client-side. (1) A token refresh gave the auth store a new `user` object, and every screen fetching
+  with `[user]` reloaded behind its spinner — `setSession` now keeps the same object for the same user,
+  and My Plan only spins before its first load. (2) supabase-js read the session from AsyncStorage
+  before every request, serialised — `src/lib/supabase.ts` keeps it in memory (writes still go to
+  disk). (3) 101: index on `order_addons(order_id)` (it was scanned whole on every lookup) and a few
+  others; RLS uses `(select auth.uid())`. (4) Admin: customer messages go out after the response
+  (`lib/background.ts`, next/server `after`). Edge-function cold starts (~0.4–1 s, more after long
+  idle) remain on the calls still made through functions (skip, pause, payments).
 - **Office adjustments (099, 2026-11-19).** On the subscriber's full profile in the admin:
   **Add paid meals** = `admin_add_paid_meals` — always meals × `default_meal_cost(sub)`; money
   received becomes a payment with proof (source `admin_paid_meals`, into the wallet), or "cash to

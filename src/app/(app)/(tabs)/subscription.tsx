@@ -275,6 +275,7 @@ export default function SubscriptionScreen() {
   const [addAddressId, setAddAddressId] = useState<string | null>(null)
   const [skipError, setSkipError] = useState('')
   const didAutoSync = useRef(false)
+  const loadedOnce = useRef(false)
   const stripRef = useRef<ScrollView | null>(null)
   const unavailableMeals = useAvailabilityStore((st) => st.unavailableMeals)
   const unavailableAddons = useAvailabilityStore((st) => st.unavailableAddons)
@@ -395,8 +396,10 @@ export default function SubscriptionScreen() {
 
   useEffect(() => {
     if (authLoading) return
-    setLoading(true)
-    fetchAll().finally(() => setLoading(false))
+    // The full-screen spinner only before the first load — later reloads
+    // (a token refresh, coming back to the tab) update what's on screen.
+    if (!loadedOnce.current) setLoading(true)
+    fetchAll().finally(() => { loadedOnce.current = true; setLoading(false) })
   }, [fetchAll, authLoading])
 
   // Back from Customize / Plan settings: reload quietly so the saved cart shows

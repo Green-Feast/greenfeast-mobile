@@ -44,10 +44,33 @@ const proxyAwareFetch: typeof fetch = async (input, init) => {
   })
 }
 
+// supabase-js reads the saved session from storage before every request, one
+// request at a time (behind its auth lock), so a screen firing a dozen
+// queries queued a dozen AsyncStorage reads. Only this client writes these
+// keys, so a copy in memory is always current: the first read comes from
+// AsyncStorage, the rest from memory, and every write still goes to disk.
+const memory = new Map<string, string | null>()
+const sessionStorage = {
+  async getItem(key: string): Promise<string | null> {
+    if (memory.has(key)) return memory.get(key) ?? null
+    const value = await AsyncStorage.getItem(key)
+    memory.set(key, value)
+    return value
+  },
+  async setItem(key: string, value: string): Promise<void> {
+    memory.set(key, value)
+    await AsyncStorage.setItem(key, value)
+  },
+  async removeItem(key: string): Promise<void> {
+    memory.set(key, null)
+    await AsyncStorage.removeItem(key)
+  },
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: { fetch: proxyAwareFetch },
   auth: {
-    storage: AsyncStorage,
+    storage: sessionStorage,
     autoRefreshToken: true,
     persistSession: true,
     // On web the OAuth redirect reloads the page, so supabase-js must pick up
