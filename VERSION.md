@@ -52,6 +52,16 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.16 — 2026-11-19
+- Build 10, OTA 16. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **New cart** (migration 097): a day's lunch / dinner opens a read-only cart
+  (items, add-ons, total; tapping a dish says to use Customize). **Customize**
+  is a full screen — the cart plus the whole menu by category with − / +,
+  add-ons per meal, drinks as their own sections, and a bottom bar against the
+  plan's default; saved with `save_day_cart`. **Skip** needs a double tap.
+- JS-only.
+
 ### 1.10.15 — 2026-11-19
 - Build 10, OTA 15. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.
