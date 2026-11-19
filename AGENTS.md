@@ -299,6 +299,14 @@ reflect the latest commits, that's expected, not a bug to fix.
   update, guarded by `guard_customer_order_update` — before cutoff only). The address book itself is
   `addresses.tsx` (from Plan settings). A pause stops deliveries only — walk-ins stay open;
   `sync_pauses` skips walk-ins. Order history shows walk-ins as their own card ("Walk-ins" filter).
+- **Office adjustments (099, 2026-11-19).** On the subscriber's full profile in the admin:
+  **Add paid meals** = `admin_add_paid_meals` — always meals × `default_meal_cost(sub)`; money
+  received becomes a payment with proof (source `admin_paid_meals`, into the wallet), or "cash to
+  collect" adds to `cod_due_paise` (on credit). Free meals stay Gift meals. **Record a delivery** =
+  `admin_record_delivery` — delivered items for today / an earlier day that never made it into the
+  app (address or counter), charged like a delivery ('Meal delivered …', meal_charge), skipped
+  rows of that slot replaced, `orders.office_note` says why. Refuses if the wallet is short or the
+  slot still has a live meal (Mark delivered is for that).
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for
