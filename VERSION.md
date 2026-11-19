@@ -52,6 +52,14 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.15 — 2026-11-19
+- Build 10, OTA 15. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **Next week's menu**: meals are made a week at a time on Sunday 7 PM
+  (migration 094). My Plan says a day's menu isn't out yet, instead of
+  "No lunch", for days after the published Sunday.
+- JS-only.
+
 ### 1.10.14 — 2026-11-19
 - Build 10, OTA 14. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`. Needs
