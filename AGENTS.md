@@ -306,7 +306,8 @@ reflect the latest commits, that's expected, not a bug to fix.
   `admin_record_delivery` — delivered items for today / an earlier day that never made it into the
   app (address or counter), charged like a delivery ('Meal delivered …', meal_charge), skipped
   rows of that slot replaced, `orders.office_note` says why. Refuses if the wallet is short or the
-  slot still has a live meal (Mark delivered is for that).
+  slot still has a live meal (Mark delivered is for that). Both need the action password and a
+  written reason (100: Add paid meals' reason is required in SQL and goes on the wallet entry).
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for
