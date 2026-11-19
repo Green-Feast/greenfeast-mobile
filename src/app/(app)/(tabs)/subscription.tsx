@@ -94,6 +94,7 @@ type CartLine = {
 }
 
 type OrderItem = {
+  item_kind?: 'meal' | 'drink' | null // 097: a drink is its own item
   id: string
   delivery_date: string
   meal_slot: string
@@ -298,7 +299,7 @@ export default function SubscriptionScreen() {
     const detailQueries = (subId: string) => Promise.all([
       supabase
         .from('orders')
-        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, delivered_at, fulfilment, pickup_location_id, pickup_code, walk_in, drink_template_id, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price, sub_option )')
+        .select('id, delivery_date, meal_slot, status, skip_reason, address_id, quantity, unit_price, switch_fee_paise, extra_dish, slot_seq, delivered_at, fulfilment, pickup_location_id, pickup_code, walk_in, drink_template_id, item_kind, meal_templates ( id, name, kcal, protein, carbs, fat, image_url ), order_addons ( id, addon_id, kind, label, quantity, unit_price, sub_option )')
         .eq('subscription_id', subId)
         .gte('delivery_date', today)
         .lte('delivery_date', endStr)
@@ -432,6 +433,47 @@ export default function SubscriptionScreen() {
 
   // Skips and un-skips show straight away and save in the background; if the
   // server refuses, the customer is told and the plan reloads to the truth.
+  // The cart sheet (097) is read-only: tapping a dish says where to change it,
+  // and Skip needs a double tap so nobody skips a meal by accident.
+  const [cartHint, setCartHint] = useState('')
+  const lastSkipTap = useRef(0)
+  function showCartHint(text: string) {
+    setCartHint(text)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setTimeout(() => setCartHint((h) => (h === text ? '' : h)), 2500)
+  }
+  function onSkipTap(date: string, slot: 'lunch' | 'dinner') {
+    const now = Date.now()
+    if (now - lastSkipTap.current > 450) {
+      lastSkipTap.current = now
+      showCartHint(`Double-tap Skip to skip this ${slot}.`)
+      return
+    }
+    lastSkipTap.current = 0
+    setCartHint('')
+    setSkipConfirm({ date, slot } as any)
+    void skipNow(date, slot)
+  }
+  async function skipNow(date: string, slot: 'lunch' | 'dinner') {
+    if (!sub) return
+    setSkipError('')
+    setSkipConfirm(null)
+    setShowDayModal(false)
+    setWeekOrders(prev => prev.map(o =>
+      o.delivery_date === date && o.meal_slot === slot && (o.status === 'scheduled' || o.status === 'confirmed')
+        ? { ...o, status: 'skipped', skip_reason: 'user' } : o))
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    try {
+      const { error } = await supabase.functions.invoke('manage-subscription', {
+        body: { action: 'skip', subscription_id: sub.id, delivery_date: date, meal_slot: slot },
+      })
+      if (error) Alert.alert('Could not skip this meal', await extractFunctionErrorMessage(error, 'Please try again.'))
+    } catch {
+      Alert.alert('Could not skip this meal', 'Please check your connection and try again.')
+    }
+    fetchAll()
+  }
+
   async function handleSkipConfirm() {
     if (!skipConfirm || !sub) return
     const { date, slot } = skipConfirm
@@ -1586,449 +1628,87 @@ export default function SubscriptionScreen() {
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
             >
-              {/* Current meal */}
-              {dayOrder ? (
-                <View style={s.dayModalCurrentSection}>
-                  <Text style={s.dayModalSectionLabel}>Your meal</Text>
-                  <View style={s.dayModalCurrentCard}>
-                    {dayOrder.meal_templates?.image_url && (
-                      <Image
-                        source={{ uri: dayOrder.meal_templates.image_url }}
-                        style={s.dayModalCurrentImg}
-                        contentFit="cover"
-                        cachePolicy="memory-disk"
-                        transition={200}
-                      />
-                    )}
-                    <Text style={s.dayModalCurrentName}>
-                      {dayOrder.meal_templates?.name ?? 'Your meal'}
-                    </Text>
-                    {(dayOrder.meal_templates?.kcal || dayOrder.meal_templates?.protein) && (
-                      <Text style={s.dayModalCurrentMeta}>
-                        {dayOrder.meal_templates.kcal ? `${dayOrder.meal_templates.kcal} kcal` : ''}
-                        {dayOrder.meal_templates.kcal && dayOrder.meal_templates.protein ? ' · ' : ''}
-                        {dayOrder.meal_templates.protein ? `${dayOrder.meal_templates.protein}g protein` : ''}
+              {/* The cart (097): read-only — every change happens in Customize. */}
+              {(() => {
+                const items = [...daySlotOrders].sort((x, y) =>
+                  (x.item_kind === 'drink' ? 1 : 0) - (y.item_kind === 'drink' ? 1 : 0) || (x.slot_seq ?? 0) - (y.slot_seq ?? 0))
+                const addonName = (id: string | null) => allAddons.find((x) => x.id === id)?.name ?? 'Add-on'
+                const lineTotal = (o: OrderItem) =>
+                  (o.unit_price ?? 0) * (o.quantity ?? 1) +
+                  (o.order_addons ?? []).reduce((n, l) => n + (l.unit_price ?? 0) * (l.quantity ?? 1), 0)
+                const total = items.reduce((n, o) => n + lineTotal(o), 0)
+                const slotName = selectedSlot === 'lunch' ? 'lunch' : 'dinner'
+                return (
+                  <View style={s.dayModalCurrentSection}>
+                    <Text style={s.dayModalSectionLabel}>Your {slotName}</Text>
+                    {items.length === 0 ? (
+                      <Text style={s.dayModalNoOrderText}>
+                        {menuNotOut(selectedDay)
+                          ? `This day's menu isn't out yet — your ${slotName} appears on Sunday evening. You can still set one up in Customize.`
+                          : `Nothing in your ${slotName} — add something in Customize.`}
                       </Text>
-                    )}
-                    <View style={s.dayModalStatusRow}>
-                      <Text style={s.dayModalStatus}>{statusLabel(dayOrder.status)}</Text>
-                    </View>
-                  </View>
-
-                  {renderAddressPicker(dayOrder)}
-
-                  {/* Portions stepper for the base meal */}
-                  {!dayEditLocked && (
-                    <View style={s.qtyRow}>
-                      <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={s.qtyLabel}>Portions</Text>
-                        <Text style={s.qtySub}>
-                          {(dayOrder.quantity ?? 1) <= 1
-                            ? 'Billed on delivery · − skips this meal'
-                            : 'Fewer portions = fewer meals and less from your wallet'}
-                        </Text>
-                      </View>
-                      <View style={s.qtyStepper}>
+                    ) : items.map((o) => {
+                      const lines = (o.order_addons ?? []).filter((l) => l.kind === 'addon' && l.addon_id && (l.quantity ?? 0) > 0)
+                      return (
                         <Pressable
-                          style={[s.qtyBtn, cartBusy && { opacity: 0.4 }]}
-                          onPress={() => {
-                            // The last portion: that's a skip (asks first).
-                            if ((dayOrder.quantity ?? 1) <= 1) setSkipConfirm({ date: selectedDay, slot: selectedSlot })
-                            else handleCartOp(dayOrder.id, 'dec_qty')
-                          }}
-                          disabled={cartBusy}
-                          hitSlop={8}
+                          key={o.id}
+                          style={({ pressed }) => [s.cartItemRow, pressed && { opacity: 0.7 }]}
+                          onPress={() => showCartHint(dayLocked ? `This ${slotName} is already being prepared.` : 'Tap Customize to change your cart.')}
                         >
-                          <Text style={s.qtyBtnText}>−</Text>
-                        </Pressable>
-                        <Text style={s.qtyValue} maxFontSizeMultiplier={1.3}>{dayOrder.quantity ?? 1}</Text>
-                        <Pressable
-                          style={[s.qtyBtn, cartBusy && { opacity: 0.4 }]}
-                          onPress={() => handleCartOp(dayOrder.id, 'inc_qty')}
-                          disabled={cartBusy}
-                          hitSlop={8}
-                        >
-                          <Text style={s.qtyBtnText}>+</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  )}
-
-                  {/* Extra dishes added to this slot — each can go to its own address */}
-                  {dayExtras.map((ex) => (
-                    <View key={ex.id}>
-                      <View style={s.extraRow}>
-                        <Plus size={14} color={Colors.primary} />
-                        <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
-                        <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
-                        {!dayEditLocked && (
-                          <Pressable
-                            style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
-                            onPress={() => handleRemoveDish(ex.id)}
-                            disabled={cartBusy}
-                          >
-                            <Text style={s.addonRemoveText}>Remove</Text>
-                          </Pressable>
-                        )}
-                      </View>
-                      {addresses.length > 1 && renderAddressPicker(ex)}
-                    </View>
-                  ))}
-
-                  {/* Your drink (088) — the day's smoothie. Change swaps it for
-                      another deliverable drink (update-day-cart set_drink, no
-                      price change); locked like the meal after the cutoff.
-                      A day without a drink can add one (a one-off, billed as
-                      the add-on), and remove it again. */}
-                  {(dayDrink || (!dayEditLocked && drinkAddon && isAddonAvailable({ unavailableAddons }, selectedDay, drinkAddon.id))) && (
-                    <View style={s.addonEditWrap}>
-                      <Text style={s.addonEditHead}>Your drink</Text>
-                      {dayDrink ? (
-                        <>
-                          <View style={s.drinkCard}>
-                            {dayDrink.dish?.image_url ? (
-                              <Image source={{ uri: dayDrink.dish.image_url }} style={s.mealRowThumb} contentFit="cover" cachePolicy="memory-disk" />
-                            ) : (
-                              <View style={s.mealRowPlaceholder}>
-                                <Text style={{ fontSize: 22 }}>🥤</Text>
-                              </View>
-                            )}
-                            <View style={s.mealRowInfo}>
-                              <Text style={s.mealRowName} numberOfLines={2}>{dayDrink.name}</Text>
-                              <Text style={s.mealRowMeta}>
-                                {dayDrink.dish
-                                  ? [dayDrink.dish.kcal ? `${dayDrink.dish.kcal} kcal` : null, dayDrink.dish.protein ? `${dayDrink.dish.protein}g protein` : null].filter(Boolean).join(' · ') || dayDrink.dish.category
-                                  : 'Our kitchen picks it for you'}
-                              </Text>
-                            </View>
-                            {!dayEditLocked && deliverableDrinks.some((d) => d.id !== dayDrink.dish?.id) && (
-                              <Pressable
-                                onPress={() => { setDrinkError(''); setPickingDrinkFor(pickingDrinkFor === dayOrder.id ? null : dayOrder.id) }}
-                                hitSlop={8}
-                              >
-                                <Text style={s.addrPickChange}>{pickingDrinkFor === dayOrder.id ? 'Close' : 'Change'}</Text>
-                              </Pressable>
-                            )}
-                          </View>
-                          {drinkError ? <Text style={[s.dayModalSwapError, { marginTop: 8, marginBottom: 0 }]}>{drinkError}</Text> : null}
-                          {!dayEditLocked && pickingDrinkFor === dayOrder.id && (
-                            <View style={{ marginTop: 6 }}>
-                              {deliverableDrinks.map((d) => {
-                                const isCurrent = d.id === dayDrink.dish?.id
-                                const available = isMealAvailable({ unavailableMeals }, selectedDay, d.id)
-                                return (
-                                  <Pressable
-                                    key={d.id}
-                                    style={({ pressed }) => [
-                                      s.mealRow,
-                                      isCurrent && s.mealRowCurrent,
-                                      !available && { opacity: 0.5 },
-                                      pressed && !isCurrent && available && { opacity: 0.7 },
-                                    ]}
-                                    onPress={() => { if (!isCurrent && available) handleSetDrink(dayOrder.id, d.id) }}
-                                    disabled={isCurrent || !available}
-                                  >
-                                    {d.image_url ? (
-                                      <Image source={{ uri: d.image_url }} style={s.mealRowThumb} contentFit="cover" cachePolicy="memory-disk" />
-                                    ) : (
-                                      <View style={s.mealRowPlaceholder}>
-                                        <Text style={{ fontSize: 22 }}>🥤</Text>
-                                      </View>
-                                    )}
-                                    <View style={s.mealRowInfo}>
-                                      <Text style={s.mealRowName} numberOfLines={2}>{d.name}</Text>
-                                      <Text style={s.mealRowMeta}>
-                                        {!available
-                                          ? 'Not available on this day'
-                                          : [d.kcal ? `${d.kcal} kcal` : null, d.protein ? `${d.protein}g protein` : null].filter(Boolean).join(' · ') || d.category}
-                                      </Text>
-                                    </View>
-                                    {isCurrent ? (
-                                      <View style={s.mealRowCurrentBadge}>
-                                        <Check size={14} color={Colors.primary} strokeWidth={2.5} />
-                                      </View>
-                                    ) : available ? (
-                                      <View style={[s.switchBadge, s.switchBadgeFree]}>
-                                        <Text style={[s.switchBadgeText, s.switchBadgeTextFree]} maxFontSizeMultiplier={1.3}>Pick</Text>
-                                      </View>
-                                    ) : null}
-                                  </Pressable>
-                                )
-                              })}
-                            </View>
-                          )}
-                          {!dayEditLocked && !defaultAddonIds.has(dayDrink.line.addon_id ?? '') && (
-                            <Pressable
-                              style={[s.addonRemoveBtn, { alignSelf: 'flex-start', marginTop: 10 }, cartBusy && { opacity: 0.4 }]}
-                              onPress={() => handleCartOp(dayOrder.id, 'remove_addon', dayDrink.line.addon_id ?? undefined)}
-                              disabled={cartBusy}
-                            >
-                              <Text style={s.addonRemoveText}>Remove drink</Text>
-                            </Pressable>
-                          )}
-                        </>
-                      ) : drinkAddon ? (
-                        <View style={s.addonEditRow}>
+                          {o.meal_templates?.image_url
+                            ? <Image source={{ uri: o.meal_templates.image_url }} style={s.cartItemImg} contentFit="cover" cachePolicy="memory-disk" />
+                            : <View style={[s.cartItemImg, { backgroundColor: Colors.surface }]} />}
                           <View style={{ flex: 1 }}>
-                            <Text style={s.addonEditName}>{DRINK_NAME}</Text>
-                            <Text style={s.addonEditPrice}>Smoothie with this meal · ₹{fmt(drinkAddon.price_per_meal)}</Text>
-                          </View>
-                          <Pressable
-                            style={[s.addonAddBtn, cartBusy && { opacity: 0.4 }]}
-                            onPress={() => handleCartOp(dayOrder.id, 'add_addon', drinkAddon.id)}
-                            disabled={cartBusy}
-                          >
-                            <Plus size={13} color={Colors.primary} />
-                            <Text style={s.addonAddText}>Add</Text>
-                          </Pressable>
-                        </View>
-                      ) : null}
-                    </View>
-                  )}
-
-                  {/* Add-ons for this day — a stepper once one's on the order
-                      (quantity > 1 is billed as unit_price × quantity by
-                      recompute_order_cart already), a plain Add button
-                      before that. A default add-on's stepper floors at 1
-                      rather than letting it reach 0 — mirrors the server's
-                      cannot_remove_default_addon guard on remove_addon. */}
-                  {!dayEditLocked && dayEditableAddons.length > 0 && (
-                    <View style={s.addonEditWrap}>
-                      <Text style={s.addonEditHead}>Add-ons for this day</Text>
-                      {dayEditableAddons.map((a) => {
-                        const on = dayOrderAddonIds.has(a.id)
-                        const isDefault = defaultAddonIds.has(a.id)
-                        const qty = dayOrderAddonQty.get(a.id) ?? 1
-                        const available = isAddonAvailable({ unavailableAddons }, selectedDay, a.id)
-                        return (
-                          <View key={a.id} style={[s.addonEditRow, !available && { opacity: 0.5 }]}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={s.addonEditName}>{a.name}</Text>
-                              <Text style={s.addonEditPrice}>
-                                ₹{fmt(a.price_per_meal * (on ? qty : 1))}
-                                {isDefault ? ' · in your plan' : ''}
-                                {!available ? ' · not available today' : ''}
+                            <Text style={s.cartItemName}>
+                              {o.item_kind === 'drink' ? 'Drink · ' : ''}{o.meal_templates?.name ?? 'Your meal'}
+                            </Text>
+                            {lines.length > 0 && (
+                              <Text style={s.cartItemSub}>
+                                {lines.map((l) => `${addonName(l.addon_id)}${(l.quantity ?? 1) > 1 ? ` ×${l.quantity}` : ''}`).join(' · ')}
                               </Text>
-                            </View>
-                            {!available ? null : on ? (
-                              <View style={s.qtyStepper}>
-                                <Pressable
-                                  style={[s.qtyBtn, (cartBusy || (isDefault && qty <= 1)) && { opacity: 0.4 }]}
-                                  onPress={() => handleCartOp(dayOrder.id, 'dec_addon_qty', a.id)}
-                                  disabled={cartBusy || (isDefault && qty <= 1)}
-                                  hitSlop={8}
-                                >
-                                  <Text style={s.qtyBtnText}>−</Text>
-                                </Pressable>
-                                <Text style={s.qtyValue} maxFontSizeMultiplier={1.3}>{qty}</Text>
-                                <Pressable
-                                  style={[s.qtyBtn, cartBusy && { opacity: 0.4 }]}
-                                  onPress={() => handleCartOp(dayOrder.id, 'inc_addon_qty', a.id)}
-                                  disabled={cartBusy}
-                                  hitSlop={8}
-                                >
-                                  <Text style={s.qtyBtnText}>+</Text>
-                                </Pressable>
-                              </View>
-                            ) : (
-                              <Pressable
-                                style={[s.addonAddBtn, cartBusy && { opacity: 0.4 }]}
-                                onPress={() => handleCartOp(dayOrder.id, 'add_addon', a.id)}
-                                disabled={cartBusy}
-                              >
-                                <Plus size={13} color={Colors.primary} />
-                                <Text style={s.addonAddText}>Add</Text>
-                              </Pressable>
                             )}
                           </View>
-                        )
-                      })}
-                    </View>
-                  )}
-
-                  {/* Cart total for the day — everything is billed on delivery */}
-                  <View style={s.cartSummary}>
-                    <View style={s.cartSummaryRow}>
-                      <Text style={s.cartSummaryLabel}>Meals & add-ons</Text>
-                      <Text style={s.cartSummaryVal}>₹{fmt(dayMealsAddons)}</Text>
-                    </View>
-                    <View style={s.cartSummaryTotalRow}>
-                      <Text style={s.cartSummaryTotalLabel}>Day total</Text>
-                      <Text style={s.cartSummaryTotalVal}>₹{fmt(dayTotal)}</Text>
-                    </View>
-                    <Text style={s.cartBilledNote}>Billed from your wallet on delivery</Text>
-                    {lowBalance && (
-                      <Pressable
-                        style={s.lowBalRow}
-                        onPress={() => { setShowDayModal(false); setShowWallet(true) }}
-                      >
-                        <AlertCircle size={14} color={Colors.accentText} />
-                        <Text style={s.lowBalText}>Your wallet doesn't cover this day — see wallet →</Text>
-                      </Pressable>
+                          <Text style={s.cartItemQty}>×{o.quantity ?? 1}</Text>
+                        </Pressable>
+                      )
+                    })}
+                    {items.length > 0 && (
+                      <View style={s.cartTotalRow}>
+                        <Text style={s.cartTotalLabel}>Total</Text>
+                        <Text style={s.cartTotalVal}>₹{fmt(total)}</Text>
+                      </View>
                     )}
-                  </View>
-                </View>
-              ) : (
-                <View style={s.dayModalCurrentSection}>
-                  <View style={s.dayModalNoOrder}>
-                    <Text style={s.dayModalNoOrderText}>
-                      {menuNotOut(selectedDay)
-                        ? `This day's menu isn't out yet — your ${selectedSlot} appears on Sunday evening. You can still add a dish yourself below.`
-                        : dayHasNothing ? 'Nothing scheduled — pick a dish below to add one' : `No ${selectedSlot} scheduled — add a dish below`}
-                    </Text>
-                  </View>
+                    <Text style={s.cartBilledNote}>Paid from your wallet when it's delivered</Text>
+                    {cartHint ? <Text style={s.cartHintText}>{cartHint}</Text> : null}
 
-                  {/* Extra dishes already added to this slot (extras-only — no base order) */}
-                  {dayExtras.map((ex) => (
-                    <View key={ex.id}>
-                      <View style={s.extraRow}>
-                        <Plus size={14} color={Colors.primary} />
-                        <Text style={s.extraName}>{ex.meal_templates?.name ?? 'Extra dish'}</Text>
-                        <Text style={s.extraTag}>+₹{fmt(orderBase(ex))}</Text>
-                        {!dayLocked && (
-                          <Pressable
-                            style={[s.addonRemoveBtn, cartBusy && { opacity: 0.4 }]}
-                            onPress={() => handleRemoveDish(ex.id)}
-                            disabled={cartBusy}
-                          >
-                            <Text style={s.addonRemoveText}>Remove</Text>
+                    {dayLocked ? (
+                      <View style={s.dayModalLockBanner}>
+                        <Text style={s.dayModalLockText}>🔒 Changes for this {slotName} are closed</Text>
+                        <Text style={s.dayModalLockSub}>{selectedSlot === 'lunch' ? 'Lunch closes at 9 AM' : 'Dinner closes at 2 PM'} on the day</Text>
+                      </View>
+                    ) : (
+                      <View style={s.cartBtns}>
+                        {items.length > 0 && (
+                          <Pressable style={s.cartSkipBtn} onPress={() => onSkipTap(selectedDay, selectedSlot as 'lunch' | 'dinner')}>
+                            <Text style={s.cartSkipText}>Skip</Text>
                           </Pressable>
                         )}
+                        <Pressable
+                          style={s.cartCustomizeBtn}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                            setShowDayModal(false)
+                            router.push({ pathname: '/(app)/customize', params: { date: selectedDay, slot: selectedSlot } } as any)
+                          }}
+                        >
+                          <SlidersHorizontal size={15} color="#fff" strokeWidth={2} />
+                          <Text style={s.cartCustomizeText}>Customize</Text>
+                        </Pressable>
                       </View>
-                      {renderAddressPicker(ex)}
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Swap / Add section — effectiveAddMode alone (not just dayOrder
-                  or addRefOrder) covers the fully-off-day case: zero orders in
-                  any slot on this date, so there's no reference order to swap
-                  or add against yet. effectiveAddMode is already true there
-                  (it's !dayOrder || addMode, and dayOrder is null), which is
-                  exactly what routes the tap handler below to the off-day
-                  add-dish path instead of the normal reference-order one. */}
-              {(dayOrder || addRefOrder || effectiveAddMode) && (
-                <View style={s.dayModalSwapSection}>
-                  {dayLocked ? (
-                    <View style={s.dayModalLockBanner}>
-                      <Text style={s.dayModalLockText}>🔒 Changes for this day are locked</Text>
-                      <Text style={s.dayModalLockSub}>
-                        {`${selectedSlot === 'lunch' ? 'Lunch closes at 9 AM' : 'Dinner closes at 2 PM'} on delivery day`}
-                      </Text>
-                    </View>
-                  ) : (
-                    <>
-                      {/* Swap / Add toggle — only meaningful when there's a base meal to swap */}
-                      {dayOrder && (
-                        <View style={s.modeToggle}>
-                          <Pressable
-                            style={[s.modeBtn, !addMode && s.modeBtnActive]}
-                            onPress={() => { setAddMode(false); setSwapError('') }}
-                          >
-                            <Text style={[s.modeBtnText, !addMode && s.modeBtnTextActive]}>Swap meal</Text>
-                          </Pressable>
-                          <Pressable
-                            style={[s.modeBtn, addMode && s.modeBtnActive]}
-                            onPress={() => { setAddMode(true); setSwapError('') }}
-                          >
-                            <Text style={[s.modeBtnText, addMode && s.modeBtnTextActive]}>Add a dish</Text>
-                          </Pressable>
-                        </View>
-                      )}
-                      <Text style={s.dayModalSectionLabel}>
-                        {effectiveAddMode ? (dayOrder ? 'Add another dish to this slot' : `Add a ${selectedSlot} dish`) : 'Swap for something else'}
-                      </Text>
-                      {effectiveAddMode && addresses.length > 1 && (
-                        <View style={s.addToRow}>
-                          <Text style={s.addToLabel}>Deliver it to</Text>
-                          {addresses.map((a) => (
-                            <Pressable
-                              key={a.id}
-                              onPress={() => setAddAddressId(a.id)}
-                              style={[s.addToChip, addTarget === a.id && s.addToChipActive]}
-                            >
-                              <Text style={[s.addToChipText, addTarget === a.id && s.addToChipTextActive]}>{a.label}</Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                      )}
-                      {swapError ? (
-                        <View style={s.swapErrorRow}>
-                          <Text style={s.dayModalSwapError}>{swapError}</Text>
-                          {swapError.includes('balance') && (
-                            <Pressable onPress={() => { setShowDayModal(false); setSwapError(''); setShowWallet(true) }}>
-                              <Text style={s.swapErrorLink}>See wallet →</Text>
-                            </Pressable>
-                          )}
-                        </View>
-                      ) : null}
-                      {allMeals.map((meal) => {
-                        const isCurrent = !effectiveAddMode && !!dayOrder && meal.id === dayOrder.meal_templates?.id
-                        const available = isMealAvailable({ unavailableMeals }, selectedDay, meal.id)
-                        return (
-                          <Pressable
-                            key={meal.id}
-                            style={({ pressed }) => [
-                              s.mealRow,
-                              isCurrent && s.mealRowCurrent,
-                              !available && { opacity: 0.5 },
-                              pressed && !isCurrent && available && { opacity: 0.7 },
-                            ]}
-                            onPress={() => {
-                              if (swapping || isCurrent || !available) return
-                              if (effectiveAddMode) {
-                                // addRefOrder is null on a fully-off day (zero
-                                // orders in any slot) — add-dish then has no
-                                // reference order to derive subscription/date/
-                                // address from, so pass them directly instead.
-                                if (addRefOrder) handleAddDish(addRefOrder.id, meal.id, selectedSlot)
-                                else handleAddDishOffDay(sub.id, selectedDay, selectedSlot, meal.id)
-                              } else if (dayOrder) {
-                                handleSwapMeal(dayOrder.id, meal.id)
-                              }
-                            }}
-                            disabled={swapping || isCurrent || !available}
-                          >
-                            {meal.image_url ? (
-                              <Image source={{ uri: meal.image_url }} style={s.mealRowThumb} contentFit="cover" cachePolicy="memory-disk" />
-                            ) : (
-                              <View style={s.mealRowPlaceholder}>
-                                <Text style={s.mealRowCategory}>{meal.category[0].toUpperCase()}</Text>
-                              </View>
-                            )}
-                            <View style={s.mealRowInfo}>
-                              <Text style={s.mealRowName} numberOfLines={2}>{meal.name}</Text>
-                              <Text style={s.mealRowMeta}>
-                                {!available
-                                  ? 'Not available on this day'
-                                  : meal.kcal ? `${meal.kcal} kcal` : meal.category}
-                                {available && meal.protein ? ` · ${meal.protein}g protein` : ''}
-                              </Text>
-                            </View>
-                            {isCurrent && (
-                              <View style={s.mealRowCurrentBadge}>
-                                <Check size={14} color={Colors.primary} strokeWidth={2.5} />
-                              </View>
-                            )}
-                            {!isCurrent && !swapping && available && (
-                              <View style={[s.switchBadge, s.switchBadgeFree]}>
-                                <Text style={[s.switchBadgeText, s.switchBadgeTextFree]} maxFontSizeMultiplier={1.3}>
-                                  {effectiveAddMode ? 'Add' : 'Swap'}
-                                </Text>
-                              </View>
-                            )}
-                            {swapping && !isCurrent && (
-                              <ActivityIndicator size="small" color={Colors.textLight} />
-                            )}
-                          </Pressable>
-                        )
-                      })}
-                      <View style={{ height: 32 }} />
-                    </>
-                  )}
-                </View>
-              )}
+                    )}
+                  </View>
+                )
+              })()}
 
             </ScrollView>
           </View>
@@ -2338,6 +2018,22 @@ const s = StyleSheet.create({
     borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: 'transparent',
   },
   viewTransactionsBtnText: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.primary },
+
+  // Cart sheet (097)
+  cartItemRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.borderFaint },
+  cartItemImg: { width: 48, height: 48, borderRadius: 12 },
+  cartItemName: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+  cartItemSub: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  cartItemQty: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.primary },
+  cartTotalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
+  cartTotalLabel: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
+  cartTotalVal: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text },
+  cartHintText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary, marginTop: 10, textAlign: 'center' },
+  cartBtns: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  cartSkipBtn: { paddingHorizontal: 22, borderRadius: 999, borderWidth: 1.5, borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', minHeight: 50 },
+  cartSkipText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.textMuted },
+  cartCustomizeBtn: { flex: 1, flexDirection: 'row', gap: 8, backgroundColor: Colors.primary, borderRadius: 999, alignItems: 'center', justifyContent: 'center', minHeight: 50 },
+  cartCustomizeText: { fontFamily: Fonts.bodySemi, fontSize: 15, color: '#fff' },
 
   // Wallet sheet
   walletMealsLine: { fontFamily: Fonts.bodySemi, fontSize: 15, color: Colors.primary, marginTop: -12, marginBottom: 6 },

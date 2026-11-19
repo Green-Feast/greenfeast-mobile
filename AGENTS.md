@@ -281,6 +281,19 @@ reflect the latest commits, that's expected, not a bug to fix.
   → ₹249; `_shared/pricing.ts`, the app's plan screens and the admin's `lib/pricing.ts` match); the
   rest is `rounding_income`, booked once the plan is fully paid (`book_rounding_income`). Reports:
   `money_ledger_rows`, `money_month_summary`, `money_checks` (admin → Money).
+- **The cart is items (097, 2026-11-19).** A lunch / dinner cart = `orders` rows with `item_kind`
+  'meal' (dish × qty, each with its own `order_addons` lines) or 'drink' (smoothie / coffee dish ×
+  qty, no add-ons). `unit_price` = plan meal price + `meal_templates.premium_paise` (meal) or
+  `drink_price()` (drink) — it **no longer includes add-ons**; every add-on is a priced line (plan
+  ones `is_plan`). Default per slot: M = `meals_lunch/dinner`, D = `plan_slot_drinks()` (=
+  `drinks_lunch/dinner`, or M when the plan has the drink add-on), plan add-ons on M meals — made by
+  `make_default_cart` (the order run, `resync_plan_orders`). **The minimum** (customers and office):
+  on a slot the plan delivers (`slot_default_applies`) meals ≥ M, drinks ≥ D, plan add-ons on ≥ M —
+  else skip. Customize (`app/(app)/customize.tsx`) saves a whole slot with `save_day_cart`; the older
+  per-item functions and the admin day editor check `slot_cart_state` before removing anything. A
+  drink add-on line written by an old writer becomes a drink item (trigger
+  `order_addons_drink_to_item`). Walk-ins keep the old shape. The cart sheet in My Plan is read-only
+  (tap → "Tap Customize"); Skip there and in Customize needs a double tap.
 - **Renewing early (069, 2026-10-28).** My Plan offers Renew from 2 meals left
   (`RENEW_FROM_MEALS_LEFT`, the renewal reminder's threshold), only for an active plan with no
   cash due — `renew-subscription` refuses paused / cash-due plans, and plans with a pause set for
