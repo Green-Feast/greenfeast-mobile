@@ -67,6 +67,7 @@ const SKIP_TEXT: Record<string, string> = {
   pause: 'Deliveries paused',
   not_delivered: "Couldn't be delivered",
   walk_in_expired: 'Not collected',
+  walk_in_missed: 'Not collected',
   off_day: 'Not a delivery day',
 }
 

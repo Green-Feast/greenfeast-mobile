@@ -43,6 +43,8 @@ type Today = {
   portions: number
   cost: number | null
   closes: string
+  // 103: the code works for an hour (or until closing, if sooner)
+  valid_until?: string
   addons: { name: string; sub_option: string | null }[]
   // 102: the whole cart (absent on a walk-in from before it)
   items?: { kind: 'meal' | 'drink'; name: string | null; qty: number; addons: { name: string; qty: number }[] }[]
@@ -163,7 +165,7 @@ function TodayCard({ today }: { today: Today }) {
         {today.cost != null && <Text style={st.rowSub}>₹{fmt(today.cost)} from your wallet{done ? '' : ' when it’s handed over'}</Text>}
       </View>
       {!done && (
-        <Text style={st.small}>Valid until {today.closes} today. If you don&apos;t come, it isn&apos;t charged.</Text>
+        <Text style={st.small}>Valid until {today.valid_until ?? today.closes} today. If you don&apos;t come, it isn&apos;t charged.</Text>
       )}
     </View>
   )

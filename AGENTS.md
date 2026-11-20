@@ -306,6 +306,12 @@ reflect the latest commits, that's expected, not a bug to fix.
   orders row per item, all `walk_in` with the same `pickup_code`; `todays_walk_in` returns the cart
   (`items`); `redeem_pickup` hands over and bills every item under the code, or none if the wallet is
   short. Old app builds still use `start_walk_in` (a cart of one). Admin Counter shows one entry per code.
+- **Missed walk-ins (103, 2026-11-20).** A walk-in code is live at the Counter for an hour (`valid_until`
+  in `todays_walk_in`; or closing, if sooner). `settle_pickups` (every 5 min) then moves it to
+  status cancelled / skip_reason `walk_in_missed` — uncharged; the customer can start another. For 7 days the
+  Counter's Missed walk-ins list can mark it served (`admin_charge_missed_walk_in`: the cart as ordered, billed
+  via advance_order_delivered, action password + reason in `office_note`) or not served
+  (`admin_dismiss_missed_walk_in` → `walk_in_expired`). Unanswered after 7 days → `walk_in_expired`.
 - **Speed (101, 2026-11-20).** The database is quick (ms-level queries, 100 % cache hit); the waits were
   client-side. (1) A token refresh gave the auth store a new `user` object, and every screen fetching
   with `[user]` reloaded behind its spinner — `setSession` now keeps the same object for the same user,

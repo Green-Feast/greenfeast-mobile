@@ -409,7 +409,7 @@ export default function WalkInCartScreen() {
           <Text style={st.barTotal}>{rupees(total)}</Text>
         </View>
         {error ? <Text style={st.error}>{error}</Text> : problem ? <Text style={st.barHint}>{problem}</Text> : (
-          <Text style={st.barHint}>Paid from your wallet when the counter hands it over.</Text>
+          <Text style={st.barHint}>Your code works for an hour. Paid from your wallet when the counter hands it over.</Text>
         )}
         <Pressable style={[st.saveBtn, (!canSave || saving) && st.saveOff]} onPress={getCode} disabled={!canSave || saving}>
           {saving ? <ActivityIndicator color="#fff" /> : <Text style={st.saveText}>Get my code</Text>}
