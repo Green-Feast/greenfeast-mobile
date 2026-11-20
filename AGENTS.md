@@ -299,6 +299,13 @@ reflect the latest commits, that's expected, not a bug to fix.
   update, guarded by `guard_customer_order_update` — before cutoff only). The address book itself is
   `addresses.tsx` (from Plan settings). A pause stops deliveries only — walk-ins stay open;
   `sync_pauses` skips walk-ins. Order history shows walk-ins as their own card ("Walk-ins" filter).
+- **Walk-in is a cart (102, 2026-11-20).** `app/(app)/walk-in-cart.tsx` (from the Walk-in tab) is
+  Customize for a walk-in: any dish the café serves today (`walk_in_dish_ok` / `walk_in_drink_ok`),
+  priced like the delivery cart. Limits from the plan's default for that meal (`walk_in_limits`, M / D):
+  meals 1…M+1, drinks (1 if D > 0)…D+1, plan add-ons on min(meals, M). `start_walk_in_cart` writes one
+  orders row per item, all `walk_in` with the same `pickup_code`; `todays_walk_in` returns the cart
+  (`items`); `redeem_pickup` hands over and bills every item under the code, or none if the wallet is
+  short. Old app builds still use `start_walk_in` (a cart of one). Admin Counter shows one entry per code.
 - **Speed (101, 2026-11-20).** The database is quick (ms-level queries, 100 % cache hit); the waits were
   client-side. (1) A token refresh gave the auth store a new `user` object, and every screen fetching
   with `[user]` reloaded behind its spinner — `setSession` now keeps the same object for the same user,

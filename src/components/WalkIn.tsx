@@ -1,4 +1,9 @@
-// My Plan → Walk-in (migration 087).
+// My Plan → Walk-in (migrations 087, 102).
+//
+// Since 102 a walk-in is a cart, ordered on the walk-in cart screen
+// (app/(app)/walk-in-cart.tsx): any dishes the café serves, drinks and
+// add-ons within the plan's limits, one code for the lot. This tab picks the
+// place and shows today's code. (The text below describes the 087 rules.)
 //
 // A 30- or 60-meal subscriber walks into one of our places (during that
 // place's hours, any day) and eats their default meal there or takes it away.
@@ -10,15 +15,12 @@
 // over and only then is it paid from the wallet. An unused code lapses at
 // closing time, uncharged.
 import { useCallback, useEffect, useState } from 'react'
-import { friendlyError } from '@/lib/friendlyError'
-import { View, Text, Pressable, StyleSheet, Modal, ScrollView, ActivityIndicator, Linking } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native'
+import { useRouter } from 'expo-router'
 import * as Haptics from 'expo-haptics'
-import { Store, MapPin, Check, ChevronRight, X, UtensilsCrossed, ShoppingBag, Lock, AlertTriangle } from 'lucide-react-native'
+import { Store, Check, ChevronRight } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { Colors, Fonts } from '@/constants/colors'
-import { ADDON_VARIANTS } from '@/constants/addonVariants'
-import { DRINK_CATEGORIES, DRINK_NAME, isDrinkCategory } from '@/constants/drinks'
 
 type Place = {
   id: string
@@ -31,11 +33,6 @@ type Place = {
   closes_at: string
 }
 type Mode = 'dine_in' | 'pickup'
-type Dish = { id: string; name: string; category: string | null; kcal: number | null; protein: number | null }
-// A drink to choose (088): any active smoothie or coffee dish. Walk-in is
-// dine-in or takeaway, so coffee is fine here (it isn't delivered).
-type DrinkDish = { id: string; name: string; category: string | null }
-type QuoteAddon = { id: string; name: string; sub_option: string | null }
 type Today = {
   order_id: string
   code: string | null
@@ -47,26 +44,8 @@ type Today = {
   cost: number | null
   closes: string
   addons: { name: string; sub_option: string | null }[]
-}
-type Quote = {
-  ok: boolean
-  eligible?: boolean
-  error?: string | null
-  open_now?: boolean
-  place?: string
-  opens?: string
-  closes?: string
-  offers_pickup?: boolean
-  offers_dine_in?: boolean
-  default_meal_id?: string | null
-  default_meal_name?: string | null
-  default_meal_ok?: boolean
-  dishes?: Dish[]
-  addons?: QuoteAddon[]
-  portions?: number[]
-  portion_cost?: number
-  spendable?: number
-  today?: Today | null
+  // 102: the whole cart (absent on a walk-in from before it)
+  items?: { kind: 'meal' | 'drink'; name: string | null; qty: number; addons: { name: string; qty: number }[] }[]
 }
 
 const fmt = (paise: number) => (paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })
@@ -92,8 +71,8 @@ function usePlaces() {
 
 export default function WalkIn({ refreshKey }: { refreshKey: number }) {
   const places = usePlaces()
+  const router = useRouter()
   const [state, setState] = useState<{ eligible: boolean; error?: string; today: Today | null } | null>(null)
-  const [place, setPlace] = useState<Place | null>(null)
 
   const loadToday = useCallback(async () => {
     const { data, error } = await supabase.rpc('my_walk_in_today')
@@ -124,7 +103,7 @@ export default function WalkIn({ refreshKey }: { refreshKey: number }) {
       <View style={st.intro}>
         <Text style={st.introTitle}>Eat at our café</Text>
         <Text style={st.lead}>
-          Walk in any day, no booking. Your default meal, made fresh, paid from your wallet when it&apos;s handed over. One walk-in a day.
+          Walk in any day, no booking. Pick your meals and drinks, get a code, and pay from your wallet when it&apos;s handed over. One walk-in a day.
         </Text>
       </View>
 
@@ -132,7 +111,7 @@ export default function WalkIn({ refreshKey }: { refreshKey: number }) {
       {places.length === 0 ? (
         <Text style={st.small}>No places are taking walk-ins right now.</Text>
       ) : places.map((p) => (
-        <Pressable key={p.id} style={({ pressed }) => [st.placeCard, pressed && { opacity: 0.85 }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPlace(p) }}>
+        <Pressable key={p.id} style={({ pressed }) => [st.placeCard, pressed && { opacity: 0.85 }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push({ pathname: '/(app)/walk-in-cart', params: { location: p.id } } as any) }}>
           <View style={st.iconCircle}><Store size={20} color={Colors.primary} /></View>
           <View style={{ flex: 1 }}>
             <Text style={st.rowTitle}>{p.name}</Text>
@@ -144,12 +123,6 @@ export default function WalkIn({ refreshKey }: { refreshKey: number }) {
           <ChevronRight size={18} color={Colors.textMuted} />
         </Pressable>
       ))}
-
-      <OrderSheet
-        place={place}
-        onClose={() => setPlace(null)}
-        onOrdered={(t) => { setPlace(null); setState({ eligible: true, today: t }) }}
-      />
     </>
   )
 }
@@ -174,308 +147,24 @@ function TodayCard({ today }: { today: Today }) {
         </View>
       )}
       <View style={st.summaryBox}>
-        <Text style={st.rowTitle}>{what}</Text>
-        {!!extras && <Text style={st.rowSub}>{extras}</Text>}
+        {today.items && today.items.length > 0 ? today.items.map((it, n) => (
+          <View key={n} style={{ marginBottom: 4 }}>
+            <Text style={st.rowTitle}>{it.kind === 'drink' ? 'Drink · ' : ''}{it.name ?? 'Item'}{it.qty > 1 ? ` ×${it.qty}` : ''}</Text>
+            {it.addons.length > 0 && (
+              <Text style={st.rowSub}>{it.addons.map((a) => `${a.name}${a.qty > 1 ? ` ×${a.qty}` : ''}`).join(' · ')}</Text>
+            )}
+          </View>
+        )) : (
+          <>
+            <Text style={st.rowTitle}>{what}</Text>
+            {!!extras && <Text style={st.rowSub}>{extras}</Text>}
+          </>
+        )}
         {today.cost != null && <Text style={st.rowSub}>₹{fmt(today.cost)} from your wallet{done ? '' : ' when it’s handed over'}</Text>}
       </View>
       {!done && (
         <Text style={st.small}>Valid until {today.closes} today. If you don&apos;t come, it isn&apos;t charged.</Text>
       )}
-    </View>
-  )
-}
-
-function OrderSheet({ place, onClose, onOrdered }: { place: Place | null; onClose: () => void; onOrdered: (t: Today) => void }) {
-  const insets = useSafeAreaInsets()
-  const [quote, setQuote] = useState<Quote | null>(null)
-  const [mode, setMode] = useState<Mode | null>(null)
-  const [dishId, setDishId] = useState<string | null>(null)
-  const [portions, setPortions] = useState(1)
-  const [flavours, setFlavours] = useState<Record<string, string | null>>({})
-  // Drinks (088): which add-on is the plan's drink, the dishes to choose from,
-  // and the pick. A plan with a drink must name one: there's no chef's choice.
-  const [drinkAddonIds, setDrinkAddonIds] = useState<string[]>([])
-  const [drinks, setDrinks] = useState<DrinkDish[]>([])
-  const [drinkId, setDrinkId] = useState<string | null>(null)
-  const [picking, setPicking] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (!place) return
-    setQuote(null); setError(''); setPicking(false); setDrinkId(null)
-    Promise.all([
-      supabase.rpc('walk_in_quote', { p_location: place.id }),
-      supabase.from('meal_templates').select('id, name, category')
-        .in('category', [...DRINK_CATEGORIES]).eq('is_active', true).order('category').order('name'),
-      supabase.from('addons').select('id').eq('is_drink', true),
-    ]).then(([{ data, error: err }, drinkRes, addonRes]) => {
-      if (err) return setError(friendlyError(err, 'Could not load. Please try again.'))
-      const q = data as Quote
-      // If the drink flag can't be read (older database), the smoothie add-on is the drink.
-      setDrinkAddonIds(addonRes.error ? ['smoothie'] : ((addonRes.data ?? []) as { id: string }[]).map((a) => a.id))
-      setDrinks((drinkRes.data ?? []) as DrinkDish[])
-      setQuote(q)
-      setMode(q.offers_dine_in ? 'dine_in' : q.offers_pickup ? 'pickup' : null)
-      setDishId(q.default_meal_ok ? q.default_meal_id ?? null : null)
-      setPortions(q.portions?.[0] ?? 1)
-      setFlavours(Object.fromEntries((q.addons ?? []).map((a) => [a.id, a.sub_option])))
-      if (q.today) onOrdered(q.today)
-    })
-  }, [place])
-
-  // The meal is a real dish; drinks have their own chips below.
-  const dishes = (quote?.dishes ?? []).filter((d) => !isDrinkCategory(d.category))
-  const drinkAddon = (quote?.addons ?? []).find((a) => drinkAddonIds.includes(a.id)) ?? null
-  const otherAddons = (quote?.addons ?? []).filter((a) => !drinkAddonIds.includes(a.id))
-  const dish = dishes.find((d) => d.id === dishId) ?? null
-  const cost = (quote?.portion_cost ?? 0) * portions
-  const cantAfford = !!quote && (quote.spendable ?? 0) < cost
-  // Only when there are drinks to pick from; if they couldn't load, the
-  // server's legacy path still takes the order.
-  const needsDrink = !!drinkAddon && drinks.length > 0 && !drinkId
-  const blocked = !quote?.ok || !quote.open_now || !mode || !dish || cantAfford || needsDrink
-  const defaultIsDeliveryOnly = !!quote?.default_meal_id && !quote.default_meal_ok
-
-  async function order() {
-    if (!place || !quote || blocked || !mode || !dish) return
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    setBusy(true); setError('')
-    // Variants (cheese...) per add-on, plus the drink dish. The drink add-on is never sent as a flavour:
-    // that is the old free-text path, kept on the server for old app builds.
-    const options: Record<string, string | null> = Object.fromEntries(otherAddons.map((a) => [a.id, flavours[a.id] ?? null]))
-    if (drinkAddon && drinkId) options.drink = drinkId
-    const { data, error: err } = await supabase.rpc('start_walk_in', {
-      p_location: place.id,
-      p_mode: mode,
-      p_meal: dish.id,
-      p_portions: portions,
-      p_options: options,
-    })
-    setBusy(false)
-    if (err) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      return setError(friendlyError(err, 'Could not place it. Please try again.'))
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-    onOrdered(data as Today)
-  }
-
-  return (
-    <Modal visible={!!place} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      {/* The backdrop is a sibling of the sheet, not its parent: a Pressable
-          wrapping the ScrollView fights it for the touch and makes scrolling
-          stutter. */}
-      <View style={st.overlay}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
-        <View style={[st.sheet, { paddingBottom: insets.bottom }]}>
-          <View style={st.sheetHeader}>
-            <Text style={st.sheetTitle} numberOfLines={1}>{place?.name}</Text>
-            <Pressable onPress={onClose} hitSlop={10}><X size={20} color={Colors.textMuted} /></Pressable>
-          </View>
-
-          {!quote && !error ? (
-            <ActivityIndicator color={Colors.primary} style={{ marginVertical: 32 }} />
-          ) : quote && !quote.ok ? (
-            <Text style={[st.error, { marginBottom: 16 }]}>{quote.error}</Text>
-          ) : quote ? (
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              style={st.sheetScroll}
-              contentContainerStyle={st.sheetContent}
-              keyboardShouldPersistTaps="handled"
-              overScrollMode="never"
-            >
-              {place && (
-                <Pressable
-                  style={st.placeLine}
-                  disabled={!place.maps_url}
-                  onPress={() => place.maps_url && Linking.openURL(place.maps_url)}
-                >
-                  <MapPin size={14} color={Colors.textMuted} style={{ marginTop: 2 }} />
-                  <Text style={[st.rowSub, { flex: 1, marginTop: 0 }]}>
-                    {place.address} · {quote.opens}–{quote.closes}{place.maps_url ? ' · Directions' : ''}
-                  </Text>
-                </Pressable>
-              )}
-
-              {!quote.open_now && (
-                <View style={st.warnBox}>
-                  <AlertTriangle size={15} color={Colors.danger} style={st.warnIcon} />
-                  <Text style={st.warnText}>Closed right now — walk-ins from {quote.opens} to {quote.closes}.</Text>
-                </View>
-              )}
-
-              {/* Eat here / takeaway */}
-              <Text style={st.subhead}>How</Text>
-              <View style={st.segment}>
-                {quote.offers_dine_in && (
-                  <Pressable style={[st.segBtn, mode === 'dine_in' && st.segBtnOn]} onPress={() => setMode('dine_in')}>
-                    <UtensilsCrossed size={15} color={mode === 'dine_in' ? '#fff' : Colors.text} />
-                    <Text style={[st.segText, mode === 'dine_in' && st.segTextOn]}>Eat here</Text>
-                  </Pressable>
-                )}
-                {quote.offers_pickup && (
-                  <Pressable style={[st.segBtn, mode === 'pickup' && st.segBtnOn]} onPress={() => setMode('pickup')}>
-                    <ShoppingBag size={15} color={mode === 'pickup' ? '#fff' : Colors.text} />
-                    <Text style={[st.segText, mode === 'pickup' && st.segTextOn]}>Takeaway</Text>
-                  </Pressable>
-                )}
-              </View>
-
-              {/* Dish */}
-              <Text style={st.subhead}>Your meal</Text>
-              {defaultIsDeliveryOnly && !dish && (
-                <View style={[st.warnBox, st.warnBoxTight]}>
-                  <AlertTriangle size={15} color={Colors.danger} style={st.warnIcon} />
-                  <Text style={st.warnText}>
-                    {quote.default_meal_name} is for delivery only — it isn&apos;t served at our café. Pick another dish for your walk-in.
-                  </Text>
-                </View>
-              )}
-              <Pressable style={({ pressed }) => [st.pickRow, pressed && { opacity: 0.8 }]} onPress={() => setPicking(true)}>
-                <View style={{ flex: 1 }}>
-                  <Text style={st.rowTitle}>{dish ? dish.name : 'Pick a dish'}</Text>
-                  <Text style={st.rowSub}>
-                    {dish
-                      ? dish.id === quote.default_meal_id ? "Today's default meal" : [dish.kcal ? `${dish.kcal} kcal` : null, dish.protein ? `${dish.protein}g protein` : null].filter(Boolean).join(' · ') || 'Your pick'
-                      : 'Any dish on our café menu'}
-                  </Text>
-                </View>
-                <Text style={st.link}>Change</Text>
-              </Pressable>
-
-              {/* Portions */}
-              <Text style={st.subhead}>Portions</Text>
-              <View style={st.segment}>
-                {(quote.portions ?? [1]).map((n) => (
-                  <Pressable key={n} style={[st.segBtn, portions === n && st.segBtnOn]} onPress={() => setPortions(n)}>
-                    <Text style={[st.segText, portions === n && st.segTextOn]}>{n} portion{n === 1 ? '' : 's'}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              {(quote.portions ?? []).length === 1 && <Text style={st.small}>A walk-in is up to 2 portions.</Text>}
-
-              {/* Drink: with every meal; the customer picks which */}
-              {drinkAddon && (
-                <>
-                  <Text style={st.subhead}>Your drink</Text>
-                  <View style={st.addonRow}>
-                    <View style={st.addonHead}>
-                      <Lock size={13} color={Colors.textMuted} />
-                      <Text style={[st.rowTitle, { flex: 1 }]}>{DRINK_NAME}{portions > 1 ? ` ×${portions}` : ''}</Text>
-                    </View>
-                    <View style={st.chipRow}>
-                      {drinks.map((d) => {
-                        const on = drinkId === d.id
-                        return (
-                          <Pressable key={d.id} style={[st.chip, on && st.chipOn]} onPress={() => { Haptics.selectionAsync(); setDrinkId(d.id) }}>
-                            <Text style={[st.chipText, on && st.chipTextOn]}>{d.name}</Text>
-                          </Pressable>
-                        )
-                      })}
-                    </View>
-                  </View>
-                  <Text style={[st.small, needsDrink && { color: Colors.danger }]}>
-                    {needsDrink ? 'Pick your drink to order.' : 'A drink comes with your walk-in, same as with a delivery.'}
-                  </Text>
-                </>
-              )}
-
-              {/* Add-ons: fixed, flavours free */}
-              {otherAddons.length > 0 && (
-                <>
-                  <Text style={st.subhead}>With your meal</Text>
-                  {otherAddons.map((a) => {
-                    const variants = ADDON_VARIANTS[a.id]
-                    return (
-                      <View key={a.id} style={st.addonRow}>
-                        <View style={st.addonHead}>
-                          <Lock size={13} color={Colors.textMuted} />
-                          <Text style={[st.rowTitle, { flex: 1 }]}>{a.name}{portions > 1 ? ` ×${portions}` : ''}</Text>
-                        </View>
-                        {variants && (
-                          <View style={st.chipRow}>
-                            {variants.map((v) => {
-                              const on = flavours[a.id] === v
-                              return (
-                                <Pressable key={v} style={[st.chip, on && st.chipOn]} onPress={() => setFlavours({ ...flavours, [a.id]: v })}>
-                                  <Text style={[st.chipText, on && st.chipTextOn]}>{v}</Text>
-                                </Pressable>
-                              )
-                            })}
-                            <Pressable style={[st.chip, !flavours[a.id] && st.chipOn]} onPress={() => setFlavours({ ...flavours, [a.id]: null })}>
-                              <Text style={[st.chipText, !flavours[a.id] && st.chipTextOn]}>Chef&apos;s choice</Text>
-                            </Pressable>
-                          </View>
-                        )}
-                      </View>
-                    )
-                  })}
-                  <Text style={st.small}>Your plan&apos;s add-ons come with every walk-in.</Text>
-                </>
-              )}
-
-              <View style={st.costBox}>
-                <Text style={st.costLabel}>From your wallet</Text>
-                <Text style={st.costValue}>₹{fmt(cost)}</Text>
-              </View>
-              {cantAfford && <Text style={st.error}>Your wallet doesn&apos;t have room for this walk-in — renew your plan to add meals.</Text>}
-              {!!error && <Text style={st.error}>{error}</Text>}
-
-              <Pressable
-                style={({ pressed }) => [st.btn, (blocked || busy) && st.btnOff, pressed && { opacity: 0.85 }]}
-                disabled={blocked || busy}
-                onPress={order}
-              >
-                {busy ? <ActivityIndicator color="#fff" /> : <Text style={st.btnText}>Order walk-in</Text>}
-              </Pressable>
-              <Text style={st.small}>You get a code to show at the counter. It&apos;s paid when it&apos;s handed over, and isn&apos;t charged if you don&apos;t come.</Text>
-            </ScrollView>
-          ) : null}
-          {!quote && !!error && <Text style={[st.error, { marginBottom: 16 }]}>{error}</Text>}
-        </View>
-      </View>
-
-      {picking && quote && (
-        <DishPicker
-          dishes={dishes}
-          current={dishId}
-          defaultId={quote.default_meal_ok ? quote.default_meal_id ?? null : null}
-          onPick={(id) => { setDishId(id); setPicking(false) }}
-          onClose={() => setPicking(false)}
-        />
-      )}
-    </Modal>
-  )
-}
-
-function DishPicker({ dishes, current, defaultId, onPick, onClose }: {
-  dishes: Dish[]; current: string | null; defaultId: string | null; onPick: (id: string) => void; onClose: () => void
-}) {
-  const insets = useSafeAreaInsets()
-  const ordered = defaultId ? [...dishes].sort((a, b) => (a.id === defaultId ? -1 : b.id === defaultId ? 1 : 0)) : dishes
-  return (
-    <View style={[StyleSheet.absoluteFill, st.overlay]}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      <View style={[st.sheet, { maxHeight: '80%', paddingBottom: 16 + insets.bottom }]}>
-        <View style={st.sheetHeader}>
-          <Text style={st.sheetTitle}>Pick a dish</Text>
-          <Pressable onPress={onClose} hitSlop={10}><X size={20} color={Colors.textMuted} /></Pressable>
-        </View>
-        <Text style={[st.small, { textAlign: 'left', marginTop: 0, marginBottom: 10 }]}>Dishes on our café menu. Delivery-only dishes aren&apos;t served here.</Text>
-        <ScrollView showsVerticalScrollIndicator={false} style={st.sheetScroll} contentContainerStyle={{ paddingBottom: 8 }}>
-          {ordered.map((d) => (
-            <Pressable key={d.id} style={[st.pickRow, current === d.id && st.pickRowOn]} onPress={() => onPick(d.id)}>
-              <View style={{ flex: 1 }}>
-                <Text style={st.rowTitle}>{d.name}</Text>
-                <Text style={st.rowSub}>{d.id === defaultId ? "Today's default meal" : d.category ?? ''}</Text>
-              </View>
-              {current === d.id && <Check size={16} color={Colors.primary} />}
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
     </View>
   )
 }

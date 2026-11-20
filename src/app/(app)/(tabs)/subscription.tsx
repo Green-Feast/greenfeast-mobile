@@ -408,6 +408,8 @@ export default function SubscriptionScreen() {
   useFocusEffect(useCallback(() => {
     if (!focusedOnce.current) { focusedOnce.current = true; return }
     if (!authLoading) fetchAll()
+    // Back from the walk-in cart: show today's code.
+    setWalkInKey((k) => k + 1)
   }, [fetchAll, authLoading]))
 
   useEffect(() => {
