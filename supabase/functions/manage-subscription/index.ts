@@ -209,7 +209,7 @@ Deno.serve(async (req) => {
       // skip_reason='user' matters: an auto-pause-after-repeated-skips feature
       // reads this to count only wallet-driven skips — a user choosing to skip
       // a day must never count toward that.
-      const { error: skipErr } = await supabase
+      const { data: skippedNow, error: skipErr } = await supabase
         .from('orders')
         .update({ status: 'skipped', skip_reason: 'user' })
         .eq('subscription_id', subscription_id)
@@ -217,8 +217,22 @@ Deno.serve(async (req) => {
         .in('status', ['scheduled', 'confirmed'])
         .in('meal_slot', openSlots)
         .eq('walk_in', false) // a walk-in (087) is its own thing
+        .select('id')
 
       if (skipErr) throw skipErr
+
+      // Nothing skipped and nothing there to skip: the day's meals aren't made
+      // yet (next week appears after Sunday's run). Saying "skipped" here would
+      // be wrong — the run would make the meal later and it would be charged.
+      if ((skippedNow ?? []).length === 0) {
+        const { data: anyRow } = await supabase
+          .from('orders').select('id')
+          .eq('subscription_id', subscription_id).eq('delivery_date', delivery_date)
+          .in('meal_slot', openSlots).eq('walk_in', false).limit(1)
+        if (!anyRow || anyRow.length === 0) {
+          return json({ error: "There's no meal on that day yet — next week's meals appear on Sunday evening. Skip it after that." }, 400)
+        }
+      }
 
       return json({ ok: true, action: 'skipped', delivery_date, meal_slot: meal_slot ?? null, slots_skipped: openSlots })
     }
