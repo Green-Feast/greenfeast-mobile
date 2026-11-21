@@ -52,6 +52,28 @@ relaunch. Reset `build` and `ota` to `0` when this happens.
 Each entry: version, release date, build/OTA numbers, and a short bullet list
 of what changed. Newest first.
 
+### 1.10.18 — 2026-11-21
+- Build 10, OTA 18. Production channel, published per platform (`--platform
+  ios`, then `--platform android`) with `--environment production`.
+- **Walk-in is a cart** (migration 102): the Walk-in tab opens a full menu
+  like Customize — meals, add-ons per meal, drinks — within the plan's limits
+  (1 … M+1 meals, a drink if the plan has one, plan add-ons kept). One code
+  for the whole cart, valid for an hour (103); paid when the counter hands
+  it over.
+- **Skip ahead** (108): future days the plan delivers can be skipped before
+  Sunday's run makes their meals (My Plan → Skip on an empty day; Plan
+  Settings → Skip a specific day). The skip is saved and kept; Undo before
+  Sunday lets the run make the meal, after it remakes it fresh.
+- **Speed**: a token refresh no longer reloads every screen behind a
+  spinner (My Plan spins only on its first load); the saved session is read
+  from memory instead of storage before every request.
+- **Delete account** says why it can't go ahead (money still due, a meal on
+  its way).
+- Server-side since 1.10.17 (live already, no app needed): office
+  adjustments (099–100, 104), speed indexes (101), missed walk-ins (103),
+  order runs never re-make a meal (105–106), money audit fixes (107).
+- JS-only.
+
 ### 1.10.17 — 2026-11-19
 - Build 10, OTA 17. Production channel, published per platform (`--platform
   ios`, then `--platform android`) with `--environment production`.
