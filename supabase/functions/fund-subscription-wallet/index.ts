@@ -6,8 +6,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 // owned, paid or not, and customers can create subscriptions themselves: free
 // wallet money on demand (2026-10-11 audit). Cash-on-delivery plans are credited
 // by the admin's "Mark cash received" instead. The webhook credits the same
-// payment itself (same reference), so this is only the app's optimistic call;
-// idempotent via wallet_credit(reference_id = subscription_id).
+// payment itself, so this is only the app's optimistic call; each payment is
+// credited exactly once by credit_plan_payment (107).
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -49,33 +49,30 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Only a Cashfree payment the webhook has confirmed counts (cash payments
-    // have no cf_order_id and are credited by the admin action).
+    // Only Cashfree payments the webhook has confirmed count (cash payments
+    // have no cf_order_id and are credited by the admin action). Each one is
+    // credited exactly once (credit_plan_payment, 107) — the webhook does the
+    // same, so whichever lands second is a no-op.
     const { data: paid } = await supabase
       .from('payments')
-      .select('amount')
+      .select('id, amount')
       .eq('subscription_id', subscriptionId)
       .eq('status', 'paid')
       .not('cf_order_id', 'is', null)
       .order('created_at')
-      .limit(1)
-      .maybeSingle()
 
-    if (!paid || !(paid.amount > 0)) {
+    if (!paid || paid.length === 0) {
       return new Response(
         JSON.stringify({ error: 'No confirmed payment for this subscription yet' }),
         { status: 409, headers: corsHeaders }
       )
     }
-    const amount = paid.amount
-
-    const { error: rpcErr } = await supabase.rpc('wallet_credit', {
-      p_user: sub.user_id,
-      p_amount: amount,
-      p_reason: `Plan payment — ${(sub as any).plan_name ?? 'Subscription'}`,
-      p_reference_id: subscriptionId,
-    })
-    if (rpcErr) throw rpcErr
+    let amount = 0
+    for (const p of paid as { id: string; amount: number }[]) {
+      const { error: rpcErr } = await supabase.rpc('credit_plan_payment', { p_payment: p.id })
+      if (rpcErr) throw rpcErr
+      amount += p.amount
+    }
 
     return new Response(JSON.stringify({ ok: true, amount }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

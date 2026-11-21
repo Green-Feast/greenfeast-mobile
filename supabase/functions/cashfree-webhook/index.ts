@@ -16,7 +16,12 @@ async function verifyCashfreeSignature(
   )
   const sigBytes = await crypto.subtle.sign('HMAC', key, enc.encode(timestamp + rawBody))
   const expected = btoa(String.fromCharCode(...new Uint8Array(sigBytes)))
-  return expected === signature
+  // Constant-time compare, so the check doesn't leak how much of a forged
+  // signature was right.
+  if (!signature || expected.length !== signature.length) return false
+  let diff = 0
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i)
+  return diff === 0
 }
 
 Deno.serve(async (req) => {
@@ -200,16 +205,11 @@ Deno.serve(async (req) => {
         // so whichever of the two lands second is a no-op.
         // Cash on delivery: this was the first day's meals; the rest is
         // collected in cash (cod_due_paise) and credited when it's recorded.
-        const planName = (sub as any)?.plan_name ?? 'Subscription'
-        const codDue = (sub as any)?.payment_method === 'cod' ? ((sub as any)?.cod_due_paise ?? 0) : 0
-        const { error: fundErr } = await supabase.rpc('wallet_credit', {
-          p_user: paymentRow.user_id,
-          p_amount: paymentRow.amount,
-          p_reason: codDue > 0
-            ? `First day paid online — ${planName} (${rupees(codDue)} cash on delivery)`
-            : `Plan payment — ${planName}`,
-          p_reference_id: paymentRow.subscription_id,
-        })
+        // Credited exactly once per payment (107): the plan's first payment
+        // under the plan id (as fund-subscription-wallet does), any further
+        // payment for the same plan under its own Cashfree payment id — never
+        // silently dropped — and the admins are told about a second payment.
+        const { error: fundErr } = await supabase.rpc('credit_plan_payment', { p_payment: paymentRow.id })
         if (fundErr) {
           console.error('cashfree-webhook: plan wallet credit failed:', fundErr.message)
           return new Response(JSON.stringify({ error: 'credit failed' }), { status: 500 })

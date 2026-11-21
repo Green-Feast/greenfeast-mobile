@@ -28,6 +28,37 @@ Deno.serve(async (req) => {
       // no body / not JSON — treat as the existing dev-reset call (data only)
     }
 
+    // Money first (107). Nobody leaves owing money (a negative wallet from meals
+    // on credit, or cash still due on a plan), and not while a meal is on its
+    // way — that would erase the debt with the account.
+    const [{ data: owing }, { data: dueRow }, { data: busy }, { data: me }] = await Promise.all([
+      supabase.from('wallets').select('balance').eq('user_id', userId).maybeSingle(),
+      supabase.from('subscriptions').select('cod_due_paise').eq('user_id', userId)
+        .in('status', ['active', 'paused', 'expired']).gt('cod_due_paise', 0).limit(1).maybeSingle(),
+      supabase.from('orders').select('id').eq('user_id', userId)
+        .in('status', ['preparing', 'out_for_delivery']).limit(1).maybeSingle(),
+      supabase.from('users').select('is_test').eq('id', userId).maybeSingle(),
+    ])
+    if ((owing?.balance ?? 0) < 0 || dueRow) {
+      return new Response(
+        JSON.stringify({ error: 'There is money still due on your account. Please clear it with us on WhatsApp first, then you can delete your account.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 }
+      )
+    }
+    if (busy) {
+      return new Response(
+        JSON.stringify({ error: 'A meal is being prepared or is on its way to you. Please try again after it is delivered.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 }
+      )
+    }
+    // The data-only reset below is a testing tool: test accounts only.
+    if (!deleteAuthUser && !me?.is_test) {
+      return new Response(
+        JSON.stringify({ error: 'Not available for this account.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      )
+    }
+
     if (deleteAuthUser) {
       // Real account deletion. public.users.id IS auth.users.id (PK+FK+CASCADE),
       // so deleting the auth user below cascades away the live profile,

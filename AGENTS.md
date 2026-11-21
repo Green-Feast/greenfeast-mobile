@@ -312,6 +312,18 @@ reflect the latest commits, that's expected, not a bug to fix.
   Counter's Missed walk-ins list can mark it served (`admin_charge_missed_walk_in`: the cart as ordered, billed
   via advance_order_delivered, action password + reason in `office_note`) or not served
   (`admin_dismiss_missed_walk_in` → `walk_in_expired`). Unanswered after 7 days → `walk_in_expired`.
+- **Money hardening (107, 2026-11-21 audit).** Rules for anything touching money or orders:
+  every wallet move goes through wallet_credit / wallet_debit with a reference — the ledger has a UNIQUE
+  (wallet, type, reference) index; a Cashfree plan payment is credited only via `credit_plan_payment(payment)`
+  (once per payment; a second payment for one plan is credited under its cf_payment_id + admin alert);
+  cashfree-create-order refuses non-pending or already-paid plans; admin money RPCs take `p_idem` and call
+  `claim_once` (dialogs send a key, fresh after each success); save_day_cart and make_default_cart share a
+  per-slot advisory lock; revivals (resume, sync_pauses, unskip) bring back only rows cancelled by that very
+  action (skip_reason 'pause' / the latest skip), never into a slot that already has a meal; one pending bank
+  refund per payment (refunds that Cashfree never received fail after 30 min and the money returns);
+  delete-user-data refuses while money is owed or a meal is out, and its reset is test-accounts only;
+  internal pricing helpers are service-role only. Any new SECURITY DEFINER function: REVOKE … FROM PUBLIC,
+  anon, authenticated and GRANT only what's needed; any new admin money action: `sensitive()` + one-time key.
 - **Order runs never re-make a slot (105, 106, 2026-11-21).** 19–21 Nov the order run re-made default meals
   for slots customers had skipped (its check counted only live meals). Now: instantiate-orders treats a slot
   with ANY order as taken (except `off_day` cancellations), and `make_default_cart` itself refuses under a

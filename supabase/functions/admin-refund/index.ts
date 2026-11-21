@@ -31,7 +31,7 @@ const rupees = (paise: number) =>
 async function syncPendingRefunds(supabase: any) {
   const { data: pending } = await supabase
     .from('refunds')
-    .select('id, user_id, amount, cf_refund_id, payments ( cf_order_id )')
+    .select('id, user_id, amount, cf_refund_id, created_at, payments ( cf_order_id )')
     .eq('kind', 'bank')
     .eq('status', 'pending')
     .not('cf_refund_id', 'is', null)
@@ -49,8 +49,13 @@ async function syncPendingRefunds(supabase: any) {
         },
       }
     )
-    if (!res.ok) continue
-    const body = await res.json().catch(() => ({}))
+    // Cashfree has no such refund (the call to start it never reached them,
+    // e.g. a dropped connection after the wallet was debited): after 30
+    // minutes it counts as failed and the money goes back to the wallet —
+    // otherwise it would sit 'pending' forever, refunded to no one (107).
+    const missing = res.status === 404 && Date.now() - new Date(r.created_at).getTime() > 30 * 60 * 1000
+    if (!res.ok && !missing) continue
+    const body = missing ? { refund_status: 'FAILED', status_description: 'Cashfree has no record of this refund' } : await res.json().catch(() => ({}))
     const status = String((body as any)?.refund_status ?? '').toUpperCase()
     if (status === 'SUCCESS') {
       const { data: done } = await supabase.from('refunds')
@@ -152,6 +157,11 @@ Deno.serve(async (req) => {
       })
       .select('id')
       .single()
+    // One pending bank refund per payment at a time (unique index, 107): two
+    // clicks can't both pass the "refundable" check above and refund twice.
+    if ((insErr as any)?.code === '23505') {
+      return json({ error: 'A refund on this payment is already in progress — wait for it to finish (Money → Refunds).' }, 409)
+    }
     if (insErr || !refund) throw insErr ?? new Error('refund insert failed')
 
     // Cashfree refund_id: 3-40 chars, alphanumeric/underscore/hyphen.

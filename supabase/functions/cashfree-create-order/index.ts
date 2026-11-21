@@ -89,6 +89,28 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Only a plan still waiting for its payment can be paid for (107). A live
+    // or ended plan has had its money: paying again would be a second charge.
+    if ((sub as any).status !== 'pending') {
+      return new Response(
+        JSON.stringify({ error: 'This plan is already paid for. To add meals, renew your plan in My Plan.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    const { data: alreadyPaid } = await supabase
+      .from('payments')
+      .select('id')
+      .eq('subscription_id', subscription_id)
+      .in('status', ['paid', 'refunded'])
+      .limit(1)
+      .maybeSingle()
+    if (alreadyPaid) {
+      return new Response(
+        JSON.stringify({ error: 'We already have your payment for this plan — it will start in a moment. Pull down to refresh.' }),
+        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // The wallet is the plan (079): no buying more mid-plan. A new plan or a
     // renewal is only for when the live plan's wallet is running low.
     if ((sub as any).status === 'pending') {

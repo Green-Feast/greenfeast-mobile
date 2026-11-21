@@ -150,17 +150,16 @@ Deno.serve(async (req) => {
       // subscription, orders only reach 'cancelled' via pause (skips use
       // 'skipped'), so this safely restores the schedule. Without this, the
       // re-instantiate below hits the unique constraint and leaves them cancelled.
-      // Only the pause's own cancellations: skip_reason 'pause', or — for
-      // pauses made before that marker existed — base meals with no reason.
-      // Extra dishes the user removed are 'cancelled' too and must stay gone
-      // (reviving them billed the user for dishes they had removed).
+      // Only the pause's own cancellations (skip_reason 'pause'). Anything
+      // cancelled for another reason stays gone — reviving it could bill a
+      // meal twice (107; no pause from before the marker is left).
       const { data: paused } = await supabase
         .from('orders')
         .select('id, delivery_date, meal_slot')
         .eq('subscription_id', subscription_id)
         .gte('delivery_date', today())
         .eq('status', 'cancelled')
-        .or('skip_reason.eq.pause,and(skip_reason.is.null,extra_dish.eq.false)')
+        .eq('skip_reason', 'pause')
       const toRevive = await withoutLockedToday(supabase, (paused ?? []) as OrderRef[])
       if (toRevive.length > 0) {
         await supabase
@@ -244,10 +243,11 @@ Deno.serve(async (req) => {
           .eq('closed_on', delivery_date).eq('meal_slot', meal_slot).maybeSingle(),
         supabase
           .from('orders')
-          .select('id, quantity')
+          .select('id, quantity, updated_at')
           .eq('subscription_id', subscription_id)
           .eq('delivery_date', delivery_date)
           .eq('meal_slot', meal_slot)
+          .eq('walk_in', false)
           .eq('status', 'skipped')
           .eq('skip_reason', 'user'),
         supabase
@@ -255,6 +255,7 @@ Deno.serve(async (req) => {
           .select('id, delivery_date, meal_slot, quantity, extra_dish, is_customized, status')
           .eq('subscription_id', subscription_id)
           .gte('delivery_date', today())
+          .eq('walk_in', false)
           .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery'])
           .order('delivery_date', { ascending: false })
           .order('meal_slot', { ascending: false }),
@@ -262,6 +263,15 @@ Deno.serve(async (req) => {
       if (locked) return json({ error: 'Too late — this meal has already locked for the day.' }, 400)
       if (closed) return json({ error: `The kitchen is closed for ${meal_slot} that day.` }, 400)
       if (!skipped || skipped.length === 0) return json({ error: "There's no skipped meal to bring back." }, 400)
+      // Never two meals in one slot (107): if this lunch / dinner already has a
+      // meal (set up again after the skip), there's nothing to bring back.
+      if ((upcoming ?? []).some((o: any) => o.delivery_date === delivery_date && o.meal_slot === meal_slot)) {
+        return json({ error: `This ${meal_slot} already has a meal — change it in Customize.` }, 400)
+      }
+      // Only the most recent skip comes back (one tap of Skip = one moment), not
+      // every meal ever skipped in this slot.
+      const latest = Math.max(...skipped.map((o: any) => new Date(o.updated_at).getTime()))
+      skipped.splice(0, skipped.length, ...skipped.filter((o: any) => latest - new Date(o.updated_at).getTime() < 2 * 60 * 1000))
       const need = skipped.reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)
       let room = (sub.deliveries_remaining ?? 0) -
         (upcoming ?? []).reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)

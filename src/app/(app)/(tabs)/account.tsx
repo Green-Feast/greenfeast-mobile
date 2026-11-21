@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { friendlyError } from '@/lib/friendlyError'
+import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import {
   View,
   Text,
@@ -157,7 +158,8 @@ export default function AccountScreen() {
         body: { deleteAuthUser: true },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (error) throw error
+      // The server says why it can't (money still due, a meal on its way).
+      if (error) throw new Error(await extractFunctionErrorMessage(error, 'Delete failed — please try again or contact support.'))
 
       setDeleteConfirm(false)
       await signOut()
