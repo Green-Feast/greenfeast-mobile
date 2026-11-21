@@ -19,6 +19,7 @@ import {
   Pause, Play, SkipForward, X, ArrowRight, UtensilsCrossed, MapPin,
 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { extractFunctionErrorMessage } from '@/lib/supabaseFunctionError'
 import { useAuthStore } from '@/store/auth'
 import { Colors, Fonts } from '@/constants/colors'
 import { istToday, addDaysISO } from '@/lib/ist'
@@ -275,7 +276,7 @@ function PauseModal({ visible, subId, onClose, onDone }: {
       const { error } = await supabase.functions.invoke('manage-subscription', {
         body: { action: 'pause', subscription_id: subId, pause_from: start, pause_until: end },
       })
-      if (error) throw error
+      if (error) { setError(await extractFunctionErrorMessage(error, 'Something went wrong. Please try again.')); return }
       onDone()
     } catch { setError('Something went wrong. Please try again.') }
     finally { setSaving(false) }
@@ -328,6 +329,7 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
   const insets = useSafeAreaInsets()
   const [orders, setOrders] = useState<UpcomingOrder[]>([])
   const [loadingOrders, setLoadingOrders] = useState(false)
+  const [aheadDays, setAheadDays] = useState<string[]>([])
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -339,16 +341,41 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
     if (!visible) return
     setLoadingOrders(true)
     setSelectedDate(null)
-    supabase.from('orders')
-      .select('id, delivery_date, meal_templates ( name )')
-      .eq('subscription_id', subId)
-      .gte('delivery_date', todayStr).lte('delivery_date', maxDate)
-      .in('status', ['scheduled', 'confirmed'])
-      .order('delivery_date')
-      .then(({ data }) => { setOrders((data as unknown as UpcomingOrder[]) ?? []); setLoadingOrders(false) })
+    Promise.all([
+      supabase.from('orders')
+        .select('id, delivery_date, meal_templates ( name )')
+        .eq('subscription_id', subId)
+        .gte('delivery_date', todayStr).lte('delivery_date', maxDate)
+        .in('status', ['scheduled', 'confirmed'])
+        .order('delivery_date'),
+      supabase.from('orders').select('delivery_date')
+        .eq('subscription_id', subId).gte('delivery_date', todayStr).lte('delivery_date', maxDate),
+      supabase.from('subscription_schedule').select('day_of_week').eq('subscription_id', subId),
+      supabase.from('subscriptions').select('no_delivery_days, pause_from, pause_until').eq('id', subId).maybeSingle(),
+      supabase.rpc('menu_published_until'),
+    ]).then(([live, any, sched, subRow, pub]) => {
+      setOrders((live.data as unknown as UpcomingOrder[]) ?? [])
+      const taken = new Set(((any.data ?? []) as { delivery_date: string }[]).map((o) => o.delivery_date))
+      const days = ((sched.data ?? []) as { day_of_week: string }[]).map((r) => r.day_of_week)
+      const s = subRow.data as { no_delivery_days: boolean | null; pause_from: string | null; pause_until: string | null } | null
+      const published = (pub.data as string | null) ?? todayStr
+      const out: string[] = []
+      for (let d = addDaysISO(published, 1); d <= maxDate; d = addDaysISO(d, 1)) {
+        if (taken.has(d)) continue
+        if (s?.pause_from && s?.pause_until && d >= s.pause_from && d <= s.pause_until) continue
+        const dow = new Date(d + 'T00:00:00Z').toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' })
+        const delivers = days.length > 0 ? days.includes(dow) : !s?.no_delivery_days && dow !== 'Sun'
+        if (delivers) out.push(d)
+      }
+      setAheadDays(out)
+      setLoadingOrders(false)
+    })
   }, [visible, subId])
 
   const orderDates = new Set(orders.map((o) => o.delivery_date))
+  // Days the plan delivers but whose meals aren't made yet (next week, before
+  // Sunday's run) can be skipped too — the skip is saved and kept (108).
+  const aheadDates = new Set(aheadDays)
   const selectedOrder = orders.find((o) => o.delivery_date === selectedDate) ?? null
 
   async function handleSkip() {
@@ -375,7 +402,7 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
           <Text style={m.stepLabel}>Select a day to skip</Text>
           {loadingOrders ? (
             <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 24 }} />
-          ) : orders.length === 0 ? (
+          ) : orders.length === 0 && aheadDays.length === 0 ? (
             <Text style={m.emptyText}>No upcoming deliveries in the next 14 days.</Text>
           ) : (
             <>
@@ -384,13 +411,17 @@ function SkipModal({ visible, subId, userId, onClose, onDone }: {
                   mode="single"
                   minDate={todayStr}
                   maxDate={maxDate}
-                  isDayEnabled={(iso) => orderDates.has(iso)}
+                  isDayEnabled={(iso) => orderDates.has(iso) || aheadDates.has(iso)}
                   value={selectedDate}
                   onChange={setSelectedDate}
                 />
               )}
               <Text style={m.calendarNote}>
-                {selectedOrder ? `${fmtDate(selectedOrder.delivery_date)} · ${selectedOrder.meal_templates?.name ?? '—'}` : 'Only days with a scheduled delivery are selectable.'}
+                {selectedOrder
+                  ? `${fmtDate(selectedOrder.delivery_date)} · ${selectedOrder.meal_templates?.name ?? '—'}`
+                  : selectedDate && aheadDates.has(selectedDate)
+                    ? `${fmtDate(selectedDate)} · next week's menu — your skip is saved now`
+                    : 'Only your delivery days can be skipped.'}
               </Text>
             </>
           )}

@@ -58,6 +58,9 @@ type SubData = {
   meal_price_paise: number | null // coupon price per meal, else null (066)
   carried_meals: number // meals passed on by the plan this one renewed early (069)
   plans: { name: string; meals_total: number; days_per_week: number; base_price: number; allow_pickup?: boolean } | null
+  // Delivery days, for skipping a day before its meal is made (108)
+  no_delivery_days?: boolean | null
+  subscription_schedule?: { day_of_week: string }[] | null
 }
 
 type SubAddon = { addon_id: string; addons: { name: string; price_per_meal: number; is_drink?: boolean | null } | null }
@@ -294,7 +297,7 @@ export default function SubscriptionScreen() {
 
     const planQuery = () => supabase
       .from('subscriptions')
-      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, meal_price_paise, carried_meals, plans ( name, meals_total, days_per_week, base_price, allow_pickup )')
+      .select('id, status, payment_method, plan_id, meals_lunch, meals_dinner, plan_name, deliveries_remaining, start_date, end_date, pause_from, pause_until, cod_due_paise, meal_price_paise, carried_meals, no_delivery_days, plans ( name, meals_total, days_per_week, base_price, allow_pickup ), subscription_schedule ( day_of_week )')
       .eq('user_id', user.id)
       .in('status', ['active', 'paused'])
       .order('created_at', { ascending: false })
@@ -524,6 +527,7 @@ export default function SubscriptionScreen() {
         body: { action: 'unskip', subscription_id: sub.id, delivery_date: date, meal_slot: slot },
       })
       if (error) Alert.alert('Could not bring it back', await extractFunctionErrorMessage(error, 'Please try again.'))
+      else if (menuNotOut(date)) Alert.alert('Skip removed', `Your ${slot} comes back with next week's menu on Sunday evening.`)
     } catch {
       Alert.alert('Could not bring it back', 'Please check your connection and try again.')
     }
@@ -1007,6 +1011,20 @@ export default function SubscriptionScreen() {
   const slotSkipped = weekOrders.filter(o =>
     o.status === 'skipped' && o.delivery_date === selectedDay && o.meal_slot === selectedSlot)
   const canUnskip = slotSkipped.some(o => o.skip_reason === 'user') && !isSlotLocked(selectedDay, selectedSlot)
+  // Would the plan deliver this lunch / dinner? (Same rule as the server's
+  // slot_default_applies.) A day like that can be skipped before its meal is
+  // made — the skip is saved and Sunday's run leaves it skipped (108).
+  const planDelivers = (day: string, slot: 'lunch' | 'dinner') => {
+    if (((slot === 'lunch' ? sub.meals_lunch : sub.meals_dinner) ?? 0) <= 0) return false
+    if (sub.start_date && day < sub.start_date) return false
+    if (sub.pause_from && sub.pause_until && day >= sub.pause_from && day <= sub.pause_until) return false
+    if (closures.has(`${day}|${slot}`)) return false
+    const dow = new Date(day + 'T00:00:00Z').toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' })
+    const days = (sub.subscription_schedule ?? []).map((r) => r.day_of_week)
+    if (days.length > 0) return days.includes(dow)
+    return !sub.no_delivery_days && dow !== 'Sun'
+  }
+  const canSkipAhead = !heroLocked && slotSkipped.length === 0 && planDelivers(selectedDay, selectedSlot as 'lunch' | 'dinner')
 
   // Day modal data (same slot).
   const daySlotOrders = (orderMap.get(selectedDay) ?? []).filter(o => o.meal_slot === selectedSlot)
@@ -1462,14 +1480,26 @@ export default function SubscriptionScreen() {
                 extra_dish row with no base order, so dayAnyBase would stay
                 null even after adding one — this can't require it. */}
             {!heroLocked && slotSkipped.length === 0 && (
-              <Pressable
-                style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }]}
-                onPress={openCartOrCustomize}
-              >
-                <Plus size={14} color={Colors.primary} />
-                <Text style={s.heroAddBtnText}>Add {selectedSlot}</Text>
-              </Pressable>
+              <View style={s.heroEmptyBtns}>
+                <Pressable
+                  style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }]}
+                  onPress={openCartOrCustomize}
+                >
+                  <Plus size={14} color={Colors.primary} />
+                  <Text style={s.heroAddBtnText}>Add {selectedSlot}</Text>
+                </Pressable>
+                {canSkipAhead && (
+                  <Pressable
+                    style={({ pressed }) => [s.heroAddBtn, pressed && { opacity: 0.7 }]}
+                    onPress={() => onSkipTap(selectedDay, selectedSlot as 'lunch' | 'dinner')}
+                  >
+                    <SkipForward size={14} color={Colors.primary} />
+                    <Text style={s.heroAddBtnText}>Skip {selectedSlot}</Text>
+                  </Pressable>
+                )}
+              </View>
             )}
+            {cartHint && !showDayModal ? <Text style={s.cartHintText}>{cartHint}</Text> : null}
           </View>
         )}
 
@@ -2168,6 +2198,7 @@ const s = StyleSheet.create({
   cartTotalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   cartTotalLabel: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text },
   cartTotalVal: { fontFamily: Fonts.bodyBold, fontSize: 15, color: Colors.text },
+  heroEmptyBtns: { flexDirection: 'row', gap: 10, flexWrap: 'wrap', justifyContent: 'center' },
   cartHintText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.primary, marginTop: 10, textAlign: 'center' },
   cartBtns: { flexDirection: 'row', gap: 10, marginTop: 16 },
   cartSkipBtn: { paddingHorizontal: 22, borderRadius: 999, borderWidth: 1.5, borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', minHeight: 50 },

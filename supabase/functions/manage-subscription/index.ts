@@ -221,16 +221,29 @@ Deno.serve(async (req) => {
 
       if (skipErr) throw skipErr
 
-      // Nothing skipped and nothing there to skip: the day's meals aren't made
-      // yet (next week appears after Sunday's run). Saying "skipped" here would
-      // be wrong — the run would make the meal later and it would be charged.
-      if ((skippedNow ?? []).length === 0) {
+      // Skip ahead (108): a slot whose meal isn't made yet (next week appears
+      // after Sunday's run) is saved as skipped now — its default meal made and
+      // marked skipped — so Sunday's run leaves it skipped and nothing is charged.
+      let ahead = 0
+      for (const slot of openSlots) {
+        const { data: rows } = await supabase
+          .from('orders').select('id')
+          .eq('subscription_id', subscription_id).eq('delivery_date', delivery_date)
+          .eq('meal_slot', slot).eq('walk_in', false).limit(1)
+        if (rows && rows.length > 0) continue
+        const { data: made, error: aheadErr } = await supabase.rpc('skip_ahead', {
+          p_sub: subscription_id, p_date: delivery_date, p_slot: slot,
+        })
+        if (aheadErr) throw aheadErr
+        ahead += made ?? 0
+      }
+      if ((skippedNow ?? []).length === 0 && ahead === 0) {
         const { data: anyRow } = await supabase
           .from('orders').select('id')
           .eq('subscription_id', subscription_id).eq('delivery_date', delivery_date)
           .in('meal_slot', openSlots).eq('walk_in', false).limit(1)
         if (!anyRow || anyRow.length === 0) {
-          return json({ error: "There's no meal on that day yet — next week's meals appear on Sunday evening. Skip it after that." }, 400)
+          return json({ error: "There's no meal planned for you that day." }, 400)
         }
       }
 
@@ -257,7 +270,7 @@ Deno.serve(async (req) => {
           .eq('closed_on', delivery_date).eq('meal_slot', meal_slot).maybeSingle(),
         supabase
           .from('orders')
-          .select('id, quantity, updated_at')
+          .select('id, quantity, updated_at, cart_edited')
           .eq('subscription_id', subscription_id)
           .eq('delivery_date', delivery_date)
           .eq('meal_slot', meal_slot)
@@ -286,6 +299,19 @@ Deno.serve(async (req) => {
       // every meal ever skipped in this slot.
       const latest = Math.max(...skipped.map((o: any) => new Date(o.updated_at).getTime()))
       skipped.splice(0, skipped.length, ...skipped.filter((o: any) => latest - new Date(o.updated_at).getTime() < 2 * 60 * 1000))
+
+      // A skip made ahead of Sunday's run (108): undoing it just removes the
+      // skip — the run makes the meal (and checks the wallet) when it reaches
+      // the day, so the "room on the plan" check below doesn't apply.
+      const { data: publishedUntil } = await supabase.rpc('menu_published_until')
+      if (publishedUntil && delivery_date > publishedUntil && skipped.every((o: any) => !o.cart_edited)) {
+        const { error: aheadErr } = await supabase.rpc('unskip_default_slot', {
+          p_sub: subscription_id, p_date: delivery_date, p_slot: meal_slot,
+        })
+        if (aheadErr) return json({ error: aheadErr.message }, 400)
+        return json({ ok: true, action: 'unskipped', delivery_date, meal_slot, restored: 0, comes_sunday: true })
+      }
+
       const need = skipped.reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)
       let room = (sub.deliveries_remaining ?? 0) -
         (upcoming ?? []).reduce((n: number, o: any) => n + (o.quantity ?? 1), 0)
@@ -304,6 +330,17 @@ Deno.serve(async (req) => {
         if (drop.length > 0) await supabase.from('orders').delete().in('id', drop)
       }
 
+      // The plan's default meal comes back made fresh — today's dish and prices,
+      // not those from when it was skipped — or, before Sunday's run reaches the
+      // day, the skip is removed and the run makes it (108). A cart the customer
+      // customized comes back exactly as they set it.
+      if (skipped.every((o: any) => !o.cart_edited)) {
+        const { data: made, error: freshErr } = await supabase.rpc('unskip_default_slot', {
+          p_sub: subscription_id, p_date: delivery_date, p_slot: meal_slot,
+        })
+        if (freshErr) return json({ error: freshErr.message }, 400)
+        return json({ ok: true, action: 'unskipped', delivery_date, meal_slot, restored: made ?? 0, comes_sunday: (made ?? 0) === 0 })
+      }
       const { error: unskipErr } = await supabase
         .from('orders')
         .update({ status: 'scheduled', skip_reason: null, updated_at: new Date().toISOString() })

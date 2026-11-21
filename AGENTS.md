@@ -312,6 +312,13 @@ reflect the latest commits, that's expected, not a bug to fix.
   Counter's Missed walk-ins list can mark it served (`admin_charge_missed_walk_in`: the cart as ordered, billed
   via advance_order_delivered, action password + reason in `office_note`) or not served
   (`admin_dismiss_missed_walk_in` → `walk_in_expired`). Unanswered after 7 days → `walk_in_expired`.
+- **Skip ahead (108, 2026-11-21).** A lunch / dinner the plan delivers can be skipped before its meal is
+  made (next week, before Sunday's run): manage-subscription skip calls `skip_ahead`, which makes the slot's
+  default cart and marks it skipped under the per-slot lock — Sunday's run never makes a slot with an order, so
+  it stays skipped. Undo of a skipped default cart (`unskip_default_slot`): before Sunday's run the skip is
+  deleted (the run makes the meal fresh); after it, the meal is remade fresh (current dish / prices). A customized
+  cart is revived as set. My Plan shows Skip on empty future days the plan delivers; Plan Settings → Skip a
+  specific day offers them too. A skip on a day the plan doesn't deliver is refused.
 - **Money hardening (107, 2026-11-21 audit).** Rules for anything touching money or orders:
   every wallet move goes through wallet_credit / wallet_debit with a reference — the ledger has a UNIQUE
   (wallet, type, reference) index; a Cashfree plan payment is credited only via `credit_plan_payment(payment)`
