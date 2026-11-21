@@ -312,6 +312,14 @@ reflect the latest commits, that's expected, not a bug to fix.
   Counter's Missed walk-ins list can mark it served (`admin_charge_missed_walk_in`: the cart as ordered, billed
   via advance_order_delivered, action password + reason in `office_note`) or not served
   (`admin_dismiss_missed_walk_in` → `walk_in_expired`). Unanswered after 7 days → `walk_in_expired`.
+- **Order runs never re-make a slot (105, 106, 2026-11-21).** 19–21 Nov the order run re-made default meals
+  for slots customers had skipped (its check counted only live meals). Now: instantiate-orders treats a slot
+  with ANY order as taken (except `off_day` cancellations), and `make_default_cart` itself refuses under a
+  per-slot advisory lock — skipped / delivered / live / cancelled-for-a-reason all block; only removed extras
+  and `off_day` don't. Runs: Sunday 7 PM weekly; 1 AM nightly check (gap filler); per-customer on payment,
+  activation, renewal, resume, plan settings, Add paid meals, gifts, refund to wallet, cash due raised,
+  referral reward (webhook). `order_run_check()` at 1:15 AM alerts admins (kind `order_run_check`) if a
+  default meal sits next to a skip, or two default meals share a slot.
 - **Speed (101, 2026-11-20).** The database is quick (ms-level queries, 100 % cache hit); the waits were
   client-side. (1) A token refresh gave the auth store a new `user` object, and every screen fetching
   with `[user]` reloaded behind its spinner — `setSession` now keeps the same object for the same user,

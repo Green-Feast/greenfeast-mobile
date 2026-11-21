@@ -261,6 +261,22 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ subscription_id: paymentRow.subscription_id }),
         }).catch(err => console.error('Failed to trigger instantiate-orders:', err))
 
+        // The referrer's reward is money in their wallet: run their plan too, so
+        // meals the reward now pays for are made straight away (not at 1 AM).
+        const { data: ref } = await supabase
+          .from('referrals').select('referrer_id').eq('payment_id', paymentRow.id).eq('status', 'rewarded').maybeSingle()
+        if (ref?.referrer_id) {
+          const { data: refSubs } = await supabase
+            .from('subscriptions').select('id').eq('user_id', ref.referrer_id).eq('status', 'active')
+          for (const s of (refSubs ?? []) as { id: string }[]) {
+            await fetch(`${SUPABASE_URL}/functions/v1/instantiate-orders`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}` },
+              body: JSON.stringify({ subscription_id: s.id }),
+            }).catch(err => console.error('Failed to run the referrer\'s plan:', err))
+          }
+        }
+
         // Tell them when their next meal is (once per plan, 075). Never fails the payment.
         const { error: nextErr } = await supabase.rpc('notify_next_meal', { p_sub: paymentRow.subscription_id })
         if (nextErr) console.error('cashfree-webhook: notify_next_meal failed:', nextErr.message)
