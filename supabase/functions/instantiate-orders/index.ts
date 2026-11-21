@@ -182,18 +182,22 @@ async function processSubscription(supabase: any, subId: string, drinkCache: Dri
     .gte('closed_on', toISO(new Date(Date.now() + IST_OFFSET_MS)))
   const closed = new Set((closures ?? []).map((c: any) => `${c.closed_on}|${c.meal_slot}`))
 
-  // A slot that already has a live meal — e.g. a dish the customer added
-  // before tonight's run made the day's default one — gets no second meal.
-  // (Karan Dutt, 19 Nov: added a Soba bowl at 10:27 PM to an empty lunch, then
-  // the 1 AM run added the weekly dish too, and both were delivered.)
-  const { data: liveRows } = await supabase
+  // A slot that already has ANY order — live, delivered, skipped or cancelled —
+  // was made already: the run never makes it again. A skip has to stay a skip.
+  // (21 Nov: the check counted only live meals, so every night it re-made the
+  // default for lunches customers had skipped — Kritika, Anant, Aakash.) Also
+  // stops a second meal where the customer added a dish first (Karan, 19 Nov).
+  // The one exception: a slot cancelled because the plan didn't deliver that
+  // day ('off_day') is made when the day is switched back on.
+  const { data: slotRows } = await supabase
     .from('orders')
-    .select('delivery_date, meal_slot')
+    .select('delivery_date, meal_slot, status, skip_reason')
     .eq('subscription_id', subId)
     .eq('walk_in', false)
     .gte('delivery_date', toISO(new Date(Date.now() + IST_OFFSET_MS)))
-    .in('status', ['scheduled', 'confirmed', 'preparing', 'out_for_delivery', 'delivered'])
-  const hasMeal = new Set((liveRows ?? []).map((o: any) => `${o.delivery_date}|${o.meal_slot}`))
+  const hasMeal = new Set((slotRows ?? [])
+    .filter((o: any) => !(o.status === 'cancelled' && o.skip_reason === 'off_day'))
+    .map((o: any) => `${o.delivery_date}|${o.meal_slot}`))
 
   // Meals are made a week at a time (094): never past the published Sunday.
   // Next week appears after the kitchen's Sunday menu run at 7 PM.
