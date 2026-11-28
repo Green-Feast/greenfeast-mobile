@@ -167,8 +167,9 @@ reflect the latest commits, that's expected, not a bug to fix.
   Account's "Rate us on the App Store" uses the write-review URL; Apple's automatic prompt
   (`expo-store-review`) needs a native build, so it waits for the next one.
 - **Coupons (066, 2026-10-26).** A coupon (admin → Coupons) sets its own price for one meal on the
-  15- and 30-meal plans (`plans.allow_coupons`; never the trial). A plan bought with one keeps that
-  price in `subscriptions.meal_price_paise` (null = regular), and **every place that prices a meal
+  15- and 30-meal plans (`plans.allow_coupons`). A plan bought with one keeps that
+  price in `subscriptions.meal_price_paise` (null = regular). Since 109 (28 Nov) the trial allows coupons
+  too — office-applied only (Create subscription); the app's CouponField still hides on the trial. **Every place that prices a meal
   must use it**: `subscription_meal_rate()` in SQL, `_shared/pricing.ts` (`mealRate`) in edge
   functions, `lib/pricing.ts` in the admin — otherwise a discounted wallet runs out before the plan
   ends. `coupon_quote()` is the only place that checks a code (who: new / renewal / selected
